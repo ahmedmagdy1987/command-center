@@ -3,28 +3,18 @@ import { Sparkles, Mail, Lock, ArrowRight, AlertCircle, Loader2 } from 'lucide-r
 import { auth } from './lib/api';
 
 export default function AuthScreen() {
-  const [mode, setMode] = useState('signin'); // 'signin' | 'signup'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [info, setInfo] = useState(null);
 
   const submit = async (e) => {
     e.preventDefault();
     if (!email || !password) return;
-    setLoading(true); setError(null); setInfo(null);
+    setLoading(true); setError(null);
     try {
-      if (mode === 'signin') {
-        await auth.signIn(email, password);
-        // App will re-render from session listener
-      } else {
-        const result = await auth.signUp(email, password);
-        if (result?.user && !result?.session) {
-          setInfo('Account created! Check your email to confirm, then sign in.');
-          setMode('signin');
-        }
-      }
+      await auth.signIn(email, password);
+      // App will re-render from session listener
     } catch (err) {
       setError(err.message || 'Something went wrong. Try again.');
     } finally {
@@ -58,20 +48,9 @@ export default function AuthScreen() {
 
         {/* Card */}
         <div className="rounded-2xl border border-white/10 bg-[#0f1017]/80 backdrop-blur p-6 shadow-2xl">
-          {/* Tab switcher */}
-          <div className="flex gap-1 p-1 rounded-xl bg-white/5 border border-white/5 mb-6">
-            <button onClick={() => { setMode('signin'); setError(null); setInfo(null); }}
-              className={`flex-1 h-9 rounded-lg text-sm font-medium transition-colors ${
-                mode === 'signin' ? 'bg-white text-black' : 'text-white/60 hover:text-white'
-              }`}>
-              Sign in
-            </button>
-            <button onClick={() => { setMode('signup'); setError(null); setInfo(null); }}
-              className={`flex-1 h-9 rounded-lg text-sm font-medium transition-colors ${
-                mode === 'signup' ? 'bg-white text-black' : 'text-white/60 hover:text-white'
-              }`}>
-              Sign up
-            </button>
+          <div className="text-center mb-5">
+            <h2 className="text-base font-semibold text-white">Sign in</h2>
+            <p className="text-[11px] text-white/40 mt-1">Enter your credentials to continue</p>
           </div>
 
           <form onSubmit={submit} className="space-y-4">
@@ -90,8 +69,7 @@ export default function AuthScreen() {
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40 pointer-events-none" />
                 <input type="password" value={password} onChange={e => setPassword(e.target.value)} required
-                  minLength={6}
-                  placeholder={mode === 'signup' ? 'At least 6 characters' : 'Your password'}
+                  placeholder="Your password"
                   className="w-full bg-black/30 border border-white/10 rounded-xl pl-10 pr-3 h-11 text-sm text-white placeholder-white/30 outline-none focus:border-violet-400/50 focus:bg-black/40 transition-colors" />
               </div>
             </div>
@@ -102,31 +80,17 @@ export default function AuthScreen() {
                 <span>{error}</span>
               </div>
             )}
-            {info && (
-              <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300">
-                <Sparkles className="w-4 h-4 shrink-0 mt-px" />
-                <span>{info}</span>
-              </div>
-            )}
 
             <button type="submit" disabled={loading || !email || !password}
               className="w-full h-11 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : (
                 <>
-                  {mode === 'signin' ? 'Sign in' : 'Create account'}
+                  Sign in
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
             </button>
           </form>
-
-          <div className="mt-5 pt-5 border-t border-white/5 text-center text-[11px] text-white/40">
-            {mode === 'signin' ? (
-              <>New here? <button onClick={() => { setMode('signup'); setError(null); }} className="text-violet-300 hover:text-violet-200 font-medium">Create an account</button></>
-            ) : (
-              <>Already have an account? <button onClick={() => { setMode('signin'); setError(null); }} className="text-violet-300 hover:text-violet-200 font-medium">Sign in</button></>
-            )}
-          </div>
         </div>
 
         <p className="mt-6 text-center text-[11px] text-white/30">

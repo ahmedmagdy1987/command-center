@@ -5,9 +5,11 @@ import {
   Clock, AlertCircle, Flag, Tag, Link2, Trash2, Copy, Archive, ChevronRight, ChevronDown,
   Circle, CheckCircle2, Calendar, Zap, Timer, MoreHorizontal, Edit3, Filter, Eye, EyeOff,
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
-  Brain, Target, Hourglass, GripVertical, Info, Keyboard, LogOut, Wifi, WifiOff, Loader2
+  Brain, Target, Hourglass, GripVertical, Info, Keyboard, LogOut, Wifi, WifiOff, Loader2,
+  KeyRound
 } from 'lucide-react';
 import { tasks as tasksApi, projects as projectsApi, members as membersApi, auth } from './lib/api';
+import { supabase } from './lib/supabase';
 import { sanitizeTask, uid, nowISO } from './lib/sanitize';
 
 /* =================================================================================
@@ -47,7 +49,6 @@ const DEFAULT_PROJECTS = [
   { id: 'other',    name: 'Other',        color: '#64748b', icon: '◇' },
 ];
 
-// Migration helpers come from ./lib/sanitize (sanitizeTask, migrateProjectId, uid, nowISO)
 const migrateProjects = (projects) => {
   if (!Array.isArray(projects) || projects.length === 0) return DEFAULT_PROJECTS;
   return projects;
@@ -61,7 +62,6 @@ const EFFORTS = {
 
 const THEME_KEY = 'visual-command-center:theme';
 
-// Local storage wrapper for THEME ONLY (everything else lives in Supabase)
 const memStore = {};
 const themeStore = {
   get(key) {
@@ -77,8 +77,6 @@ const themeStore = {
 /* =================================================================================
    UTILITIES
 ================================================================================= */
-// uid + nowISO are imported from ./lib/sanitize
-
 const daysBetween = (a, b) => Math.floor((new Date(b).setHours(0,0,0,0) - new Date(a).setHours(0,0,0,0)) / 86400000);
 
 const formatDue = (iso) => {
@@ -130,73 +128,6 @@ const scoreRationale = (task) => {
 };
 
 /* =================================================================================
-   DEMO DATA
-================================================================================= */
-function buildDemoData() {
-  const addDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); d.setHours(17,0,0,0); return d.toISOString(); };
-  const tasks = [
-    // Me — business
-    { title: 'Finalize Q4 client proposal deck', description: 'Tighten pricing slide, add ROI case study, proofread.', owner: 'me', privacy: 'workspace', project: 'blogs', status: 'must', priority: 'critical', urgent: true, important: true, effort: 'deep', dueDate: addDays(0), estimatedMinutes: 120, tags: ['proposal'], subtasks: [{id: uid(), title:'Pricing slide', done:true},{id:uid(),title:'ROI case study', done:false},{id:uid(),title:'Proofread', done:false}] },
-    { title: 'Record Loom walkthrough for onboarding', owner: 'me', privacy: 'workspace', project: 'website', status: 'should', priority: 'high', effort: 'medium', dueDate: addDays(2), estimatedMinutes: 45, tags: ['video'] },
-    { title: 'Review brand refresh moodboard', description: 'Give feedback to designer on direction B vs C.', owner: 'me', privacy: 'workspace', project: 'assets', status: 'should', priority: 'medium', effort: 'quick', dueDate: addDays(3), estimatedMinutes: 20 },
-    { title: 'Draft Q1 roadmap outline', owner: 'me', privacy: 'workspace', project: 'tools', status: 'inbox', priority: 'high', important: true, effort: 'deep', estimatedMinutes: 90 },
-    { title: 'Call with accountant re: tax filing', owner: 'me', privacy: 'workspace', project: 'other', status: 'scheduled', priority: 'high', urgent: true, effort: 'medium', scheduledDate: addDays(1), dueDate: addDays(1), estimatedMinutes: 30 },
-    { title: 'Follow up with Goldberg partnership', owner: 'me', privacy: 'workspace', project: 'outreach', status: 'waiting', priority: 'medium', blocked: true, blockedReason: 'Awaiting their legal review', effort: 'quick', dueDate: addDays(-2) },
-
-    // VA tasks
-    { title: 'Schedule next week social posts', description: 'Use approved Q4 content calendar. Tag products in captions.', owner: 'va', privacy: 'workspace', project: 'social', status: 'must', priority: 'high', urgent: true, effort: 'medium', dueDate: addDays(0), estimatedMinutes: 60, subtasks: [{id:uid(),title:'Instagram (7 posts)',done:false},{id:uid(),title:'LinkedIn (3 posts)',done:false}] },
-    { title: 'Clean and tag new leads in CRM', owner: 'va', privacy: 'workspace', project: 'outreach', status: 'should', priority: 'medium', effort: 'medium', dueDate: addDays(2), estimatedMinutes: 60 },
-    { title: 'Update SEO meta descriptions — top 10 pages', owner: 'va', privacy: 'workspace', project: 'seo', status: 'must', priority: 'high', effort: 'medium', dueDate: addDays(1), estimatedMinutes: 75 },
-    { title: 'File and organize receipts for October', owner: 'va', privacy: 'workspace', project: 'other', status: 'should', priority: 'low', effort: 'quick', dueDate: addDays(4), estimatedMinutes: 30 },
-    { title: 'Draft weekly newsletter', owner: 'va', privacy: 'workspace', project: 'blogs', status: 'waiting', priority: 'medium', blocked: true, blockedReason: 'Needs topic approval', effort: 'medium', dueDate: addDays(-1) },
-    { title: 'Research 3 podcast guest candidates', owner: 'va', privacy: 'workspace', project: 'outreach', status: 'inbox', priority: 'low', effort: 'medium', estimatedMinutes: 45 },
-
-    // Shared
-    { title: 'Weekly sync — agenda + recap', owner: 'shared', privacy: 'workspace', project: 'tools', status: 'scheduled', priority: 'medium', recurring: { interval: 1, unit: 'week', daysOfWeek: [1], ends: { type: 'never' } }, effort: 'quick', scheduledDate: addDays(2), dueDate: addDays(2), estimatedMinutes: 30 },
-    { title: 'Review October metrics dashboard together', owner: 'shared', privacy: 'workspace', project: 'tools', status: 'should', priority: 'medium', effort: 'medium', dueDate: addDays(5) },
-
-    // Private
-    { title: 'Book dentist appointment', owner: 'me', privacy: 'private', project: 'personal', status: 'inbox', priority: 'medium', urgent: true, effort: 'quick', dueDate: addDays(1), estimatedMinutes: 10 },
-    { title: 'Plan anniversary weekend trip', description: 'Shortlist 3 destinations, check flights.', owner: 'me', privacy: 'private', project: 'personal', status: 'should', priority: 'high', important: true, effort: 'deep', dueDate: addDays(10), estimatedMinutes: 120 },
-    { title: 'Journal — weekly reflection', owner: 'me', privacy: 'private', project: 'personal', status: 'scheduled', priority: 'low', recurring: { interval: 1, unit: 'week', daysOfWeek: [0], ends: { type: 'never' } }, effort: 'quick', scheduledDate: addDays(3), estimatedMinutes: 15 },
-    { title: 'Pay quarterly estimated taxes', owner: 'me', privacy: 'private', project: 'personal', status: 'must', priority: 'critical', urgent: true, important: true, effort: 'medium', dueDate: addDays(-1), estimatedMinutes: 30 },
-    { title: 'Pick up dry cleaning', owner: 'me', privacy: 'private', project: 'personal', status: 'inbox', priority: 'low', effort: 'quick', dueDate: addDays(0) },
-
-    // Completed
-    { title: 'Send September invoice batch', owner: 'va', privacy: 'workspace', project: 'other', status: 'done', priority: 'high', effort: 'medium', completedAt: addDays(0) },
-    { title: 'Publish October blog post', owner: 'me', privacy: 'workspace', project: 'blogs', status: 'done', priority: 'high', effort: 'deep', completedAt: addDays(-2) },
-  ];
-
-  return tasks.map((t, i) => ({
-    id: uid(),
-    title: t.title,
-    description: t.description || '',
-    owner: t.owner,
-    privacy: t.privacy,
-    project: t.project,
-    status: t.status,
-    priority: t.priority,
-    urgent: t.urgent ?? (t.priority === 'critical' || isSoon(t.dueDate)),
-    important: t.important ?? (t.priority === 'critical' || t.priority === 'high'),
-    effort: t.effort || 'medium',
-    dueDate: t.dueDate || null,
-    scheduledDate: t.scheduledDate || null,
-    estimatedMinutes: t.estimatedMinutes || 30,
-    tags: t.tags || [],
-    subtasks: t.subtasks || [],
-    recurring: t.recurring || null,
-    blocked: t.blocked || false,
-    blockedReason: t.blockedReason || '',
-    links: t.links || [],
-    createdAt: nowISO(),
-    updatedAt: nowISO(),
-    completedAt: t.completedAt || null,
-    order: i,
-  }));
-}
-function isSoon(d) { if (!d) return false; const days = daysBetween(new Date(), d); return days >= 0 && days <= 2; }
-
-/* =================================================================================
    APP CONTEXT / STATE
 ================================================================================= */
 const AppCtx = createContext(null);
@@ -206,7 +137,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState(DEFAULT_PROJECTS);
   const [loading, setLoading] = useState(true);
-  const [syncStatus, setSyncStatus] = useState('connecting'); // 'connecting' | 'live' | 'offline'
+  const [syncStatus, setSyncStatus] = useState('connecting');
 
   const [theme, setTheme] = useState(() => {
     const t = themeStore.get(THEME_KEY) || 'dark';
@@ -222,11 +153,9 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   const [compact, setCompact] = useState(false);
   const [draggedId, setDraggedId] = useState(null);
 
-  // Theme persistence
   useEffect(() => { themeStore.set(THEME_KEY, theme); }, [theme]);
   useLayoutEffect(() => { document.documentElement.setAttribute('data-theme', theme); }, [theme]);
 
-  // Initial data load
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -245,7 +174,6 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     return () => { mounted = false; };
   }, []);
 
-  // Real-time subscription
   useEffect(() => {
     setSyncStatus('connecting');
     const unsub = tasksApi.subscribe(({ type, task }) => {
@@ -258,12 +186,10 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
         setTasks(prev => prev.filter(t => t.id !== task.id));
       }
     });
-    // Mark as live after subscription is established
     const timer = setTimeout(() => setSyncStatus(s => s === 'connecting' ? 'live' : s), 1000);
     return () => { unsub(); clearTimeout(timer); };
   }, []);
 
-  // Online/offline detection
   useEffect(() => {
     const onOnline = () => setSyncStatus('live');
     const onOffline = () => setSyncStatus('offline');
@@ -276,7 +202,6 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     };
   }, []);
 
-  // Keyboard
   useEffect(() => {
     const handler = (e) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -290,8 +215,6 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
-
-  // ----- ACTIONS (optimistic updates: UI updates immediately, then persist) -----
 
   const addTask = useCallback(async (partial) => {
     const optimistic = sanitizeTask({
@@ -313,19 +236,16 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     setTasks(prev => [optimistic, ...prev]);
     try {
       const real = await tasksApi.create(optimistic);
-      // Replace optimistic with real (in case server changed anything)
       setTasks(prev => prev.map(t => t.id === optimistic.id ? real : t));
       return real;
     } catch (err) {
       console.error('Add task failed:', err);
-      // Revert on failure
       setTasks(prev => prev.filter(t => t.id !== optimistic.id));
-      alert('فشل إضافة التاسك: ' + err.message);
+      alert('Failed to add task: ' + err.message);
     }
   }, [session]);
 
   const updateTask = useCallback(async (id, patch) => {
-    // Optimistic update
     setTasks(prev => prev.map(t => t.id === id ? {
       ...t, ...patch,
       updatedAt: nowISO(),
@@ -335,7 +255,6 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       await tasksApi.update(id, patch);
     } catch (err) {
       console.error('Update task failed:', err);
-      // Reload from server to revert
       tasksApi.list().then(setTasks).catch(() => {});
     }
   }, []);
@@ -373,12 +292,12 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   }, [tasks, updateTask]);
 
   const resetDemo = async () => {
-    if (!confirm('هذا يحذف كل التاسكات الحالية. متأكد؟')) return;
+    if (!confirm('This will delete ALL tasks. Are you sure?')) return;
     try {
       await tasksApi.bulkDelete();
       setTasks([]);
     } catch (err) {
-      alert('فشل المسح: ' + err.message);
+      alert('Failed to clear: ' + err.message);
     }
   };
 
@@ -394,12 +313,12 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       try {
         const d = JSON.parse(e.target.result);
         if (Array.isArray(d.tasks) && d.tasks.length) {
-          if (!confirm(`استيراد ${d.tasks.length} تاسك؟ سيتم إضافتهم للموجودين.`)) return;
+          if (!confirm(`Import ${d.tasks.length} tasks? They will be added to existing tasks.`)) return;
           const created = await tasksApi.bulkInsert(d.tasks);
           setTasks(prev => [...created, ...prev]);
         }
       } catch (err) {
-        alert('ملف JSON غير صالح: ' + err.message);
+        alert('Invalid JSON file: ' + err.message);
       }
     };
     reader.readAsText(file);
@@ -479,7 +398,123 @@ function Tooltip({ children, content, className = 'inline-flex' }) {
 }
 
 /* =================================================================================
-   TASK CARD — core visual unit
+   CHANGE PASSWORD MODAL
+================================================================================= */
+function ChangePasswordModal({ open, onClose }) {
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setCurrent(''); setNext(''); setConfirm('');
+      setError(null); setSuccess(false);
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError(null);
+
+    if (next.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+    if (next !== confirm) {
+      setError('New passwords do not match');
+      return;
+    }
+    if (next === current) {
+      setError('New password must be different from current');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Verify current password by re-authenticating
+      const session = await auth.getSession();
+      if (!session?.user?.email) throw new Error('Not signed in');
+
+      await auth.signIn(session.user.email, current);
+
+      // Update to new password
+      const { error: updateError } = await supabase.auth.updateUser({ password: next });
+      if (updateError) throw updateError;
+
+      setSuccess(true);
+      setTimeout(() => onClose(), 1500);
+    } catch (err) {
+      setError(err.message?.includes('Invalid') ? 'Current password is incorrect' : (err.message || 'Failed to change password'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-[fadeIn_.15s_ease]" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-white font-display">Change password</h3>
+          <button onClick={onClose} className="text-white/50 hover:text-white"><X className="w-4 h-4" /></button>
+        </div>
+
+        {success ? (
+          <div className="py-8 text-center">
+            <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center mx-auto mb-3">
+              <Check className="w-6 h-6 text-emerald-400" strokeWidth={3} />
+            </div>
+            <div className="text-sm text-white/90 font-medium">Password changed successfully</div>
+          </div>
+        ) : (
+          <form onSubmit={submit} className="space-y-3">
+            <div>
+              <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">Current password</label>
+              <input type="password" value={current} onChange={e => setCurrent(e.target.value)} required autoFocus
+                className="w-full bg-black/30 border border-white/10 rounded-lg px-3 h-10 text-sm text-white outline-none focus:border-violet-400/50" />
+            </div>
+            <div>
+              <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">New password</label>
+              <input type="password" value={next} onChange={e => setNext(e.target.value)} required minLength={6}
+                placeholder="At least 6 characters"
+                className="w-full bg-black/30 border border-white/10 rounded-lg px-3 h-10 text-sm text-white placeholder-white/30 outline-none focus:border-violet-400/50" />
+            </div>
+            <div>
+              <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">Confirm new password</label>
+              <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} required
+                className="w-full bg-black/30 border border-white/10 rounded-lg px-3 h-10 text-sm text-white outline-none focus:border-violet-400/50" />
+            </div>
+
+            {error && (
+              <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-px" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={onClose} disabled={loading}
+                className="flex-1 h-10 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-sm text-white/80 font-medium transition-colors disabled:opacity-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={loading || !current || !next || !confirm}
+                className="flex-1 h-10 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm hover:shadow-lg hover:shadow-fuchsia-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2">
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Change'}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* =================================================================================
+   TASK CARD
 ================================================================================= */
 function TaskCard({ task, compact = false, onClick, draggable = true, showOwner = true }) {
   const { setDraggedId, updateTask, projects } = useApp();
@@ -518,10 +553,8 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showOwner 
         boxShadow: overdue ? `inset 0 0 0 1px ${priority.ring}, 0 0 20px -8px ${priority.glow}` : undefined,
       }}
     >
-      {/* priority stripe */}
       <div className="absolute top-0 left-0 h-full w-[3px] rounded-l-xl" style={{ background: `linear-gradient(180deg, ${priority.hex}, ${priority.hex}00)` }} />
 
-      {/* header row */}
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <button
@@ -539,17 +572,14 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showOwner 
         {showOwner && <OwnerChip owner={task.owner} showLabel={!compact} size="sm" />}
       </div>
 
-      {/* title */}
       <div className={cx('font-medium leading-snug text-white/95 mb-2', done && 'line-through text-white/50', compact ? 'text-sm' : 'text-[15px]')}>
         {task.title}
       </div>
 
-      {/* description (expanded only) */}
       {!compact && task.description && (
         <p className="text-xs text-white/50 leading-relaxed mb-3 line-clamp-2">{task.description}</p>
       )}
 
-      {/* subtask progress bar */}
       {totalSub > 0 && !compact && (
         <div className="mb-3">
           <div className="h-1 bg-white/5 rounded-full overflow-hidden">
@@ -559,7 +589,6 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showOwner 
         </div>
       )}
 
-      {/* footer row */}
       <div className="flex flex-wrap items-center gap-1.5">
         {project && (
           <span className="inline-flex items-center gap-1 text-[10px] font-medium text-white/60">
@@ -581,7 +610,7 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showOwner 
 }
 
 /* =================================================================================
-   TASK MODAL (edit/create details)
+   TASK MODAL
 ================================================================================= */
 function TaskModal() {
   const { editingTask, setEditingTask, updateTask, deleteTask, duplicateTask, projects, toggleSubtask } = useApp();
@@ -606,7 +635,6 @@ function TaskModal() {
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center p-0 sm:p-6 animate-[fadeIn_.15s_ease]" onClick={() => setEditingTask(null)}>
       <div onClick={e => e.stopPropagation()} className="w-full sm:max-w-2xl max-h-screen sm:max-h-[85vh] overflow-hidden rounded-t-2xl sm:rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl flex flex-col">
-        {/* Header */}
         <div className="px-6 pt-5 pb-3 border-b border-white/5" style={{ background: `linear-gradient(180deg, ${priority.bg}, transparent)` }}>
           <div className="flex items-center gap-2 mb-3">
             <OwnerChip owner={t.owner} />
@@ -625,9 +653,7 @@ function TaskModal() {
           />
         </div>
 
-        {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-          {/* Quick pill row */}
           <div className="flex flex-wrap gap-2">
             <SelectPill label="Status" value={t.status} options={Object.values(STATUSES).map(s => [s.id, s.label])} onChange={v => set({ status: v })} />
             <SelectPill label="Priority" value={t.priority} options={Object.values(PRIORITIES).map(p => [p.id, p.label])} onChange={v => set({ priority: v })} color={priority.hex} />
@@ -637,7 +663,6 @@ function TaskModal() {
             <SelectPill label="Effort" value={t.effort} options={Object.values(EFFORTS).map(e => [e.id, `${e.label} (${e.mins}m)`])} onChange={v => set({ effort: v, estimatedMinutes: EFFORTS[v].mins })} />
           </div>
 
-          {/* Flags */}
           <div className="flex flex-wrap gap-2">
             <ToggleChip active={t.urgent} onClick={() => set({ urgent: !t.urgent })} icon={Zap} label="Urgent" color="#fb923c" />
             <ToggleChip active={t.important} onClick={() => set({ important: !t.important })} icon={Flag} label="Important" color="#a78bfa" />
@@ -658,7 +683,6 @@ function TaskModal() {
               onClose={() => setRecurrenceOpen(false)} />
           )}
 
-          {/* Dates */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5">Due date</div>
@@ -672,7 +696,6 @@ function TaskModal() {
             </div>
           </div>
 
-          {/* Description */}
           <div>
             <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5">Notes</div>
             <textarea value={t.description} onChange={e => set({ description: e.target.value })} rows={4}
@@ -680,7 +703,6 @@ function TaskModal() {
               className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white/90 outline-none focus:border-white/25 resize-y" />
           </div>
 
-          {/* Blocked reason */}
           {t.blocked && (
             <div>
               <div className="text-[10px] font-medium uppercase tracking-widest text-rose-300/70 mb-1.5">Blocked because</div>
@@ -689,7 +711,6 @@ function TaskModal() {
             </div>
           )}
 
-          {/* Subtasks */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <div className="text-[10px] font-medium uppercase tracking-widest text-white/40">Subtasks</div>
@@ -717,7 +738,6 @@ function TaskModal() {
             </div>
           </div>
 
-          {/* Meta */}
           <div className="pt-4 border-t border-white/5 text-[11px] text-white/30 flex flex-wrap gap-x-4 gap-y-1">
             <span>Created {new Date(t.createdAt).toLocaleDateString()}</span>
             <span>Updated {new Date(t.updatedAt).toLocaleDateString()}</span>
@@ -759,7 +779,7 @@ function ToggleChip({ active, onClick, icon: Icon, label, color }) {
 }
 
 /* =================================================================================
-   RECURRENCE — picker + format helpers
+   RECURRENCE
 ================================================================================= */
 const DAY_LABELS = ['S','M','T','W','T','F','S'];
 const DAY_NAMES_FULL = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -772,7 +792,6 @@ function isRecurring(r) {
 }
 
 function normalizeRecurrence(r) {
-  // Accepts: null, 'none', 'weekly', or full object. Returns full object or null.
   if (!r || r === 'none') return null;
   if (r === 'weekly') return { interval: 1, unit: 'week', daysOfWeek: [], ends: { type: 'never' } };
   if (typeof r === 'object') {
@@ -827,7 +846,6 @@ function RecurrencePicker({ value, onChange, onClose }) {
           <button onClick={onClose} className="text-white/50 hover:text-white transition-colors"><X className="w-4 h-4" /></button>
         </div>
 
-        {/* Interval + unit */}
         <div>
           <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5">Repeats every</div>
           <div className="flex gap-2">
@@ -840,7 +858,6 @@ function RecurrencePicker({ value, onChange, onClose }) {
           </div>
         </div>
 
-        {/* Day picker (weekly only) */}
         {r.unit === 'week' && (
           <div>
             <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-2">On these days</div>
@@ -861,7 +878,6 @@ function RecurrencePicker({ value, onChange, onClose }) {
           </div>
         )}
 
-        {/* Ends */}
         <div>
           <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-2">Ends</div>
           <div className="space-y-1.5">
@@ -895,13 +911,11 @@ function RecurrencePicker({ value, onChange, onClose }) {
           </div>
         </div>
 
-        {/* Preview */}
         <div className="rounded-lg bg-violet-500/10 border border-violet-500/20 px-3 py-2 text-xs text-violet-200 flex items-center gap-2">
           <RefreshCw className="w-3.5 h-3.5 shrink-0" />
           <span className="leading-snug">{formatRecurrence(r) || 'Set repeat schedule'}</span>
         </div>
 
-        {/* Actions */}
         <div className="flex justify-end gap-2 pt-1">
           {value && isRecurring(value) && (
             <button onClick={() => { onChange(null); onClose(); }} type="button"
@@ -1031,7 +1045,7 @@ function CommandPalette() {
     { id: 'v-va', label: 'Go to VA Desk', icon: UserCog, run: () => { setView('va'); setPaletteOpen(false); } },
     { id: 'theme', label: `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`, icon: theme === 'dark' ? Sun : Moon, run: () => { setTheme(theme === 'dark' ? 'light' : 'dark'); setPaletteOpen(false); } },
     { id: 'export', label: 'Export JSON backup', icon: Download, run: () => { exportJSON(); setPaletteOpen(false); } },
-    { id: 'reset', label: 'Reset demo data', icon: RefreshCw, run: () => { setPaletteOpen(false); resetDemo(); } },
+    { id: 'reset', label: 'Clear all tasks', icon: RefreshCw, run: () => { setPaletteOpen(false); resetDemo(); } },
   ], [theme]);
 
   const results = useMemo(() => {
@@ -1225,6 +1239,7 @@ function MobileTabs() {
 function TopBar() {
   const { theme, setTheme, setPaletteOpen, setQuickAddOpen, filters, setFilters, view, compact, setCompact, exportJSON, importJSON, resetDemo, projects, syncStatus, currentMember, onSignOut } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const fileRef = useRef(null);
 
   const showFilters = ['kanban', 'projects', 'schedule', 'matrix'].includes(view);
@@ -1237,16 +1252,15 @@ function TopBar() {
   const syncLabel = { live: 'Synced', connecting: 'Connecting…', offline: 'Offline' }[syncStatus];
 
   return (
+    <>
     <header className="sticky top-0 z-20 border-b border-white/5 bg-[#0a0b11]/80 backdrop-blur-xl">
       <div className="flex items-center gap-2 px-4 lg:px-6 h-14">
-        {/* Mobile logo */}
         <div className="lg:hidden flex items-center gap-2 mr-2">
           <div className="w-7 h-7 rounded-md bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center">
             <Sparkles className="w-3.5 h-3.5 text-white" />
           </div>
         </div>
 
-        {/* Search */}
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40 pointer-events-none" />
           <input id="global-search" value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
@@ -1260,7 +1274,6 @@ function TopBar() {
           )}
         </div>
 
-        {/* Filters (view-aware) */}
         {showFilters && (
           <div className="hidden sm:flex items-center gap-1 pl-2 overflow-x-auto no-scrollbar">
             <FilterPill label="Owner" value={filters.owner} options={[['all','All'],['me','Me'],['va','VA'],['shared','Shared']]} onChange={v => setFilters(f => ({ ...f, owner: v }))} />
@@ -1271,13 +1284,11 @@ function TopBar() {
 
         <div className="flex-1" />
 
-        {/* Sync indicator */}
         <div className="hidden md:flex items-center gap-1.5 px-2.5 h-8 rounded-lg border border-white/5 bg-white/[0.02]" title={syncLabel}>
           <span className={cx('w-1.5 h-1.5 rounded-full transition-colors', syncDot)} />
           <span className="text-[10px] font-medium text-white/50">{syncLabel}</span>
         </div>
 
-        {/* Right actions */}
         <div className="flex items-center gap-1.5">
           {view === 'kanban' && (
             <IconButton icon={compact ? Maximize2 : Minimize2} label="Toggle compact" active={compact} onClick={() => setCompact(c => !c)} />
@@ -1303,7 +1314,7 @@ function TopBar() {
                   <MenuItem icon={Download} onClick={() => { exportJSON(); setMenuOpen(false); }}>Export JSON</MenuItem>
                   <MenuItem icon={Upload} onClick={() => { fileRef.current?.click(); setMenuOpen(false); }}>Import JSON</MenuItem>
                   <div className="h-px bg-white/5 my-1" />
-                  <MenuItem icon={RefreshCw} onClick={() => { resetDemo(); setMenuOpen(false); }}>Clear all tasks</MenuItem>
+                  <MenuItem icon={KeyRound} onClick={() => { setPasswordModalOpen(true); setMenuOpen(false); }}>Change password</MenuItem>
                   <div className="h-px bg-white/5 my-1" />
                   <MenuItem icon={LogOut} onClick={() => { onSignOut?.(); setMenuOpen(false); }}>Sign out</MenuItem>
                 </div>
@@ -1315,6 +1326,8 @@ function TopBar() {
         </div>
       </div>
     </header>
+    <ChangePasswordModal open={passwordModalOpen} onClose={() => setPasswordModalOpen(false)} />
+    </>
   );
 }
 function MenuItem({ icon: Icon, children, onClick }) {
@@ -1407,7 +1420,6 @@ function DashboardView() {
     <div className="space-y-6">
       <ViewHeader title="Mission control" subtitle="Today's ranked priorities, flagged blockers, and where your energy should go." accent={new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric'})} />
 
-      {/* Top row: Top 3 priorities */}
       <Card title="Top 3 priorities — right now" subtitle="Auto-ranked by priority, due date, urgency, and blockers." accent="#a78bfa">
         {top3.length === 0 ? (
           <EmptyState icon={Sparkles} text="Nothing on fire. Beautiful." />
@@ -1427,7 +1439,6 @@ function DashboardView() {
         )}
       </Card>
 
-      {/* Stats grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard label="Me" value={counts.me} color={OWNERS.me.hex} icon={<span className="w-2 h-2 rounded-full" style={{background:OWNERS.me.hex}} />} onClick={() => setView('kanban')} />
         <StatCard label="VA" value={counts.va} color={OWNERS.va.hex} icon={<span className="w-2 h-2 rounded-full" style={{background:OWNERS.va.hex}} />} onClick={() => setView('va')} />
@@ -1435,7 +1446,6 @@ function DashboardView() {
         <StatCard label="Completed this week" value={counts.doneWeek} color="#34d399" icon={<CheckCircle2 className="w-3 h-3 text-emerald-400" />} />
       </div>
 
-      {/* Priority distribution */}
       <Card title="Priority distribution" subtitle="Open tasks by urgency level">
         <div className="space-y-2">
           {['critical','high','medium','low'].map(p => {
@@ -1458,7 +1468,6 @@ function DashboardView() {
         </div>
       </Card>
 
-      {/* Two columns: Me + VA */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card title="My upcoming" subtitle="Due dates coming for you" accent={OWNERS.me.hex} action={<button onClick={() => setView('kanban')} className="text-[11px] text-white/40 hover:text-white/80 inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
           {myUpcoming.length === 0 ? <EmptyState icon={Calendar} text="No upcoming — nothing on your plate." /> :
@@ -1470,7 +1479,6 @@ function DashboardView() {
         </Card>
       </div>
 
-      {/* Shared + Overdue */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card title="Shared priorities" subtitle="Both of you touch these" accent={OWNERS.shared.hex}>
           {sharedPriority.length === 0 ? <EmptyState icon={Sparkles} text="No shared items — add collaborative work here." /> :
@@ -1482,7 +1490,6 @@ function DashboardView() {
         </Card>
       </div>
 
-      {/* Stuck + Recent */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card title="Stuck tasks" subtitle="Blocked or waiting — needs unblocking" accent="#fb923c">
           {stuck.length === 0 ? <EmptyState icon={PlayCircle} text="Nothing stuck. Flow state." /> :
@@ -1493,7 +1500,6 @@ function DashboardView() {
         </Card>
       </div>
 
-      {/* Progress */}
       <Card title="Overall progress" subtitle={`${tasks.filter(t => t.status==='done').length} of ${tasks.length} tasks complete`}>
         <div className="flex items-center gap-4">
           <div className="relative w-20 h-20 shrink-0">
@@ -1866,7 +1872,6 @@ function MatrixQuad({ id, title, subtitle, tasks, accent }) {
       onDrop={onDrop}
       className={cx('relative rounded-2xl border p-4 min-h-[280px] transition-all overflow-hidden',
         over ? 'border-white/30 bg-white/[0.05]' : 'border-white/[0.06] bg-white/[0.015]')}>
-      {/* Soft inset glow — stays well inside the rounded border */}
       <div className="pointer-events-none absolute inset-x-6 -top-10 h-20 rounded-full opacity-40 blur-2xl" style={{ background: accent }} />
       <div className="relative flex items-start justify-between mb-3">
         <div>
@@ -1908,14 +1913,12 @@ function MatrixView() {
     <div className="space-y-6">
       <ViewHeader title="Priority matrix" subtitle="Drag tasks into quadrants to reframe what actually matters." />
 
-      {/* Top axis label — sits above the grid, aligned with the Y-axis label offset */}
       <div className="hidden md:flex items-center justify-center gap-2 text-[10px] font-semibold uppercase tracking-widest text-white/70 md:ml-10">
         <Flame className="w-3.5 h-3.5 text-rose-400" />
         <span>More urgent →</span>
       </div>
 
       <div className="flex gap-3 md:gap-4">
-        {/* Left axis label — vertical, sits left of the grid */}
         <div className="hidden md:flex items-center justify-center w-7 shrink-0" aria-hidden>
           <div
             className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-widest text-white/70 whitespace-nowrap"
@@ -1995,7 +1998,7 @@ function ProjectsView() {
 }
 
 /* =================================================================================
-   SCHEDULE / CALENDAR-LITE
+   SCHEDULE
 ================================================================================= */
 function ScheduleView() {
   const { tasks, setEditingTask, filters } = useApp();
@@ -2115,7 +2118,6 @@ function AppShell() {
 
   return (
     <div className="min-h-screen flex bg-[#070810] text-white" data-theme={theme}>
-      {/* Global styles */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
         body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; font-feature-settings: "ss01","cv11"; background: #070810; }
@@ -2151,10 +2153,32 @@ function AppShell() {
         [data-theme="light"] .search-input { background: #ffffff !important; border-color: rgba(0,0,0,0.12) !important; color: #17181c !important; }
         [data-theme="light"] .search-input::placeholder { color: rgba(0,0,0,0.4) !important; }
         [data-theme="light"] .hover\\:bg-white\\/5:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.04\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.07\\]:hover { background: rgba(0,0,0,0.04) !important; }
-        [data-theme="light"] .bg-white { background: #17181c !important; color: #fafaf9 !important; }
-        [data-theme="light"] .text-black { color: #fafaf9 !important; }
+
+        /* Action buttons — keep dark-on-light for "New" button */
+        [data-theme="light"] .bg-white { background: #17181c !important; color: #ffffff !important; }
+        [data-theme="light"] .text-black { color: #ffffff !important; }
         [data-theme="light"] .hover\\:bg-white\\/90:hover { background: #000 !important; }
-      `}</style>
+        [data-theme="light"] kbd { background: rgba(255,255,255,0.15) !important; color: rgba(255,255,255,0.7) !important; }
+
+        /* Hero sections (Private + VA) — keep them dark for visual contrast */
+        [data-theme="light"] .from-\\[\\#1a1530\\] { --tw-gradient-from: #2a2245 !important; }
+        [data-theme="light"] .via-\\[\\#14101e\\] { --tw-gradient-via: #1f1a30 !important; }
+        [data-theme="light"] .from-\\[\\#0d2a20\\] { --tw-gradient-from: #134032 !important; }
+        [data-theme="light"] .via-\\[\\#0c1a18\\] { --tw-gradient-via: #0f2820 !important; }
+        [data-theme="light"] .to-\\[\\#0a0b11\\] { --tw-gradient-to: #1a1d28 !important; }
+
+        /* Hero text stays white (since hero bg stays dark) */
+        [data-theme="light"] .from-\\[\\#1a1530\\] *, [data-theme="light"] .from-\\[\\#0d2a20\\] * { color: inherit; }
+        [data-theme="light"] .from-\\[\\#1a1530\\] h1, [data-theme="light"] .from-\\[\\#0d2a20\\] h1 { color: #ffffff !important; }
+        [data-theme="light"] .from-\\[\\#1a1530\\] p, [data-theme="light"] .from-\\[\\#0d2a20\\] p { color: rgba(255,255,255,0.7) !important; }
+        [data-theme="light"] .from-\\[\\#1a1530\\] .bg-black\\/30, [data-theme="light"] .from-\\[\\#0d2a20\\] .bg-black\\/30 { background: rgba(0,0,0,0.3) !important; }
+        [data-theme="light"] .from-\\[\\#1a1530\\] .bg-white, [data-theme="light"] .from-\\[\\#0d2a20\\] .bg-white { background: #ffffff !important; color: #17181c !important; }
+        [data-theme="light"] .from-\\[\\#1a1530\\] .bg-white .text-black, [data-theme="light"] .from-\\[\\#0d2a20\\] .bg-white .text-black { color: #17181c !important; }
+        [data-theme="light"] .from-\\[\\#0d2a20\\] .bg-emerald-500 { background: #10b981 !important; color: #ffffff !important; }
+        [data-theme="light"] .from-\\[\\#0d2a20\\] .bg-emerald-500 .text-black { color: #ffffff !important; }
+        [data-theme="light"] .from-\\[\\#0d2a20\\] .text-white\\/50 { color: rgba(255,255,255,0.6) !important; }
+        [data-theme="light"] .from-\\[\\#1a1530\\] .text-white\\/50 { color: rgba(255,255,255,0.6) !important; }
+        [data-theme="light"] .from-\\[\\#0d2a20\\] .text-white\\/70, [data-theme="light"] .from-\\[\\#1a1530\\] .text-white\\/70 { color: rgba(255,255,255,0.85) !important; }`}</style>
 
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0">
