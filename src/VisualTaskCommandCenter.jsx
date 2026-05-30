@@ -26,6 +26,13 @@ const VIEW_TO_PATH = {
 };
 const PATH_TO_VIEW = Object.fromEntries(Object.entries(VIEW_TO_PATH).map(([v, p]) => [p, v]));
 
+// OS-aware keyboard modifier label. The keydown handler already accepts Ctrl OR Cmd, so only
+// the *displayed* hint needs to differ: ⌘ on macOS, Ctrl elsewhere (Windows/Linux).
+const IS_MAC = typeof navigator !== 'undefined' && /mac/i.test(
+  navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || ''
+);
+const shortcutLabel = (key) => (IS_MAC ? `⌘${key}` : `Ctrl+${key}`);
+
 /* =================================================================================
    CONSTANTS
 ================================================================================= */
@@ -1051,7 +1058,7 @@ function QuickAdd() {
               <Plus className="w-3.5 h-3.5" />Add task
             </button>
           </div>
-          <div className="text-[11px] text-white/30">Tip: press <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded">⌘N</kbd> or <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded">N</kbd> anywhere to capture.</div>
+          <div className="text-[11px] text-white/30">Tip: press <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded">{shortcutLabel('N')}</kbd> or <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded">N</kbd> anywhere to capture.</div>
         </div>
       </div>
     </div>
@@ -1509,7 +1516,7 @@ function TopBar() {
           {view === 'kanban' && (
             <IconButton icon={compact ? Maximize2 : Minimize2} label="Toggle compact" active={compact} onClick={() => setCompact(c => !c)} />
           )}
-          <IconButton icon={Command} label="Command palette (⌘K)" onClick={() => setPaletteOpen(true)} />
+          <IconButton icon={Command} label={`Command palette (${shortcutLabel('K')})`} onClick={() => setPaletteOpen(true)} />
           <button onClick={() => setQuickAddOpen(true)}
             className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-white text-black text-xs font-semibold hover:bg-white/90 transition-colors">
             <Plus className="w-3.5 h-3.5" />New<kbd className="hidden sm:inline text-[9px] text-black/50 bg-black/10 rounded px-1 py-0.5">N</kbd>
