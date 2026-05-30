@@ -7,9 +7,9 @@ import {
   Circle, CheckCircle2, Calendar, Zap, Timer, MoreHorizontal, Edit3, Filter,
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
   Brain, Target, Hourglass, GripVertical, Info, Keyboard, LogOut, Wifi, WifiOff, Loader2,
-  KeyRound, Bell, MessageSquare, Send
+  KeyRound, Bell, MessageSquare, Send, Mic, Square
 } from 'lucide-react';
-import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, auth } from './lib/api';
+import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, auth } from './lib/api';
 import { supabase } from './lib/supabase';
 import { sanitizeTask, uid, nowISO } from './lib/sanitize';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
@@ -23,6 +23,7 @@ const VIEW_TO_PATH = {
   schedule: '/schedule',
   va: '/va-desk',
   private: '/private',
+  chat: '/chat',
 };
 const PATH_TO_VIEW = Object.fromEntries(Object.entries(VIEW_TO_PATH).map(([v, p]) => [p, v]));
 
@@ -183,6 +184,13 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   const [editingTask, setEditingTask] = useState(null);
   const [compact, setCompact] = useState(false);
   const [draggedId, setDraggedId] = useState(null);
+  const [chatUnread, setChatUnread] = useState(0);
+  const chatViewRef = useRef(view);
+  useEffect(() => { chatViewRef.current = view; }, [view]);
+  const markChatRead = useCallback(() => {
+    try { localStorage.setItem('cc_chat_last_seen', new Date().toISOString()); } catch { /* ignore */ }
+    setChatUnread(0);
+  }, []);
 
   useEffect(() => { themeStore.set(THEME_KEY, theme); }, [theme]);
   useLayoutEffect(() => { document.documentElement.setAttribute('data-theme', theme); }, [theme]);
@@ -220,6 +228,24 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     const timer = setTimeout(() => setSyncStatus(s => s === 'connecting' ? 'live' : s), 1000);
     return () => { unsub(); clearTimeout(timer); };
   }, []);
+
+  // Live unread badge for chat: count messages newer than the user's last-seen (localStorage)
+  // and bump it on new messages from others while they're not viewing the channel.
+  useEffect(() => {
+    const me = session?.user?.id;
+    if (!me) return;
+    let on = true;
+    let lastSeen = null;
+    try { lastSeen = localStorage.getItem('cc_chat_last_seen'); } catch { /* ignore */ }
+    messagesApi.unreadCount(lastSeen, me).then(n => { if (on) setChatUnread(n); }).catch(() => {});
+    const unsub = messagesApi.subscribe(({ type, message }) => {
+      if (type !== 'INSERT' || !message || !on) return;
+      if (message.senderId === me) return;
+      if (chatViewRef.current === 'chat') return;   // viewing -> ChatView keeps it read
+      setChatUnread(n => n + 1);
+    }, 'messages-unread');
+    return () => { on = false; unsub(); };
+  }, [session?.user?.id]);
 
   useEffect(() => {
     const onOnline = () => setSyncStatus('live');
@@ -364,6 +390,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     setPaletteOpen, setQuickAddOpen, setEditingTask,
     addTask, updateTask, deleteTask, duplicateTask, toggleSubtask,
     resetDemo, exportJSON, importJSON,
+    chatUnread, markChatRead,
   };
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
 }
@@ -1221,6 +1248,7 @@ function CommandPalette() {
     { id: 'v-sched', label: 'Go to Schedule', icon: CalendarDays, run: () => { setView('schedule'); setPaletteOpen(false); } },
     { id: 'v-priv', label: 'Go to Private', icon: Lock, run: () => { setView('private'); setPaletteOpen(false); } },
     { id: 'v-va', label: isMember ? 'Go to My Tasks' : 'Go to VA Desk', icon: UserCog, run: () => { setView('va'); setPaletteOpen(false); } },
+    { id: 'v-chat', label: 'Go to Chat', icon: MessageSquare, run: () => { setView('chat'); setPaletteOpen(false); } },
     { id: 'theme', label: `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`, icon: theme === 'dark' ? Sun : Moon, run: () => { setTheme(theme === 'dark' ? 'light' : 'dark'); setPaletteOpen(false); } },
     { id: 'export', label: 'Export JSON backup', icon: Download, run: () => { exportJSON(); setPaletteOpen(false); } },
     { id: 'reset', label: 'Clear all tasks', icon: RefreshCw, run: () => { setPaletteOpen(false); resetDemo(); } },
@@ -1311,7 +1339,7 @@ function CommandPalette() {
    SIDEBAR
 ================================================================================= */
 function Sidebar() {
-  const { view, setView, tasks, isMember } = useApp();
+  const { view, setView, tasks, isMember, chatUnread } = useApp();
 
   const counts = useMemo(() => {
     const open = tasks.filter(t => t.status !== 'done');
@@ -1357,6 +1385,7 @@ function Sidebar() {
         {item('matrix', Grid3x3, 'Priority Matrix')}
         {item('projects', FolderKanban, 'Projects')}
         {item('schedule', CalendarDays, 'Schedule')}
+        {item('chat', MessageSquare, 'Chat', chatUnread)}
 
         <div className="px-3 pt-5 pb-2 text-[10px] font-medium uppercase tracking-widest text-white/30">Lanes</div>
         {item('va', UserCog, isMember ? 'My Tasks' : 'VA Desk', counts.va)}
@@ -1385,7 +1414,7 @@ function Sidebar() {
    MOBILE TAB BAR
 ================================================================================= */
 function MobileTabs() {
-  const { view, setView, isMember } = useApp();
+  const { view, setView, isMember, chatUnread } = useApp();
   const items = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Home' },
     { id: 'kanban',    icon: KanbanSquare,    label: 'Board' },
@@ -1394,15 +1423,19 @@ function MobileTabs() {
     { id: 'schedule',  icon: CalendarDays,    label: 'Plan' },
     { id: 'va',        icon: UserCog,         label: isMember ? 'Mine' : 'VA' },
     { id: 'private',   icon: Lock,            label: 'Private' },
+    { id: 'chat',      icon: MessageSquare,   label: 'Chat' },
   ];
   return (
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 border-t border-white/5 bg-[#0a0b11]/95 backdrop-blur">
       <div className="flex overflow-x-auto no-scrollbar">
         {items.map(it => (
           <button key={it.id} onClick={() => setView(it.id)}
-            className={cx('flex-1 min-w-[64px] py-2.5 flex flex-col items-center justify-center gap-0.5 transition-colors',
+            className={cx('relative flex-1 min-w-[64px] py-2.5 flex flex-col items-center justify-center gap-0.5 transition-colors',
               view === it.id ? 'text-white' : 'text-white/40')}>
             <it.icon className="w-5 h-5" />
+            {it.id === 'chat' && chatUnread > 0 && (
+              <span className="absolute top-1.5 left-1/2 translate-x-2 min-w-[14px] h-3.5 px-1 rounded-full bg-rose-500 text-rose-50 text-[8px] font-bold leading-none flex items-center justify-center">{chatUnread > 9 ? '9+' : chatUnread}</span>
+            )}
             <span className="text-[9px] font-medium tracking-wide">{it.label}</span>
           </button>
         ))}
@@ -2444,6 +2477,226 @@ export default function App({ session, currentMember, onSignOut }) {
   );
 }
 
+/* =================================================================================
+   TEAM CHAT
+================================================================================= */
+const fmtDur = (s) => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+const pickAudioMime = () => {
+  if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) return '';
+  for (const m of ['audio/webm', 'audio/mp4', 'audio/ogg']) {
+    if (MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return '';
+};
+
+function VoiceNote({ path, duration }) {
+  const [url, setUrl] = useState(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let on = true;
+    messagesApi.signedUrl(path).then(u => { if (on) setUrl(u); }).catch(() => { if (on) setFailed(true); });
+    return () => { on = false; };
+  }, [path]);
+  if (failed) return <div className="mt-1 text-[11px] text-rose-300/70">Voice note unavailable</div>;
+  if (!url) return <div className="mt-1 text-[11px] text-white/40">Loading audio…</div>;
+  return (
+    <div className="mt-1 flex items-center gap-2">
+      <audio controls preload="none" src={url} className="h-8 max-w-[240px]" />
+      {duration ? <span className="text-[10px] text-white/35 shrink-0">{fmtDur(duration)}</span> : null}
+    </div>
+  );
+}
+
+function ChatView() {
+  const { session, markChatRead } = useApp();
+  const userId = session?.user?.id;
+  const [items, setItems] = useState([]);
+  const [people, setPeople] = useState({});
+  const [text, setText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const [micError, setMicError] = useState('');
+  const scrollRef = useRef(null);
+  const mrRef = useRef(null);
+  const chunksRef = useRef([]);
+  const streamRef = useRef(null);
+  const timerRef = useRef(null);
+  const startRef = useRef(0);
+  const cancelRef = useRef(false);
+
+  // Sender names from members.
+  useEffect(() => {
+    let on = true;
+    membersApi.list().then(list => { if (on) setPeople(Object.fromEntries((list || []).map(m => [m.id, m]))); }).catch(() => {});
+    return () => { on = false; };
+  }, []);
+
+  // Load + subscribe; mark read while open.
+  useEffect(() => {
+    let on = true;
+    messagesApi.list().then(list => { if (on) setItems(list); }).catch(e => console.error('Failed to load messages:', e)).finally(() => { if (on) setLoading(false); });
+    markChatRead();
+    const unsub = messagesApi.subscribe(({ type, message }) => {
+      if (!message || !on) return;
+      setItems(prev => {
+        if (type === 'DELETE') return prev.filter(m => m.id !== message.id);
+        if (type === 'UPDATE') return prev.map(m => m.id === message.id ? message : m);
+        return prev.some(m => m.id === message.id) ? prev : [...prev, message];
+      });
+      markChatRead();
+    }, 'messages-thread');
+    return () => { on = false; unsub(); };
+  }, [markChatRead]);
+
+  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }); }, [items.length]);
+
+  // Stop any in-flight recording on unmount.
+  useEffect(() => () => {
+    clearInterval(timerRef.current);
+    streamRef.current?.getTracks().forEach(t => t.stop());
+  }, []);
+
+  const nameOf = (id) => (id === userId ? 'You' : (people[id]?.display_name || people[id]?.email || 'Someone'));
+
+  const sendText = async () => {
+    const body = text.trim();
+    if (!body || sending) return;
+    setText('');
+    try {
+      const created = await messagesApi.sendText(body);
+      setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
+    } catch (e) { console.error('Send failed:', e); setText(body); }
+  };
+
+  const startRecording = async () => {
+    setMicError('');
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setMicError('Voice recording is not supported in this browser.');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mime = pickAudioMime();
+      const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      chunksRef.current = [];
+      cancelRef.current = false;
+      mr.ondataavailable = (e) => { if (e.data && e.data.size) chunksRef.current.push(e.data); };
+      mr.onstop = async () => {
+        clearInterval(timerRef.current);
+        streamRef.current?.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+        const dur = (Date.now() - startRef.current) / 1000;
+        const ct = (mr.mimeType || 'audio/webm').split(';')[0];
+        const blob = new Blob(chunksRef.current, { type: ct });
+        chunksRef.current = [];
+        if (cancelRef.current || blob.size === 0 || dur < 0.4) return;
+        try {
+          setSending(true);
+          const created = await messagesApi.sendVoice(blob, dur, ct);
+          setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
+        } catch (e) { console.error('Voice send failed:', e); setMicError('Failed to send voice note.'); }
+        finally { setSending(false); }
+      };
+      mrRef.current = mr;
+      startRef.current = Date.now();
+      mr.start();
+      setRecording(true);
+      setSeconds(0);
+      timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
+    } catch (e) {
+      console.error('Mic error:', e);
+      setMicError('Microphone access was denied or unavailable.');
+    }
+  };
+
+  const stopRecording = (cancelled) => {
+    cancelRef.current = cancelled;
+    setRecording(false);
+    clearInterval(timerRef.current);
+    const mr = mrRef.current;
+    if (mr && mr.state !== 'inactive') mr.stop();
+  };
+
+  const remove = async (m) => {
+    setItems(prev => prev.filter(x => x.id !== m.id));
+    try { await messagesApi.remove(m); }
+    catch (e) { console.error('Delete failed:', e); messagesApi.list().then(setItems).catch(() => {}); }
+  };
+
+  return (
+    <div className="flex flex-col h-[calc(100dvh-9rem)] rounded-2xl border border-white/10 bg-[#0a0b11] overflow-hidden">
+      <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2 shrink-0">
+        <MessageSquare className="w-4 h-4 text-white/50" />
+        <div className="text-sm font-semibold text-white/90">Team chat</div>
+        <div className="text-[10px] text-white/35">Shared workspace channel</div>
+      </div>
+
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
+        {loading ? (
+          <div className="py-6 text-center text-[11px] text-white/40">Loading…</div>
+        ) : items.length === 0 ? (
+          <div className="py-10 text-center text-[12px] text-white/40">No messages yet — say hello 👋</div>
+        ) : items.map(m => {
+          const mine = m.senderId === userId;
+          return (
+            <div key={m.id} className="group">
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className="text-xs font-medium text-white/80">{nameOf(m.senderId)}</span>
+                <span className="text-[10px] text-white/35">{timeAgo(m.createdAt)}</span>
+                {mine && (
+                  <button onClick={() => remove(m)} title="Delete"
+                    className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-white/30 hover:text-rose-300">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              {m.body && <div className="text-sm text-white/80 leading-relaxed whitespace-pre-wrap break-words">{m.body}</div>}
+              {m.audioPath && <VoiceNote path={m.audioPath} duration={m.audioDuration} />}
+            </div>
+          );
+        })}
+      </div>
+
+      {micError && <div className="px-4 py-1.5 text-[11px] text-rose-300/80 border-t border-white/5 shrink-0">{micError}</div>}
+
+      <div className="border-t border-white/10 p-3 shrink-0">
+        {recording ? (
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-2 text-xs text-rose-300">
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" /> Recording {fmtDur(seconds)}
+            </span>
+            <div className="flex-1" />
+            <button onClick={() => stopRecording(true)} className="text-xs text-white/50 hover:text-white/80">Cancel</button>
+            <button onClick={() => stopRecording(false)}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90">
+              <Square className="w-3 h-3" />Stop &amp; send
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-end gap-2">
+            <textarea value={text} onChange={e => setText(e.target.value)} rows={2}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); } }}
+              placeholder="Message the workspace…  (Enter to send, Shift+Enter for a new line)"
+              className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none" />
+            <button onClick={startRecording} disabled={sending} title="Record a voice note"
+              className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 disabled:opacity-40 shrink-0">
+              <Mic className="w-4 h-4" />
+            </button>
+            <button onClick={sendText} disabled={!text.trim() || sending}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed shrink-0">
+              <Send className="w-3.5 h-3.5" />Send
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AppShell() {
   const { view, theme, loading } = useApp();
 
@@ -2540,6 +2793,7 @@ function AppShell() {
               <Route path="/schedule" element={<ScheduleView />} />
               <Route path="/va-desk" element={<VAView />} />
               <Route path="/private" element={<PrivateView />} />
+              <Route path="/chat" element={<ChatView />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </div>

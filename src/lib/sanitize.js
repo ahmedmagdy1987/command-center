@@ -148,3 +148,20 @@ export const fromDbComment = (row) => {
     updatedAt: row.updated_at,
   };
 };
+
+/* =================================================================================
+   MESSAGES (team chat)
+================================================================================= */
+/** Convert a DB-shaped chat message (snake_case columns) to app shape (camelCase) */
+export const fromDbMessage = (row) => {
+  if (!row || typeof row !== 'object') return null;
+  return {
+    id: row.id,
+    senderId: row.sender_id,
+    body: row.body,
+    audioPath: row.audio_path,
+    audioDuration: row.audio_duration_seconds,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+};

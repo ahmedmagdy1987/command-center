@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { fromDbTask, toDbTask, sanitizeTask, fromDbNotification, fromDbComment } from './sanitize';
+import { fromDbTask, toDbTask, sanitizeTask, fromDbNotification, fromDbComment, fromDbMessage, uid } from './sanitize';
 
 /* =================================================================================
    AUTH
@@ -269,6 +269,99 @@ export const comments = {
       .on('postgres_changes', opts('INSERT'), (p) => cb({ type: 'INSERT', comment: fromDbComment(p.new) }))
       .on('postgres_changes', opts('UPDATE'), (p) => cb({ type: 'UPDATE', comment: fromDbComment(p.new) }))
       .on('postgres_changes', opts('DELETE'), (p) => cb({ type: 'DELETE', comment: fromDbComment(p.old) }))
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  },
+};
+
+/* =================================================================================
+   MESSAGES — one shared workspace chat channel (text + voice notes).
+   RLS: any workspace member reads/sends; edit/delete own only. Voice notes live in
+   the private 'voice-notes' bucket at <uid>/<uuid>.<ext>, played via signed URLs.
+================================================================================= */
+export const messages = {
+  /** List the channel, oldest first. */
+  async list(limit = 200) {
+    const { data, error } = await supabase
+      .from('messages').select('*')
+      .order('created_at', { ascending: true })
+      .limit(limit);
+    if (error) throw error;
+    return (data || []).map(fromDbMessage);
+  },
+
+  /** Count messages newer than `since` (ISO) not sent by `exceptSenderId` — for the unread badge. */
+  async unreadCount(since, exceptSenderId) {
+    let q = supabase.from('messages').select('*', { count: 'exact', head: true });
+    if (since) q = q.gt('created_at', since);
+    if (exceptSenderId) q = q.neq('sender_id', exceptSenderId);
+    const { count, error } = await q;
+    if (error) throw error;
+    return count || 0;
+  },
+
+  async sendText(body) {
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({ sender_id: session.user.id, body })
+      .select().single();
+    if (error) throw error;
+    return fromDbMessage(data);
+  },
+
+  /** Upload a recorded audio blob to the bucket, then insert the message row. */
+  async sendVoice(blob, durationSeconds, contentType) {
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+    // Normalize to a base audio type that exactly matches the bucket's allowlist.
+    const ct = (contentType || blob.type || 'audio/webm').split(';')[0];
+    const ext = ct === 'audio/mp4' ? 'm4a' : ct === 'audio/ogg' ? 'ogg' : ct === 'audio/mpeg' ? 'mp3' : ct === 'audio/wav' ? 'wav' : 'webm';
+    const path = `${session.user.id}/${uid()}.${ext}`;
+    const { error: upErr } = await supabase.storage.from('voice-notes').upload(path, blob, { contentType: ct, upsert: false });
+    if (upErr) throw upErr;
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({ sender_id: session.user.id, audio_path: path, audio_duration_seconds: Math.max(1, Math.round(durationSeconds || 0)) })
+      .select().single();
+    if (error) {
+      supabase.storage.from('voice-notes').remove([path]).catch(() => {}); // best-effort cleanup of the orphan object
+      throw error;
+    }
+    return fromDbMessage(data);
+  },
+
+  async update(id, body) {
+    const { data, error } = await supabase
+      .from('messages')
+      .update({ body, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select().single();
+    if (error) throw error;
+    return fromDbMessage(data);
+  },
+
+  /** Delete your own message (and its audio object, if any). */
+  async remove(message) {
+    const { error } = await supabase.from('messages').delete().eq('id', message.id);
+    if (error) throw error;
+    if (message.audioPath) supabase.storage.from('voice-notes').remove([message.audioPath]).catch(() => {}); // best-effort
+  },
+
+  /** Signed URL for playing a voice note. */
+  async signedUrl(path, expiresIn = 3600) {
+    const { data, error } = await supabase.storage.from('voice-notes').createSignedUrl(path, expiresIn);
+    if (error) throw error;
+    return data.signedUrl;
+  },
+
+  /** Subscribe to realtime INSERT/UPDATE/DELETE. cb -> { type, message }. Returns unsubscribe. */
+  subscribe(cb, channelName = 'messages-changes') {
+    const channel = supabase.channel(channelName)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (p) => cb({ type: 'INSERT', message: fromDbMessage(p.new) }))
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (p) => cb({ type: 'UPDATE', message: fromDbMessage(p.new) }))
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (p) => cb({ type: 'DELETE', message: fromDbMessage(p.old) }))
       .subscribe();
     return () => supabase.removeChannel(channel);
   },
