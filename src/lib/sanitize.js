@@ -132,3 +132,19 @@ export const fromDbNotification = (row) => {
     createdAt: row.created_at,
   };
 };
+
+/* =================================================================================
+   COMMENTS
+================================================================================= */
+/** Convert a DB-shaped comment (snake_case columns) to app shape (camelCase) */
+export const fromDbComment = (row) => {
+  if (!row || typeof row !== 'object') return null;
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    authorId: row.author_id,
+    body: row.body,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+};

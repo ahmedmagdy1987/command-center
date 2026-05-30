@@ -7,9 +7,9 @@ import {
   Circle, CheckCircle2, Calendar, Zap, Timer, MoreHorizontal, Edit3, Filter,
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
   Brain, Target, Hourglass, GripVertical, Info, Keyboard, LogOut, Wifi, WifiOff, Loader2,
-  KeyRound, Bell
+  KeyRound, Bell, MessageSquare, Send
 } from 'lucide-react';
-import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, auth } from './lib/api';
+import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, auth } from './lib/api';
 import { supabase } from './lib/supabase';
 import { sanitizeTask, uid, nowISO } from './lib/sanitize';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
@@ -661,6 +661,140 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showOwner 
 /* =================================================================================
    TASK MODAL
 ================================================================================= */
+function TaskComments({ taskId }) {
+  const { session } = useApp();
+  const userId = session?.user?.id;
+  const [items, setItems] = useState([]);
+  const [people, setPeople] = useState({});
+  const [text, setText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [editId, setEditId] = useState(null);
+  const [editText, setEditText] = useState('');
+  const scrollRef = useRef(null);
+
+  // Resolve author names from members (members are readable by any authenticated user).
+  useEffect(() => {
+    let mounted = true;
+    membersApi.list()
+      .then(list => { if (mounted) setPeople(Object.fromEntries((list || []).map(m => [m.id, m]))); })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+
+  // Load this task's comments + subscribe to live changes while the modal is open.
+  useEffect(() => {
+    if (!taskId) return;
+    let mounted = true;
+    setLoading(true);
+    commentsApi.list(taskId)
+      .then(list => { if (mounted) setItems(list); })
+      .catch(err => console.error('Failed to load comments:', err))
+      .finally(() => { if (mounted) setLoading(false); });
+
+    const unsub = commentsApi.subscribe(taskId, ({ type, comment }) => {
+      if (!comment || !mounted) return;
+      setItems(prev => {
+        if (type === 'DELETE') return prev.filter(c => c.id !== comment.id);
+        if (type === 'UPDATE') return prev.map(c => c.id === comment.id ? comment : c);
+        return prev.some(c => c.id === comment.id) ? prev : [...prev, comment];
+      });
+    });
+    return () => { mounted = false; unsub(); };
+  }, [taskId]);
+
+  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }); }, [items.length]);
+
+  const nameOf = (id) => people[id]?.display_name || people[id]?.email || 'Someone';
+
+  const send = async () => {
+    const body = text.trim();
+    if (!body) return;
+    setText('');
+    try {
+      const created = await commentsApi.add(taskId, body);
+      setItems(prev => prev.some(c => c.id === created.id) ? prev : [...prev, created]);
+    } catch (err) {
+      console.error('Failed to add comment:', err);
+      setText(body); // restore on failure
+    }
+  };
+
+  const saveEdit = async (id) => {
+    const body = editText.trim();
+    if (!body) { setEditId(null); return; }
+    setEditId(null);
+    try {
+      const updated = await commentsApi.update(id, body);
+      setItems(prev => prev.map(c => c.id === id ? updated : c));
+    } catch (err) { console.error('Failed to edit comment:', err); }
+  };
+
+  const remove = async (id) => {
+    setItems(prev => prev.filter(c => c.id !== id));
+    try { await commentsApi.remove(id); }
+    catch (err) { console.error('Failed to delete comment:', err); commentsApi.list(taskId).then(setItems).catch(() => {}); }
+  };
+
+  return (
+    <div className="pt-5 border-t border-white/5">
+      <div className="flex items-center gap-2 mb-3">
+        <MessageSquare className="w-4 h-4 text-white/50" />
+        <div className="text-[10px] font-medium uppercase tracking-widest text-white/40">Discussion</div>
+        {items.length > 0 && <div className="text-[10px] text-white/30">{items.length}</div>}
+      </div>
+
+      <div ref={scrollRef} className="max-h-72 overflow-y-auto no-scrollbar space-y-3 pr-1">
+        {loading ? (
+          <div className="py-4 text-center text-[11px] text-white/40">Loading…</div>
+        ) : items.length === 0 ? (
+          <div className="py-6 text-center text-[11px] text-white/40">No comments yet — start the discussion.</div>
+        ) : items.map(c => {
+          const mine = c.authorId === userId;
+          const edited = c.updatedAt && c.createdAt && c.updatedAt !== c.createdAt;
+          return (
+            <div key={c.id} className="group">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs font-medium text-white/80">{mine ? 'You' : nameOf(c.authorId)}</span>
+                <span className="text-[10px] text-white/35">{timeAgo(c.createdAt)}{edited ? ' · edited' : ''}</span>
+                {mine && editId !== c.id && (
+                  <span className="ml-auto flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => { setEditId(c.id); setEditText(c.body); }} className="text-[10px] text-white/40 hover:text-white/80">Edit</button>
+                    <button onClick={() => remove(c.id)} className="text-[10px] text-white/40 hover:text-rose-300">Delete</button>
+                  </span>
+                )}
+              </div>
+              {editId === c.id ? (
+                <div className="space-y-1.5">
+                  <textarea value={editText} onChange={e => setEditText(e.target.value)} rows={2}
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(c.id); } else if (e.key === 'Escape') setEditId(null); }}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white/90 outline-none focus:border-violet-400/50 resize-none" />
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => saveEdit(c.id)} className="text-[10px] font-semibold text-violet-300 hover:text-violet-200">Save</button>
+                    <button onClick={() => setEditId(null)} className="text-[10px] text-white/40 hover:text-white/70">Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-white/70 leading-relaxed whitespace-pre-wrap break-words rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2">{c.body}</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex items-end gap-2 mt-3">
+        <textarea value={text} onChange={e => setText(e.target.value)} rows={2}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder="Write a comment…  (Enter to send, Shift+Enter for a new line)"
+          className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none" />
+        <button onClick={send} disabled={!text.trim()}
+          className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity shrink-0">
+          <Send className="w-3.5 h-3.5" />Send
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function TaskModal() {
   const { editingTask, setEditingTask, updateTask, deleteTask, duplicateTask, projects, toggleSubtask, isMember } = useApp();
   const t = editingTask;
@@ -791,6 +925,8 @@ function TaskModal() {
             <span>Updated {new Date(t.updatedAt).toLocaleDateString()}</span>
             {t.completedAt && <span>Completed {new Date(t.completedAt).toLocaleDateString()}</span>}
           </div>
+
+          <TaskComments key={t.id} taskId={t.id} />
         </div>
       </div>
     </div>

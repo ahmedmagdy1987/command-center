@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { fromDbTask, toDbTask, sanitizeTask, fromDbNotification } from './sanitize';
+import { fromDbTask, toDbTask, sanitizeTask, fromDbNotification, fromDbComment } from './sanitize';
 
 /* =================================================================================
    AUTH
@@ -207,6 +207,69 @@ export const notifications = {
           console.info('[notifications realtime] SUBSCRIBED');
         }
       });
+    return () => supabase.removeChannel(channel);
+  },
+};
+
+/* =================================================================================
+   COMMENTS
+   In-task discussion. RLS makes a comment visible exactly when its task is visible;
+   INSERT/UPDATE/DELETE are restricted to the author.
+================================================================================= */
+export const comments = {
+  /** List a task's comments, oldest first. */
+  async list(taskId) {
+    const { data, error } = await supabase
+      .from('comments')
+      .select('*')
+      .eq('task_id', taskId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return (data || []).map(fromDbComment);
+  },
+
+  /** Add a comment to a task (author = current user; enforced by RLS). */
+  async add(taskId, body) {
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+    const { data, error } = await supabase
+      .from('comments')
+      .insert({ task_id: taskId, author_id: session.user.id, body })
+      .select().single();
+    if (error) throw error;
+    return fromDbComment(data);
+  },
+
+  /** Edit one of the current user's own comments (RLS restricts to the author). */
+  async update(id, body) {
+    const { data, error } = await supabase
+      .from('comments')
+      .update({ body, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select().single();
+    if (error) throw error;
+    return fromDbComment(data);
+  },
+
+  /** Delete one of the current user's own comments (RLS restricts to the author). */
+  async remove(id) {
+    const { error } = await supabase.from('comments').delete().eq('id', id);
+    if (error) throw error;
+  },
+
+  /**
+   * Subscribe to realtime INSERT/UPDATE/DELETE for one task's comments (DELETE relies on
+   * the table's REPLICA IDENTITY FULL so the per-task filter matches). Returns unsubscribe.
+   * cb is called with { type, comment }.
+   */
+  subscribe(taskId, cb) {
+    const opts = (event) => ({ event, schema: 'public', table: 'comments', filter: `task_id=eq.${taskId}` });
+    const channel = supabase
+      .channel(`comments-${taskId}`)
+      .on('postgres_changes', opts('INSERT'), (p) => cb({ type: 'INSERT', comment: fromDbComment(p.new) }))
+      .on('postgres_changes', opts('UPDATE'), (p) => cb({ type: 'UPDATE', comment: fromDbComment(p.new) }))
+      .on('postgres_changes', opts('DELETE'), (p) => cb({ type: 'DELETE', comment: fromDbComment(p.old) }))
+      .subscribe();
     return () => supabase.removeChannel(channel);
   },
 };
