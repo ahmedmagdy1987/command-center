@@ -199,7 +199,14 @@ export const notifications = {
       }, (payload) => {
         cb(fromDbNotification(payload.new));
       })
-      .subscribe();
+      .subscribe((status, err) => {
+        // Surface realtime health so live delivery can be verified (should reach SUBSCRIBED).
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.warn(`[notifications realtime] ${status}`, err ?? '');
+        } else if (status === 'SUBSCRIBED') {
+          console.info('[notifications realtime] SUBSCRIBED');
+        }
+      });
     return () => supabase.removeChannel(channel);
   },
 };

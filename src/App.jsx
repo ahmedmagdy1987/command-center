@@ -3,6 +3,7 @@ import { Sparkles } from 'lucide-react';
 import { auth, members } from './lib/api';
 import AuthScreen from './AuthScreen';
 import VisualTaskCommandCenter from './VisualTaskCommandCenter';
+import { supabase } from './lib/supabase';
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -13,12 +14,16 @@ export default function App() {
     let mounted = true;
     auth.getSession().then((s) => {
       if (!mounted) return;
+      // Authenticate the Realtime socket so RLS-protected postgres_changes are delivered live.
+      supabase.realtime.setAuth(s?.access_token ?? null);
       setSession(s);
       setChecking(false);
     });
 
     const unsub = auth.onAuthChange((s) => {
       if (!mounted) return;
+      // Keep the Realtime socket's JWT in sync on login / token refresh / logout.
+      supabase.realtime.setAuth(s?.access_token ?? null);
       setSession(s);
       if (!s) setCurrentMember(null);
     });
