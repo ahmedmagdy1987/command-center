@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, createContext, useContext } from 'react';
+import { createPortal } from 'react-dom';
 import {
   LayoutDashboard, KanbanSquare, Grid3x3, FolderKanban, CalendarDays, Lock, UserCog,
   Plus, Search, Command, Settings, Sun, Moon, Download, Upload, RefreshCw, X, Check,
@@ -1269,6 +1270,32 @@ function MobileTabs() {
 /* =================================================================================
    TOP BAR
 ================================================================================= */
+/* A single in-app notification toast. Self-dismisses after 5s. Rendered through a
+   portal to <body> by NotificationBell so the sticky header's backdrop-filter
+   (which establishes a containing block for fixed descendants) cannot clip it. */
+function NotificationToast({ n, light, onOpen, onDismiss }) {
+  const { id } = n;
+  useEffect(() => {
+    const t = setTimeout(() => onDismiss(id), 5000);
+    return () => clearTimeout(t);
+  }, [id, onDismiss]);
+  return (
+    <button onClick={() => onOpen(n)}
+      className="pointer-events-auto flex items-start gap-2.5 w-full text-left px-3.5 py-3 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl hover:border-white/20 transition-colors animate-[slideUp_.2s_ease]">
+      <span className="mt-0.5 w-7 h-7 rounded-lg border flex items-center justify-center shrink-0" style={{
+        background: light ? 'rgba(124,58,237,0.12)' : 'rgba(139,92,246,0.15)',
+        borderColor: light ? 'rgba(124,58,237,0.35)' : 'rgba(139,92,246,0.30)',
+      }}>
+        <Bell className="w-3.5 h-3.5" style={{ color: light ? '#6d28d9' : '#c4b5fd' }} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[11px] font-semibold text-white/90">New notification</span>
+        <span className="block text-xs text-white/60 leading-snug">{n.message}</span>
+      </span>
+    </button>
+  );
+}
+
 function NotificationBell() {
   const { session, tasks, setEditingTask, theme } = useApp();
   const userId = session?.user?.id;
@@ -1276,8 +1303,8 @@ function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState(null);
-  const toastTimer = useRef(null);
+  const [toasts, setToasts] = useState([]);
+  const removeToast = useCallback((id) => setToasts(prev => prev.filter(t => t.id !== id)), []);
 
   const unreadCount = items.reduce((n, x) => n + (x.read ? 0 : 1), 0);
 
@@ -1310,11 +1337,10 @@ function NotificationBell() {
     const unsub = notificationsApi.subscribe(userId, (n) => {
       if (!n || !mounted) return;
       setItems(prev => prev.some(x => x.id === n.id) ? prev : [n, ...prev]);
-      setToast(n);
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-      toastTimer.current = setTimeout(() => { if (mounted) setToast(null); }, 5000);
+      // Newest toast on top; cap the stack so it never runs off-screen. Each toast self-dismisses.
+      setToasts(prev => prev.some(t => t.id === n.id) ? prev : [n, ...prev].slice(0, 3));
     });
-    return () => { mounted = false; unsub(); if (toastTimer.current) clearTimeout(toastTimer.current); };
+    return () => { mounted = false; unsub(); };
   }, [userId]);
 
   // Open the task referenced by a notification — from local state if present,
@@ -1333,8 +1359,7 @@ function NotificationBell() {
 
   const handleOpen = (n) => {
     setOpen(false);
-    setToast(null);
-    if (toastTimer.current) { clearTimeout(toastTimer.current); toastTimer.current = null; }
+    removeToast(n.id);
     if (!n.read) {
       setItems(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
       notificationsApi.markRead(n.id).catch(err => {
@@ -1411,22 +1436,16 @@ function NotificationBell() {
         )}
       </div>
 
-      {toast && (
-        <div className="fixed right-4 bottom-20 sm:bottom-4 z-50 animate-[slideUp_.2s_ease]">
-          <button onClick={() => handleOpen(toast)}
-            className="flex items-start gap-2.5 w-72 max-w-[calc(100vw-2rem)] text-left px-3.5 py-3 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl hover:border-white/20 transition-colors">
-            <span className="mt-0.5 w-7 h-7 rounded-lg border flex items-center justify-center shrink-0" style={{
-              background: light ? 'rgba(124,58,237,0.12)' : 'rgba(139,92,246,0.15)',
-              borderColor: light ? 'rgba(124,58,237,0.35)' : 'rgba(139,92,246,0.30)',
-            }}>
-              <Bell className="w-3.5 h-3.5" style={{ color: light ? '#6d28d9' : '#c4b5fd' }} />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-[11px] font-semibold text-white/90">New notification</span>
-              <span className="block text-xs text-white/60 leading-snug">{toast.message}</span>
-            </span>
-          </button>
-        </div>
+      {toasts.length > 0 && createPortal(
+        <div
+          className="fixed right-4 z-[100] flex flex-col gap-2 w-72 max-w-[calc(100vw-2rem)] pointer-events-none"
+          style={{ top: 'calc(env(safe-area-inset-top, 0px) + 4.5rem)' }}
+        >
+          {toasts.map(n => (
+            <NotificationToast key={n.id} n={n} light={light} onOpen={handleOpen} onDismiss={removeToast} />
+          ))}
+        </div>,
+        document.body
       )}
     </>
   );
