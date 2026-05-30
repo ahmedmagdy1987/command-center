@@ -11,6 +11,19 @@ import {
 import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, auth } from './lib/api';
 import { supabase } from './lib/supabase';
 import { sanitizeTask, uid, nowISO } from './lib/sanitize';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+
+/* Route <-> view mapping. Each main view gets its own shareable URL. */
+const VIEW_TO_PATH = {
+  dashboard: '/',
+  kanban: '/kanban',
+  matrix: '/priority-matrix',
+  projects: '/projects',
+  schedule: '/schedule',
+  va: '/va-desk',
+  private: '/private',
+};
+const PATH_TO_VIEW = Object.fromEntries(Object.entries(VIEW_TO_PATH).map(([v, p]) => [p, v]));
 
 /* =================================================================================
    CONSTANTS
@@ -134,6 +147,8 @@ const AppCtx = createContext(null);
 const useApp = () => useContext(AppCtx);
 
 function AppProvider({ children, session, currentMember, onSignOut }) {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState(DEFAULT_PROJECTS);
   const [loading, setLoading] = useState(true);
@@ -145,7 +160,9 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     return t;
   });
 
-  const [view, setView] = useState('dashboard');
+  // View is driven by the URL (react-router) so each view has a shareable, bookmarkable route.
+  const view = PATH_TO_VIEW[location.pathname] ?? 'dashboard';
+  const setView = useCallback((v) => navigate(VIEW_TO_PATH[v] ?? '/'), [navigate]);
   const [filters, setFilters] = useState({ owner: 'all', privacy: 'all', project: 'all', search: '' });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
@@ -2267,19 +2284,6 @@ export default function App({ session, currentMember, onSignOut }) {
 function AppShell() {
   const { view, theme, loading } = useApp();
 
-  const content = useMemo(() => {
-    switch (view) {
-      case 'dashboard': return <DashboardView />;
-      case 'kanban':    return <KanbanView />;
-      case 'matrix':    return <MatrixView />;
-      case 'projects':  return <ProjectsView />;
-      case 'schedule':  return <ScheduleView />;
-      case 'private':   return <PrivateView />;
-      case 'va':        return <VAView />;
-      default:          return <DashboardView />;
-    }
-  }, [view]);
-
   if (loading) {
     return (
       <div className="min-h-screen bg-[#070810] text-white flex items-center justify-center">
@@ -2365,7 +2369,16 @@ function AppShell() {
         <TopBar />
         <main className="flex-1 overflow-y-auto px-4 lg:px-6 py-6 pb-24 lg:pb-10">
           <div className="max-w-[1400px] mx-auto animate-[slideUp_.25s_ease]" key={view}>
-            {content}
+            <Routes>
+              <Route path="/" element={<DashboardView />} />
+              <Route path="/kanban" element={<KanbanView />} />
+              <Route path="/priority-matrix" element={<MatrixView />} />
+              <Route path="/projects" element={<ProjectsView />} />
+              <Route path="/schedule" element={<ScheduleView />} />
+              <Route path="/va-desk" element={<VAView />} />
+              <Route path="/private" element={<PrivateView />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
           </div>
         </main>
       </div>
