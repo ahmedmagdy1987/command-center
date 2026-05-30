@@ -388,13 +388,14 @@ function PriorityDot({ priority, size = 8, glow = true }) {
 }
 
 function OwnerChip({ owner, showLabel = true, size = 'sm' }) {
+  const { isMember } = useApp();
   const o = OWNERS[owner];
   const dims = size === 'sm' ? 'h-5 px-2 text-[10px]' : 'h-6 px-2.5 text-xs';
   return (
     <span className={cx('inline-flex items-center gap-1.5 rounded-full font-medium tracking-wide', dims)}
       style={{ background: o.soft, color: o.hex, border: `1px solid ${o.hex}33` }}>
       <span className="w-1.5 h-1.5 rounded-full" style={{ background: o.hex }} />
-      {showLabel && o.label}
+      {showLabel && ownerLabel(owner, isMember)}
     </span>
   );
 }
