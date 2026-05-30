@@ -6,9 +6,9 @@ import {
   Circle, CheckCircle2, Calendar, Zap, Timer, MoreHorizontal, Edit3, Filter, Eye, EyeOff,
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
   Brain, Target, Hourglass, GripVertical, Info, Keyboard, LogOut, Wifi, WifiOff, Loader2,
-  KeyRound
+  KeyRound, Bell
 } from 'lucide-react';
-import { tasks as tasksApi, projects as projectsApi, members as membersApi, auth } from './lib/api';
+import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, auth } from './lib/api';
 import { supabase } from './lib/supabase';
 import { sanitizeTask, uid, nowISO } from './lib/sanitize';
 
@@ -340,6 +340,22 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
    SHARED UI PRIMITIVES
 ================================================================================= */
 const cx = (...xs) => xs.filter(Boolean).join(' ');
+
+/** Relative "time ago" label for notifications (e.g. "just now", "5m ago", "Apr 3"). */
+const timeAgo = (iso) => {
+  if (!iso) return '';
+  const then = new Date(iso).getTime();
+  if (!isFinite(then)) return '';
+  const secs = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (secs < 45) return 'just now';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
 
 function PriorityDot({ priority, size = 8, glow = true }) {
   const p = PRIORITIES[priority];
@@ -1236,6 +1252,169 @@ function MobileTabs() {
 /* =================================================================================
    TOP BAR
 ================================================================================= */
+function NotificationBell() {
+  const { session, tasks, setEditingTask, theme } = useApp();
+  const userId = session?.user?.id;
+  const light = theme === 'light';
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState(null);
+  const toastTimer = useRef(null);
+
+  const unreadCount = items.reduce((n, x) => n + (x.read ? 0 : 1), 0);
+
+  // Initial load of the current user's notifications (RLS scopes to recipient).
+  useEffect(() => {
+    if (!userId) { setLoading(false); return; }
+    let mounted = true;
+    setLoading(true);
+    notificationsApi.list()
+      .then(list => {
+        if (!mounted) return;
+        // Merge with any realtime items that arrived during the fetch (dedupe by id, newest-first)
+        // so a notification streamed in mid-load is not clobbered by the list replacement.
+        setItems(prev => {
+          if (prev.length === 0) return list;
+          const seen = new Set(list.map(x => x.id));
+          const extras = prev.filter(x => !seen.has(x.id));
+          return [...extras, ...list].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+        });
+      })
+      .catch(err => console.error('Failed to load notifications:', err))
+      .finally(() => { if (mounted) setLoading(false); });
+    return () => { mounted = false; };
+  }, [userId]);
+
+  // Realtime: a new notification for this recipient bumps the badge + raises an in-app toast.
+  useEffect(() => {
+    if (!userId) return;
+    let mounted = true;
+    const unsub = notificationsApi.subscribe(userId, (n) => {
+      if (!n || !mounted) return;
+      setItems(prev => prev.some(x => x.id === n.id) ? prev : [n, ...prev]);
+      setToast(n);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => { if (mounted) setToast(null); }, 5000);
+    });
+    return () => { mounted = false; unsub(); if (toastTimer.current) clearTimeout(toastTimer.current); };
+  }, [userId]);
+
+  // Open the task referenced by a notification — from local state if present,
+  // otherwise fetch the single row and map it via fromDbTask (in tasksApi.getById).
+  const openTask = useCallback(async (taskId) => {
+    if (!taskId) return;
+    const local = tasks.find(t => t.id === taskId);
+    if (local) { setEditingTask(local); return; }
+    try {
+      const fetched = await tasksApi.getById(taskId);
+      if (fetched) setEditingTask(fetched);
+    } catch (err) {
+      console.error('Failed to open task from notification:', err);
+    }
+  }, [tasks, setEditingTask]);
+
+  const handleOpen = (n) => {
+    setOpen(false);
+    setToast(null);
+    if (toastTimer.current) { clearTimeout(toastTimer.current); toastTimer.current = null; }
+    if (!n.read) {
+      setItems(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+      notificationsApi.markRead(n.id).catch(err => {
+        console.error('markRead failed:', err);
+        notificationsApi.list().then(setItems).catch(() => {}); // reconcile with server on failure
+      });
+    }
+    openTask(n.taskId);
+  };
+
+  const markAll = async () => {
+    if (unreadCount === 0) return;
+    setItems(prev => prev.map(x => x.read ? x : { ...x, read: true }));
+    try {
+      await notificationsApi.markAllRead();
+    } catch (err) {
+      console.error('markAllRead failed:', err);
+      notificationsApi.list().then(setItems).catch(() => {}); // reconcile with server on failure
+    }
+  };
+
+  return (
+    <>
+      <div className="relative">
+        <IconButton icon={Bell} label="Notifications" active={open} onClick={() => setOpen(o => !o)} />
+        {unreadCount > 0 && (
+          <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-rose-50 text-[9px] font-bold leading-none flex items-center justify-center pointer-events-none shadow-[0_0_8px_rgba(244,63,94,0.5)]">
+            {unreadCount > 9 ? '9+' : unreadCount}
+          </span>
+        )}
+        {open && (
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+            <div className="absolute right-0 top-11 z-40 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/5">
+                <div className="text-xs font-semibold text-white/90">
+                  Notifications
+                  {unreadCount > 0 && <span className="ml-1.5 text-[10px] font-medium text-white/40">{unreadCount} new</span>}
+                </div>
+                {unreadCount > 0 && (
+                  <button onClick={markAll}
+                    className="inline-flex items-center gap-1 text-[10px] font-medium text-white/50 hover:text-white/90 transition-colors">
+                    <Check className="w-3 h-3" />Mark all read
+                  </button>
+                )}
+              </div>
+              <div className="max-h-[70vh] overflow-y-auto no-scrollbar">
+                {loading ? (
+                  <div className="px-3 py-6 text-center text-[11px] text-white/40">Loading…</div>
+                ) : items.length === 0 ? (
+                  <div className="px-3 py-8 text-center">
+                    <Bell className="w-5 h-5 text-white/20 mx-auto mb-2" />
+                    <div className="text-[11px] text-white/40">You're all caught up</div>
+                  </div>
+                ) : (
+                  items.map(n => (
+                    <button key={n.id} onClick={() => handleOpen(n)}
+                      className={cx('w-full text-left flex items-start gap-2.5 px-3 py-2.5 border-b border-white/5 last:border-b-0 transition-colors hover:bg-white/5',
+                        !n.read && 'bg-white/[0.03]')}>
+                      <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0" style={{
+                        background: n.read ? 'transparent' : (light ? '#7c3aed' : '#a78bfa'),
+                        boxShadow: n.read ? 'none' : `0 0 6px ${light ? 'rgba(124,58,237,0.45)' : 'rgba(167,139,250,0.7)'}`,
+                      }} />
+                      <span className="min-w-0 flex-1">
+                        <span className={cx('block text-xs leading-snug', n.read ? 'text-white/55' : 'text-white/90')}>{n.message}</span>
+                        <span className="block mt-0.5 text-[10px] text-white/35">{timeAgo(n.createdAt)}</span>
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {toast && (
+        <div className="fixed right-4 bottom-20 sm:bottom-4 z-50 animate-[slideUp_.2s_ease]">
+          <button onClick={() => handleOpen(toast)}
+            className="flex items-start gap-2.5 w-72 max-w-[calc(100vw-2rem)] text-left px-3.5 py-3 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl hover:border-white/20 transition-colors">
+            <span className="mt-0.5 w-7 h-7 rounded-lg border flex items-center justify-center shrink-0" style={{
+              background: light ? 'rgba(124,58,237,0.12)' : 'rgba(139,92,246,0.15)',
+              borderColor: light ? 'rgba(124,58,237,0.35)' : 'rgba(139,92,246,0.30)',
+            }}>
+              <Bell className="w-3.5 h-3.5" style={{ color: light ? '#6d28d9' : '#c4b5fd' }} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[11px] font-semibold text-white/90">New notification</span>
+              <span className="block text-xs text-white/60 leading-snug">{toast.message}</span>
+            </span>
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
 function TopBar() {
   const { theme, setTheme, setPaletteOpen, setQuickAddOpen, filters, setFilters, view, compact, setCompact, exportJSON, importJSON, resetDemo, projects, syncStatus, currentMember, onSignOut } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1298,6 +1477,7 @@ function TopBar() {
             className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-white text-black text-xs font-semibold hover:bg-white/90 transition-colors">
             <Plus className="w-3.5 h-3.5" />New<kbd className="hidden sm:inline text-[9px] text-black/50 bg-black/10 rounded px-1 py-0.5">N</kbd>
           </button>
+          <NotificationBell />
           <div className="relative">
             <IconButton icon={Settings} label="Settings" onClick={() => setMenuOpen(o => !o)} />
             {menuOpen && (

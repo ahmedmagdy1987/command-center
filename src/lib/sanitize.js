@@ -111,3 +111,22 @@ export const sanitizeTask = (raw) => {
     order: typeof t.order === 'number' ? t.order : Date.now(),
   };
 };
+
+/* =================================================================================
+   NOTIFICATIONS
+================================================================================= */
+/** Convert a DB-shaped notification (snake_case columns) to app shape (camelCase) */
+export const fromDbNotification = (row) => {
+  if (!row || typeof row !== 'object') return null;
+  return {
+    id: row.id,
+    recipientId: row.recipient_id,
+    actorId: row.actor_id,
+    taskId: row.task_id,
+    type: row.type,
+    title: row.title,
+    message: row.message,
+    read: !!row.read,
+    createdAt: row.created_at,
+  };
+};
