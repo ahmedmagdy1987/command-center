@@ -365,4 +365,34 @@ export const messages = {
       .subscribe();
     return () => supabase.removeChannel(channel);
   },
+
+  /**
+   * Realtime Presence channel for typing/recording indicators on the shared chat.
+   * onOthers receives an array of { name, typing, recording } for OTHER people who are
+   * currently typing or recording. Returns { update(partial), unsubscribe() }.
+   */
+  presence({ userId, name }, onOthers) {
+    let mine = { userId, name: name || 'Someone', typing: false, recording: false };
+    const channel = supabase.channel('chat-presence', { config: { presence: { key: userId } } });
+    const emit = () => {
+      const state = channel.presenceState();
+      const others = [];
+      for (const key of Object.keys(state)) {
+        if (key === userId) continue;
+        const metas = Array.isArray(state[key]) ? state[key] : [];
+        const meta = metas[metas.length - 1] || {};
+        if (meta.typing || meta.recording) others.push({ name: meta.name || 'Someone', typing: !!meta.typing, recording: !!meta.recording });
+      }
+      try { onOthers(others); } catch (e) { console.error('[presence] callback error:', e); }
+    };
+    channel.on('presence', { event: 'sync' }, emit);
+    channel.subscribe((status) => { if (status === 'SUBSCRIBED') channel.track(mine); });
+    return {
+      update: (partial) => {
+        mine = { ...mine, ...partial };
+        if (channel.state === 'joined') channel.track(mine);
+      },
+      unsubscribe: () => { try { channel.untrack(); } catch { /* ignore */ } supabase.removeChannel(channel); },
+    };
+  },
 };

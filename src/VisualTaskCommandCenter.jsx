@@ -7,7 +7,7 @@ import {
   Circle, CheckCircle2, Calendar, Zap, Timer, MoreHorizontal, Edit3, Filter,
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
   Brain, Target, Hourglass, GripVertical, Info, Keyboard, LogOut, Wifi, WifiOff, Loader2,
-  KeyRound, Bell, MessageSquare, Send, Mic, Square
+  KeyRound, Bell, MessageSquare, Send, Mic, Square, Play, Pause
 } from 'lucide-react';
 import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, auth } from './lib/api';
 import { supabase } from './lib/supabase';
@@ -2480,7 +2480,18 @@ export default function App({ session, currentMember, onSignOut }) {
 /* =================================================================================
    TEAM CHAT
 ================================================================================= */
-const fmtDur = (s) => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+const fmtDur = (s) => { s = Number(s); if (!isFinite(s) || s < 0) s = 0; s = Math.round(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+/** Build the subtle "X is typing… / recording…" line from presence state. */
+const presenceLabel = (others) => {
+  if (!others || !others.length) return '';
+  const rec = others.filter(o => o.recording).map(o => o.name);
+  const typ = others.filter(o => o.typing && !o.recording).map(o => o.name);
+  const parts = [];
+  if (rec.length) parts.push(`${rec.join(', ')} ${rec.length > 1 ? 'are' : 'is'} recording…`);
+  if (typ.length) parts.push(`${typ.join(', ')} ${typ.length > 1 ? 'are' : 'is'} typing…`);
+  return parts.join('   ·   ');
+};
 
 const pickAudioMime = () => {
   if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) return '';
@@ -2489,6 +2500,66 @@ const pickAudioMime = () => {
   }
   return '';
 };
+
+// Custom, theme-aware audio player (play/pause, seekable bar, elapsed / total).
+function AudioPlayer({ url, duration }) {
+  const audioRef = useRef(null);
+  const barRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const [current, setCurrent] = useState(0);
+  const [total, setTotal] = useState(() => (isFinite(duration) && duration > 0 ? duration : 0));
+  const [failed, setFailed] = useState(false);
+
+  const toggle = () => {
+    const a = audioRef.current;
+    if (!a) return;
+    if (a.paused) a.play().catch(() => setPlaying(false));  // onPlay/onPause keep state in sync
+    else a.pause();
+  };
+  const seekTo = (ratio) => {
+    const a = audioRef.current;
+    if (!a || !total) return;
+    a.currentTime = Math.min(1, Math.max(0, ratio)) * total;
+    setCurrent(a.currentTime);
+  };
+  const onBarClick = (e) => {
+    const bar = barRef.current;
+    if (!bar) return;
+    const rect = bar.getBoundingClientRect();
+    seekTo((e.clientX - rect.left) / rect.width);
+  };
+  const onBarKey = (e) => {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); seekTo((current - 5) / (total || 1)); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); seekTo((current + 5) / (total || 1)); }
+    else if (e.key === 'Home') { e.preventDefault(); seekTo(0); }
+    else if (e.key === 'End') { e.preventDefault(); seekTo(1); }
+  };
+  const pct = total ? Math.min(100, (current / total) * 100) : 0;
+
+  if (failed) return <div className="mt-1 text-[11px] text-rose-300/70">Voice note unavailable</div>;
+
+  return (
+    <div className="mt-1 flex items-center gap-2 w-[240px] max-w-full rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5">
+      <audio ref={audioRef} src={url} preload="metadata"
+        onLoadedMetadata={e => { const d = e.currentTarget.duration; if (isFinite(d) && d > 0) setTotal(d); }}
+        onTimeUpdate={e => setCurrent(e.currentTarget.currentTime)}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => { setPlaying(false); setCurrent(0); }}
+        onError={() => setFailed(true)} />
+      <button onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}
+        className="shrink-0 w-7 h-7 rounded-full bg-violet-500/25 hover:bg-violet-500/35 border border-violet-400/30 flex items-center justify-center text-white">
+        {playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 translate-x-px" />}
+      </button>
+      <div ref={barRef} onClick={onBarClick} onKeyDown={onBarKey} role="slider" tabIndex={0}
+        aria-label="Seek" aria-valuemin={0} aria-valuemax={Math.round(total)} aria-valuenow={Math.round(current)}
+        className="flex-1 h-1.5 rounded-full bg-white/10 cursor-pointer relative overflow-hidden focus:outline-none focus:ring-2 focus:ring-violet-400/40">
+        <div className="absolute inset-y-0 left-0 rounded-full bg-violet-400" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="shrink-0 text-[10px] tabular-nums text-white/45">{fmtDur(current)}/{fmtDur(total)}</span>
+    </div>
+  );
+}
 
 function VoiceNote({ path, duration }) {
   const [url, setUrl] = useState(null);
@@ -2499,18 +2570,18 @@ function VoiceNote({ path, duration }) {
     return () => { on = false; };
   }, [path]);
   if (failed) return <div className="mt-1 text-[11px] text-rose-300/70">Voice note unavailable</div>;
-  if (!url) return <div className="mt-1 text-[11px] text-white/40">Loading audio…</div>;
-  return (
-    <div className="mt-1 flex items-center gap-2">
-      <audio controls preload="none" src={url} className="h-8 max-w-[240px]" />
-      {duration ? <span className="text-[10px] text-white/35 shrink-0">{fmtDur(duration)}</span> : null}
+  if (!url) return (
+    <div className="mt-1 inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-[11px] text-white/40">
+      <Loader2 className="w-3 h-3 animate-spin" />Loading…
     </div>
   );
+  return <AudioPlayer url={url} duration={duration} />;
 }
 
 function ChatView() {
-  const { session, markChatRead } = useApp();
+  const { session, markChatRead, currentMember } = useApp();
   const userId = session?.user?.id;
+  const myName = currentMember?.display_name || currentMember?.email || 'You';
   const [items, setItems] = useState([]);
   const [people, setPeople] = useState({});
   const [text, setText] = useState('');
@@ -2519,6 +2590,7 @@ function ChatView() {
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [micError, setMicError] = useState('');
+  const [others, setOthers] = useState([]);
   const scrollRef = useRef(null);
   const mrRef = useRef(null);
   const chunksRef = useRef([]);
@@ -2526,6 +2598,8 @@ function ChatView() {
   const timerRef = useRef(null);
   const startRef = useRef(0);
   const cancelRef = useRef(false);
+  const presenceRef = useRef(null);
+  const typingTimerRef = useRef(null);
 
   // Sender names from members.
   useEffect(() => {
@@ -2556,8 +2630,27 @@ function ChatView() {
   // Stop any in-flight recording on unmount.
   useEffect(() => () => {
     clearInterval(timerRef.current);
+    clearTimeout(typingTimerRef.current);
     streamRef.current?.getTracks().forEach(t => t.stop());
   }, []);
+
+  // Realtime presence: who is typing / recording on the channel.
+  useEffect(() => {
+    if (!userId) return;
+    const handle = messagesApi.presence({ userId, name: myName }, setOthers);
+    presenceRef.current = handle;
+    return () => { handle.unsubscribe(); presenceRef.current = null; };
+  }, [userId, myName]);
+
+  const signalTyping = () => {
+    presenceRef.current?.update({ typing: true });
+    clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = setTimeout(() => presenceRef.current?.update({ typing: false }), 2500);
+  };
+  const stopTyping = () => {
+    clearTimeout(typingTimerRef.current);
+    presenceRef.current?.update({ typing: false });
+  };
 
   const nameOf = (id) => (id === userId ? 'You' : (people[id]?.display_name || people[id]?.email || 'Someone'));
 
@@ -2565,6 +2658,7 @@ function ChatView() {
     const body = text.trim();
     if (!body || sending) return;
     setText('');
+    stopTyping();
     try {
       const created = await messagesApi.sendText(body);
       setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
@@ -2606,6 +2700,7 @@ function ChatView() {
       mr.start();
       setRecording(true);
       setSeconds(0);
+      presenceRef.current?.update({ recording: true, typing: false });
       timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
     } catch (e) {
       console.error('Mic error:', e);
@@ -2617,6 +2712,7 @@ function ChatView() {
     cancelRef.current = cancelled;
     setRecording(false);
     clearInterval(timerRef.current);
+    presenceRef.current?.update({ recording: false });
     const mr = mrRef.current;
     if (mr && mr.state !== 'inactive') mr.stop();
   };
@@ -2628,38 +2724,74 @@ function ChatView() {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-9rem)] rounded-2xl border border-white/10 bg-[#0a0b11] overflow-hidden">
+    <div className="cc-chat flex flex-col h-[calc(100dvh-9rem)] rounded-2xl border border-white/10 bg-[#0a0b11] overflow-hidden">
+      <style>{`
+        [data-theme="light"] .cc-chat .bg-violet-500\\/20 { background: #ede9fe !important; }
+        [data-theme="light"] .cc-chat .border-violet-500\\/25 { border-color: #c4b5fd !important; }
+        [data-theme="light"] .cc-chat .bg-violet-500\\/25 { background: rgba(124,58,237,0.16) !important; }
+        [data-theme="light"] .cc-chat .border-violet-400\\/30 { border-color: rgba(124,58,237,0.4) !important; }
+        [data-theme="light"] .cc-chat .bg-violet-500\\/10 { background: #f3e8ff !important; }
+        [data-theme="light"] .cc-chat .border-violet-500\\/20 { border-color: #e9d5ff !important; }
+        [data-theme="light"] .cc-chat .text-violet-300\\/70 { color: #7c3aed !important; }
+        [data-theme="light"] .cc-chat .bg-violet-400 { background: #7c3aed !important; }
+        [data-theme="light"] .cc-chat .bg-violet-400\\/70 { background: #7c3aed !important; }
+        [data-theme="light"] .cc-chat .bg-white\\/\\[0\\.05\\] { background: rgba(0,0,0,0.06) !important; }
+      `}</style>
       <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2 shrink-0">
         <MessageSquare className="w-4 h-4 text-white/50" />
         <div className="text-sm font-semibold text-white/90">Team chat</div>
         <div className="text-[10px] text-white/35">Shared workspace channel</div>
       </div>
 
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-4">
         {loading ? (
           <div className="py-6 text-center text-[11px] text-white/40">Loading…</div>
         ) : items.length === 0 ? (
-          <div className="py-10 text-center text-[12px] text-white/40">No messages yet — say hello 👋</div>
-        ) : items.map(m => {
+          <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-10">
+            <div className="w-12 h-12 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
+              <MessageSquare className="w-5 h-5 text-violet-300/70" />
+            </div>
+            <div className="text-sm font-medium text-white/70">No messages yet</div>
+            <div className="text-[12px] text-white/40">Start the conversation with your team 👋</div>
+          </div>
+        ) : items.map((m, i) => {
+          const prev = items[i - 1];
           const mine = m.senderId === userId;
+          const firstOfGroup = !prev || prev.senderId !== m.senderId || (new Date(m.createdAt) - new Date(prev.createdAt) > 5 * 60 * 1000);
           return (
-            <div key={m.id} className="group">
-              <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-xs font-medium text-white/80">{nameOf(m.senderId)}</span>
-                <span className="text-[10px] text-white/35">{timeAgo(m.createdAt)}</span>
+            <div key={m.id} className={cx('flex flex-col', mine ? 'items-end' : 'items-start', firstOfGroup ? 'mt-3 first:mt-0' : 'mt-0.5')}>
+              {firstOfGroup && (
+                <div className="flex items-center gap-2 mb-1 px-1">
+                  <span className="text-[11px] font-medium text-white/70">{nameOf(m.senderId)}</span>
+                  <span className="text-[10px] text-white/35">{timeAgo(m.createdAt)}</span>
+                </div>
+              )}
+              <div className={cx('group relative max-w-[80%] rounded-2xl px-3 py-2',
+                mine ? 'bg-violet-500/20 border border-violet-500/25 rounded-tr-md' : 'bg-white/[0.05] border border-white/10 rounded-tl-md')}>
+                {m.body && <div className="text-sm text-white/85 leading-relaxed whitespace-pre-wrap break-words">{m.body}</div>}
+                {m.audioPath && <VoiceNote path={m.audioPath} duration={m.audioDuration} />}
                 {mine && (
                   <button onClick={() => remove(m)} title="Delete"
-                    className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-white/30 hover:text-rose-300">
-                    <Trash2 className="w-3.5 h-3.5" />
+                    className="absolute -top-2 -left-2 opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 rounded-full bg-[#0a0b11] border border-white/10 flex items-center justify-center text-white/40 hover:text-rose-300">
+                    <Trash2 className="w-2.5 h-2.5" />
                   </button>
                 )}
               </div>
-              {m.body && <div className="text-sm text-white/80 leading-relaxed whitespace-pre-wrap break-words">{m.body}</div>}
-              {m.audioPath && <VoiceNote path={m.audioPath} duration={m.audioDuration} />}
             </div>
           );
         })}
       </div>
+
+      {presenceLabel(others) && (
+        <div className="px-4 py-1.5 text-[11px] text-white/45 border-t border-white/5 shrink-0 flex items-center gap-1.5">
+          <span className="flex gap-0.5">
+            <span className="w-1 h-1 rounded-full bg-violet-400/70 animate-bounce" style={{ animationDelay: '0ms' }} />
+            <span className="w-1 h-1 rounded-full bg-violet-400/70 animate-bounce" style={{ animationDelay: '150ms' }} />
+            <span className="w-1 h-1 rounded-full bg-violet-400/70 animate-bounce" style={{ animationDelay: '300ms' }} />
+          </span>
+          {presenceLabel(others)}
+        </div>
+      )}
 
       {micError && <div className="px-4 py-1.5 text-[11px] text-rose-300/80 border-t border-white/5 shrink-0">{micError}</div>}
 
@@ -2678,7 +2810,10 @@ function ChatView() {
           </div>
         ) : (
           <div className="flex items-end gap-2">
-            <textarea value={text} onChange={e => setText(e.target.value)} rows={2}
+            <textarea value={text}
+              onChange={e => { setText(e.target.value); signalTyping(); }}
+              onBlur={stopTyping}
+              rows={2}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); } }}
               placeholder="Message the workspace…  (Enter to send, Shift+Enter for a new line)"
               className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none" />
