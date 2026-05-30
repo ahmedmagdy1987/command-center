@@ -48,11 +48,28 @@ export const members = {
 };
 
 /* =================================================================================
-   PROJECTS
+   WORKSPACES (multi-tenancy). RLS (workspaces_select_member) scopes selects to the
+   workspaces the caller is a member of.
+================================================================================= */
+export const workspaces = {
+  /** The workspaces the current user belongs to, oldest first. */
+  async listMine() {
+    const { data, error } = await supabase
+      .from('workspaces').select('id,name,created_at')
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  },
+};
+
+/* =================================================================================
+   PROJECTS — scoped to a workspace.
 ================================================================================= */
 export const projects = {
-  async list() {
-    const { data, error } = await supabase.from('projects').select('*').order('name');
+  async list(workspaceId) {
+    let q = supabase.from('projects').select('*').order('name');
+    if (workspaceId) q = q.eq('workspace_id', workspaceId);
+    const { data, error } = await q;
     if (error) throw error;
     return data || [];
   },
@@ -62,8 +79,10 @@ export const projects = {
    TASKS
 ================================================================================= */
 export const tasks = {
-  async list() {
-    const { data, error } = await supabase.from('tasks').select('*').order('task_order', { ascending: false });
+  async list(workspaceId) {
+    let q = supabase.from('tasks').select('*').order('task_order', { ascending: false });
+    if (workspaceId) q = q.eq('workspace_id', workspaceId);
+    const { data, error } = await q;
     if (error) throw error;
     return (data || []).map(fromDbTask);
   },
@@ -75,11 +94,13 @@ export const tasks = {
     return fromDbTask(data);
   },
 
-  async create(partial) {
+  async create(partial, workspaceId) {
     const session = await auth.getSession();
     if (!session) throw new Error('Not authenticated');
     const sanitized = sanitizeTask({ ...partial, createdBy: session.user.id });
-    const { data, error } = await supabase.from('tasks').insert(toDbTask(sanitized)).select().single();
+    const row = toDbTask(sanitized);
+    if (workspaceId) row.workspace_id = workspaceId;   // explicit workspace; else the DB trigger fills it
+    const { data, error } = await supabase.from('tasks').insert(row).select().single();
     if (error) throw error;
     return fromDbTask(data);
   },
@@ -108,10 +129,14 @@ export const tasks = {
     if (error) throw error;
   },
 
-  async bulkInsert(taskList) {
+  async bulkInsert(taskList, workspaceId) {
     const session = await auth.getSession();
     if (!session) throw new Error('Not authenticated');
-    const rows = taskList.map(t => toDbTask(sanitizeTask({ ...t, createdBy: session.user.id })));
+    const rows = taskList.map(t => {
+      const row = toDbTask(sanitizeTask({ ...t, createdBy: session.user.id }));
+      if (workspaceId) row.workspace_id = workspaceId;
+      return row;
+    });
     const { data, error } = await supabase.from('tasks').insert(rows).select();
     if (error) throw error;
     return (data || []).map(fromDbTask);
@@ -126,9 +151,13 @@ export const tasks = {
    * Subscribe to real-time changes. Returns an unsubscribe function.
    * cb is called with { type: 'INSERT' | 'UPDATE' | 'DELETE', task }
    */
-  subscribe(cb) {
+  // NOTE: no server-side workspace_id filter — tasks is REPLICA IDENTITY DEFAULT, so a
+  // workspace_id filter would drop DELETE events (payload.old carries only the PK). The caller
+  // filters INSERT/UPDATE by task.workspaceId; DELETE is by id (a no-op if the row isn't in the
+  // current-workspace list). workspaceId only namespaces the channel so a switch re-subscribes.
+  subscribe(cb, workspaceId) {
     const channel = supabase
-      .channel('tasks-changes')
+      .channel(`tasks-changes${workspaceId ? `-${workspaceId}` : ''}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
         const type = payload.eventType;
         if (type === 'DELETE') {
@@ -150,12 +179,14 @@ export const tasks = {
 ================================================================================= */
 export const notifications = {
   /** List the current user's notifications, newest first. RLS scopes to the recipient. */
-  async list(limit = 50) {
-    const { data, error } = await supabase
+  async list(limit = 50, workspaceId) {
+    let q = supabase
       .from('notifications')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(limit);
+    if (workspaceId) q = q.eq('workspace_id', workspaceId);   // recipient scope still enforced by RLS
+    const { data, error } = await q;
     if (error) throw error;
     return (data || []).map(fromDbNotification);
   },
@@ -173,14 +204,16 @@ export const notifications = {
   },
 
   /** Mark all of the current user's unread notifications read. RLS scopes to the recipient. */
-  async markAllRead() {
+  async markAllRead(workspaceId) {
     const session = await auth.getSession();
     if (!session) throw new Error('Not authenticated');
-    const { error } = await supabase
+    let q = supabase
       .from('notifications')
       .update({ read: true })
       .eq('recipient_id', session.user.id)
       .eq('read', false);
+    if (workspaceId) q = q.eq('workspace_id', workspaceId);
+    const { error } = await q;
     if (error) throw error;
   },
 
@@ -188,16 +221,18 @@ export const notifications = {
    * Subscribe to new notifications for a recipient. Returns an unsubscribe function.
    * cb is called with the app-shaped notification for each INSERT.
    */
-  subscribe(recipientId, cb) {
+  subscribe(recipientId, cb, workspaceId) {
     const channel = supabase
-      .channel(`notifications-changes-${recipientId}`)
+      .channel(`notifications-changes-${recipientId}${workspaceId ? `-${workspaceId}` : ''}`)
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
         table: 'notifications',
-        filter: `recipient_id=eq.${recipientId}`,
+        filter: `recipient_id=eq.${recipientId}`,   // server-side recipient scope (security gate) kept
       }, (payload) => {
-        cb(fromDbNotification(payload.new));
+        const n = fromDbNotification(payload.new);
+        if (workspaceId && n.workspaceId && n.workspaceId !== workspaceId) return;   // + current-workspace scope on top
+        cb(n);
       })
       .subscribe((status, err) => {
         // Surface realtime health so live delivery can be verified (should reach SUBSCRIBED).
@@ -229,12 +264,14 @@ export const comments = {
   },
 
   /** Add a comment to a task (author = current user; enforced by RLS). */
-  async add(taskId, body) {
+  async add(taskId, body, workspaceId) {
     const session = await auth.getSession();
     if (!session) throw new Error('Not authenticated');
+    const row = { task_id: taskId, author_id: session.user.id, body };
+    if (workspaceId) row.workspace_id = workspaceId;   // must equal the task's workspace (RLS WITH CHECK)
     const { data, error } = await supabase
       .from('comments')
-      .insert({ task_id: taskId, author_id: session.user.id, body })
+      .insert(row)
       .select().single();
     if (error) throw error;
     return fromDbComment(data);
@@ -281,18 +318,21 @@ export const comments = {
 ================================================================================= */
 export const messages = {
   /** List the channel, oldest first. */
-  async list(limit = 200) {
-    const { data, error } = await supabase
+  async list(limit = 200, workspaceId) {
+    let q = supabase
       .from('messages').select('*')
       .order('created_at', { ascending: true })
       .limit(limit);
+    if (workspaceId) q = q.eq('workspace_id', workspaceId);
+    const { data, error } = await q;
     if (error) throw error;
     return (data || []).map(fromDbMessage);
   },
 
   /** Count messages newer than `since` (ISO) not sent by `exceptSenderId` — for the unread badge. */
-  async unreadCount(since, exceptSenderId) {
+  async unreadCount(since, exceptSenderId, workspaceId) {
     let q = supabase.from('messages').select('*', { count: 'exact', head: true });
+    if (workspaceId) q = q.eq('workspace_id', workspaceId);
     if (since) q = q.gt('created_at', since);
     if (exceptSenderId) q = q.neq('sender_id', exceptSenderId);
     const { count, error } = await q;
@@ -300,19 +340,21 @@ export const messages = {
     return count || 0;
   },
 
-  async sendText(body) {
+  async sendText(body, workspaceId) {
     const session = await auth.getSession();
     if (!session) throw new Error('Not authenticated');
+    const row = { sender_id: session.user.id, body };
+    if (workspaceId) row.workspace_id = workspaceId;
     const { data, error } = await supabase
       .from('messages')
-      .insert({ sender_id: session.user.id, body })
+      .insert(row)
       .select().single();
     if (error) throw error;
     return fromDbMessage(data);
   },
 
   /** Upload a recorded audio blob to the bucket, then insert the message row. */
-  async sendVoice(blob, durationSeconds, contentType) {
+  async sendVoice(blob, durationSeconds, contentType, workspaceId) {
     const session = await auth.getSession();
     if (!session) throw new Error('Not authenticated');
     // Normalize to a base audio type that exactly matches the bucket's allowlist.
@@ -321,9 +363,11 @@ export const messages = {
     const path = `${session.user.id}/${uid()}.${ext}`;
     const { error: upErr } = await supabase.storage.from('voice-notes').upload(path, blob, { contentType: ct, upsert: false });
     if (upErr) throw upErr;
+    const row = { sender_id: session.user.id, audio_path: path, audio_duration_seconds: Math.max(1, Math.round(durationSeconds || 0)) };
+    if (workspaceId) row.workspace_id = workspaceId;
     const { data, error } = await supabase
       .from('messages')
-      .insert({ sender_id: session.user.id, audio_path: path, audio_duration_seconds: Math.max(1, Math.round(durationSeconds || 0)) })
+      .insert(row)
       .select().single();
     if (error) {
       supabase.storage.from('voice-notes').remove([path]).catch(() => {}); // best-effort cleanup of the orphan object
@@ -357,11 +401,15 @@ export const messages = {
   },
 
   /** Subscribe to realtime INSERT/UPDATE/DELETE. cb -> { type, message }. Returns unsubscribe. */
-  subscribe(cb, channelName = 'messages-changes') {
-    const channel = supabase.channel(channelName)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (p) => cb({ type: 'INSERT', message: fromDbMessage(p.new) }))
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (p) => cb({ type: 'UPDATE', message: fromDbMessage(p.new) }))
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (p) => cb({ type: 'DELETE', message: fromDbMessage(p.old) }))
+  // messages is REPLICA IDENTITY FULL, so a server-side workspace_id filter is safe for
+  // INSERT/UPDATE/DELETE alike. Channel name is namespaced per workspace so a switch re-subscribes.
+  subscribe(cb, channelName = 'messages-changes', workspaceId) {
+    const base = { schema: 'public', table: 'messages' };
+    const opts = (event) => (workspaceId ? { event, ...base, filter: `workspace_id=eq.${workspaceId}` } : { event, ...base });
+    const channel = supabase.channel(`${channelName}${workspaceId ? `-${workspaceId}` : ''}`)
+      .on('postgres_changes', opts('INSERT'), (p) => cb({ type: 'INSERT', message: fromDbMessage(p.new) }))
+      .on('postgres_changes', opts('UPDATE'), (p) => cb({ type: 'UPDATE', message: fromDbMessage(p.new) }))
+      .on('postgres_changes', opts('DELETE'), (p) => cb({ type: 'DELETE', message: fromDbMessage(p.old) }))
       .subscribe();
     return () => supabase.removeChannel(channel);
   },

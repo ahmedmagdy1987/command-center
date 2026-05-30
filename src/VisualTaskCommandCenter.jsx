@@ -9,7 +9,7 @@ import {
   Brain, Target, Hourglass, GripVertical, Info, Keyboard, LogOut, Wifi, WifiOff, Loader2,
   KeyRound, Bell, MessageSquare, Send, Mic, Square, Play, Pause
 } from 'lucide-react';
-import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, auth } from './lib/api';
+import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, workspaces as workspacesApi, auth } from './lib/api';
 import { supabase } from './lib/supabase';
 import { sanitizeTask, uid, nowISO } from './lib/sanitize';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
@@ -161,13 +161,23 @@ const scoreRationale = (task) => {
 const AppCtx = createContext(null);
 const useApp = () => useContext(AppCtx);
 
+// Per-user persistence of the chosen workspace (survives reload).
+const wsStorageKey = (userId) => `cc:currentWorkspace:${userId || 'anon'}`;
+const readStoredWorkspace = (userId) => { try { return localStorage.getItem(wsStorageKey(userId)); } catch { return null; } };
+const writeStoredWorkspace = (userId, id) => { try { localStorage.setItem(wsStorageKey(userId), id); } catch { /* ignore */ } };
+
 function AppProvider({ children, session, currentMember, onSignOut }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const userId = session?.user?.id;
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState(DEFAULT_PROJECTS);
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState('connecting');
+
+  // Multi-tenancy: the workspaces the user belongs to + which one is currently shown.
+  const [workspaces, setWorkspaces] = useState([]);
+  const [currentWorkspaceId, setCurrentWorkspaceId] = useState(null);
 
   const [theme, setTheme] = useState(() => {
     const t = themeStore.get(THEME_KEY) || 'dark';
@@ -177,7 +187,11 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
 
   // View is driven by the URL (react-router) so each view has a shareable, bookmarkable route.
   const view = PATH_TO_VIEW[location.pathname] ?? 'dashboard';
-  const setView = useCallback((v) => navigate(VIEW_TO_PATH[v] ?? '/'), [navigate]);
+  // Keep the current workspace (?ws=) on every view navigation so it survives reload + navigation.
+  const setView = useCallback((v) => {
+    const path = VIEW_TO_PATH[v] ?? '/';
+    navigate(currentWorkspaceId ? `${path}?ws=${currentWorkspaceId}` : path);
+  }, [navigate, currentWorkspaceId]);
   const [filters, setFilters] = useState({ owner: 'all', privacy: 'all', project: 'all', search: '' });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
@@ -195,11 +209,46 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   useEffect(() => { themeStore.set(THEME_KEY, theme); }, [theme]);
   useLayoutEffect(() => { document.documentElement.setAttribute('data-theme', theme); }, [theme]);
 
+  // Resolve the current workspace BEFORE any data query/subscription. Precedence:
+  // ?ws= (only if the user is a member) -> localStorage (only if still valid) -> first workspace.
+  // An invalid/stale choice silently falls back to the first valid one and corrects URL + storage,
+  // so we never fire a query for a workspace the user can't access.
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        const [t, p] = await Promise.all([tasksApi.list(), projectsApi.list()]);
+        const ws = await workspacesApi.listMine();
+        if (!mounted) return;
+        setWorkspaces(ws);
+        if (!ws.length) { setCurrentWorkspaceId(null); setLoading(false); return; }   // no workspace -> placeholder
+        const ids = new Set(ws.map(w => w.id));
+        const urlWs = new URLSearchParams(window.location.search).get('ws');
+        const stored = readStoredWorkspace(userId);
+        const chosen = (urlWs && ids.has(urlWs)) ? urlWs
+                     : (stored && ids.has(stored)) ? stored
+                     : ws[0].id;
+        setCurrentWorkspaceId(chosen);
+        writeStoredWorkspace(userId, chosen);
+        navigate(`${window.location.pathname}?ws=${chosen}`, { replace: true });  // normalize/correct ?ws=
+      } catch (err) {
+        console.error('Failed to resolve workspace:', err);
+        setSyncStatus('offline');
+        setLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, [userId, navigate]);
+
+  // Load the current workspace's data once it's resolved; re-runs (clear + refetch) on switch.
+  useEffect(() => {
+    if (!currentWorkspaceId) return;
+    let mounted = true;
+    (async () => {
+      setLoading(true);
+      setTasks([]);                  // clear so a switch doesn't flash the previous workspace's data
+      setProjects(DEFAULT_PROJECTS);
+      try {
+        const [t, p] = await Promise.all([tasksApi.list(currentWorkspaceId), projectsApi.list(currentWorkspaceId)]);
         if (!mounted) return;
         setTasks(t);
         setProjects(p.length ? p : DEFAULT_PROJECTS);
@@ -211,41 +260,44 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       }
     })();
     return () => { mounted = false; };
-  }, []);
+  }, [currentWorkspaceId]);
 
   useEffect(() => {
+    if (!currentWorkspaceId) return;
     setSyncStatus('connecting');
     const unsub = tasksApi.subscribe(({ type, task }) => {
       setSyncStatus('live');
-      if (type === 'INSERT') {
+      if (type === 'DELETE') {
+        setTasks(prev => prev.filter(t => t.id !== task.id));   // id-only; no-op if not in this workspace's list
+      } else if (task.workspaceId && task.workspaceId !== currentWorkspaceId) {
+        // ignore INSERT/UPDATE for other workspaces (one subscription sees all the user's rows via RLS)
+      } else if (type === 'INSERT') {
         setTasks(prev => prev.some(t => t.id === task.id) ? prev : [task, ...prev]);
       } else if (type === 'UPDATE') {
         setTasks(prev => prev.map(t => t.id === task.id ? task : t));
-      } else if (type === 'DELETE') {
-        setTasks(prev => prev.filter(t => t.id !== task.id));
       }
-    });
+    }, currentWorkspaceId);
     const timer = setTimeout(() => setSyncStatus(s => s === 'connecting' ? 'live' : s), 1000);
     return () => { unsub(); clearTimeout(timer); };
-  }, []);
+  }, [currentWorkspaceId]);
 
   // Live unread badge for chat: count messages newer than the user's last-seen (localStorage)
   // and bump it on new messages from others while they're not viewing the channel.
   useEffect(() => {
     const me = session?.user?.id;
-    if (!me) return;
+    if (!me || !currentWorkspaceId) return;
     let on = true;
     let lastSeen = null;
     try { lastSeen = localStorage.getItem('cc_chat_last_seen'); } catch { /* ignore */ }
-    messagesApi.unreadCount(lastSeen, me).then(n => { if (on) setChatUnread(n); }).catch(() => {});
+    messagesApi.unreadCount(lastSeen, me, currentWorkspaceId).then(n => { if (on) setChatUnread(n); }).catch(() => {});
     const unsub = messagesApi.subscribe(({ type, message }) => {
       if (type !== 'INSERT' || !message || !on) return;
       if (message.senderId === me) return;
       if (chatViewRef.current === 'chat') return;   // viewing -> ChatView keeps it read
       setChatUnread(n => n + 1);
-    }, 'messages-unread');
+    }, 'messages-unread', currentWorkspaceId);
     return () => { on = false; unsub(); };
-  }, [session?.user?.id]);
+  }, [session?.user?.id, currentWorkspaceId]);
 
   useEffect(() => {
     const onOnline = () => setSyncStatus('live');
@@ -274,25 +326,28 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   }, []);
 
   const addTask = useCallback(async (partial) => {
-    const optimistic = sanitizeTask({
-      id: uid(),
-      title: 'New task',
-      owner: 'me',
-      privacy: 'workspace',
-      project: 'other',
-      status: 'inbox',
-      priority: 'medium',
-      effort: 'medium',
-      estimatedMinutes: 30,
-      createdAt: nowISO(),
-      updatedAt: nowISO(),
-      order: Date.now(),
-      createdBy: session?.user?.id,
-      ...partial,
-    });
+    const optimistic = {
+      ...sanitizeTask({
+        id: uid(),
+        title: 'New task',
+        owner: 'me',
+        privacy: 'workspace',
+        project: 'other',
+        status: 'inbox',
+        priority: 'medium',
+        effort: 'medium',
+        estimatedMinutes: 30,
+        createdAt: nowISO(),
+        updatedAt: nowISO(),
+        order: Date.now(),
+        createdBy: session?.user?.id,
+        ...partial,
+      }),
+      workspaceId: currentWorkspaceId,
+    };
     setTasks(prev => [optimistic, ...prev]);
     try {
-      const real = await tasksApi.create(optimistic);
+      const real = await tasksApi.create(optimistic, currentWorkspaceId);
       setTasks(prev => prev.map(t => t.id === optimistic.id ? real : t));
       return real;
     } catch (err) {
@@ -300,7 +355,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       setTasks(prev => prev.filter(t => t.id !== optimistic.id));
       alert('Failed to add task: ' + err.message);
     }
-  }, [session]);
+  }, [session, currentWorkspaceId]);
 
   const updateTask = useCallback(async (id, patch) => {
     setTasks(prev => prev.map(t => t.id === id ? {
@@ -333,13 +388,13 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     const copy = { ...original, id: uid(), title: original.title + ' (copy)', createdAt: nowISO(), updatedAt: nowISO(), completedAt: null, status: 'inbox' };
     setTasks(prev => [copy, ...prev]);
     try {
-      const real = await tasksApi.create(copy);
+      const real = await tasksApi.create(copy, currentWorkspaceId);
       setTasks(prev => prev.map(t => t.id === copy.id ? real : t));
     } catch (err) {
       console.error('Duplicate failed:', err);
       setTasks(prev => prev.filter(t => t.id !== copy.id));
     }
-  }, [tasks]);
+  }, [tasks, currentWorkspaceId]);
 
   const toggleSubtask = useCallback(async (taskId, subId) => {
     const task = tasks.find(t => t.id === taskId);
@@ -371,7 +426,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
         const d = JSON.parse(e.target.result);
         if (Array.isArray(d.tasks) && d.tasks.length) {
           if (!confirm(`Import ${d.tasks.length} tasks? They will be added to existing tasks.`)) return;
-          const created = await tasksApi.bulkInsert(d.tasks);
+          const created = await tasksApi.bulkInsert(d.tasks, currentWorkspaceId);
           setTasks(prev => [...created, ...prev]);
         }
       } catch (err) {
@@ -381,11 +436,19 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     reader.readAsText(file);
   };
 
+  const switchWorkspace = useCallback((id) => {
+    if (id === currentWorkspaceId || !workspaces.some(w => w.id === id)) return;
+    setCurrentWorkspaceId(id);
+    writeStoredWorkspace(userId, id);
+    navigate(`${window.location.pathname}?ws=${id}`, { replace: true });
+  }, [currentWorkspaceId, workspaces, userId, navigate]);
+
   const isMember = currentMember?.role === 'member';
   const value = {
     tasks, projects, theme, view, filters, compact, draggedId,
     paletteOpen, quickAddOpen, editingTask,
     loading, syncStatus, session, currentMember, isMember, onSignOut,
+    workspaces, currentWorkspaceId, switchWorkspace,
     setTheme, setView, setFilters, setCompact, setDraggedId,
     setPaletteOpen, setQuickAddOpen, setEditingTask,
     addTask, updateTask, deleteTask, duplicateTask, toggleSubtask,
@@ -689,7 +752,7 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showOwner 
    TASK MODAL
 ================================================================================= */
 function TaskComments({ taskId }) {
-  const { session } = useApp();
+  const { session, currentWorkspaceId } = useApp();
   const userId = session?.user?.id;
   const [items, setItems] = useState([]);
   const [people, setPeople] = useState({});
@@ -738,7 +801,7 @@ function TaskComments({ taskId }) {
     if (!body) return;
     setText('');
     try {
-      const created = await commentsApi.add(taskId, body);
+      const created = await commentsApi.add(taskId, body, currentWorkspaceId);
       setItems(prev => prev.some(c => c.id === created.id) ? prev : [...prev, created]);
     } catch (err) {
       console.error('Failed to add comment:', err);
@@ -1474,7 +1537,7 @@ function NotificationToast({ n, light, onOpen, onDismiss }) {
 }
 
 function NotificationBell() {
-  const { session, tasks, setEditingTask, theme } = useApp();
+  const { session, tasks, setEditingTask, theme, currentWorkspaceId } = useApp();
   const userId = session?.user?.id;
   const light = theme === 'light';
   const [open, setOpen] = useState(false);
@@ -1487,10 +1550,10 @@ function NotificationBell() {
 
   // Initial load of the current user's notifications (RLS scopes to recipient).
   useEffect(() => {
-    if (!userId) { setLoading(false); return; }
+    if (!userId || !currentWorkspaceId) { setLoading(false); return; }
     let mounted = true;
     setLoading(true);
-    notificationsApi.list()
+    notificationsApi.list(50, currentWorkspaceId)
       .then(list => {
         if (!mounted) return;
         // Merge with any realtime items that arrived during the fetch (dedupe by id, newest-first)
@@ -1505,20 +1568,20 @@ function NotificationBell() {
       .catch(err => console.error('Failed to load notifications:', err))
       .finally(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
-  }, [userId]);
+  }, [userId, currentWorkspaceId]);
 
   // Realtime: a new notification for this recipient bumps the badge + raises an in-app toast.
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || !currentWorkspaceId) return;
     let mounted = true;
     const unsub = notificationsApi.subscribe(userId, (n) => {
       if (!n || !mounted) return;
       setItems(prev => prev.some(x => x.id === n.id) ? prev : [n, ...prev]);
       // Newest toast on top; cap the stack so it never runs off-screen. Each toast self-dismisses.
       setToasts(prev => prev.some(t => t.id === n.id) ? prev : [n, ...prev].slice(0, 3));
-    });
+    }, currentWorkspaceId);
     return () => { mounted = false; unsub(); };
-  }, [userId]);
+  }, [userId, currentWorkspaceId]);
 
   // Open the task referenced by a notification — from local state if present,
   // otherwise fetch the single row and map it via fromDbTask (in tasksApi.getById).
@@ -1541,7 +1604,7 @@ function NotificationBell() {
       setItems(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
       notificationsApi.markRead(n.id).catch(err => {
         console.error('markRead failed:', err);
-        notificationsApi.list().then(setItems).catch(() => {}); // reconcile with server on failure
+        notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(() => {}); // reconcile with server on failure
       });
     }
     openTask(n.taskId);
@@ -1551,7 +1614,7 @@ function NotificationBell() {
     if (unreadCount === 0) return;
     setItems(prev => prev.map(x => x.read ? x : { ...x, read: true }));
     try {
-      await notificationsApi.markAllRead();
+      await notificationsApi.markAllRead(currentWorkspaceId);
     } catch (err) {
       console.error('markAllRead failed:', err);
       notificationsApi.list().then(setItems).catch(() => {}); // reconcile with server on failure
@@ -1628,6 +1691,45 @@ function NotificationBell() {
   );
 }
 
+/** Current-workspace label + switcher. Collapses to a static label when there's only one. */
+function WorkspaceSwitcher() {
+  const { workspaces, currentWorkspaceId, switchWorkspace } = useApp();
+  const [open, setOpen] = useState(false);
+  const current = workspaces.find(w => w.id === currentWorkspaceId);
+  if (!current) return null;
+  const single = workspaces.length <= 1;
+  const badgeCls = 'w-4 h-4 rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-[8px] font-bold text-white shrink-0';
+  const initial = (name) => (name || 'W').slice(0, 1).toUpperCase();
+  return (
+    <div className="relative shrink-0">
+      <button onClick={() => !single && setOpen(o => !o)} disabled={single}
+        title={single ? current.name : 'Switch workspace'}
+        className={cx('inline-flex items-center gap-1.5 h-9 px-2.5 rounded-xl border border-white/10 bg-white/[0.03] text-xs transition-colors',
+          single ? 'cursor-default' : 'hover:bg-white/[0.06] cursor-pointer')}>
+        <span className={badgeCls}>{initial(current.name)}</span>
+        <span className="font-medium text-white/90 max-w-[90px] sm:max-w-[140px] truncate">{current.name}</span>
+        {!single && <ChevronDown className="w-3 h-3 text-white/40 shrink-0" />}
+      </button>
+      {open && !single && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-11 z-40 w-56 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1.5">
+            <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-white/35">Workspaces</div>
+            {workspaces.map(w => (
+              <button key={w.id} onClick={() => { switchWorkspace(w.id); setOpen(false); }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/80 hover:bg-white/5 hover:text-white transition-colors">
+                <span className={badgeCls}>{initial(w.name)}</span>
+                <span className="flex-1 truncate text-left">{w.name}</span>
+                {w.id === currentWorkspaceId && <Check className="w-3.5 h-3.5 text-violet-400 shrink-0" />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function TopBar() {
   const { theme, setTheme, setPaletteOpen, setQuickAddOpen, filters, setFilters, view, compact, setCompact, exportJSON, importJSON, resetDemo, projects, syncStatus, currentMember, isMember, onSignOut } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1652,6 +1754,8 @@ function TopBar() {
             <Sparkles className="w-3.5 h-3.5 text-white" />
           </div>
         </div>
+
+        <WorkspaceSwitcher />
 
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40 pointer-events-none" />
@@ -2579,7 +2683,7 @@ function VoiceNote({ path, duration }) {
 }
 
 function ChatView() {
-  const { session, markChatRead, currentMember } = useApp();
+  const { session, markChatRead, currentMember, currentWorkspaceId } = useApp();
   const userId = session?.user?.id;
   const myName = currentMember?.display_name || currentMember?.email || 'You';
   const [items, setItems] = useState([]);
@@ -2608,10 +2712,13 @@ function ChatView() {
     return () => { on = false; };
   }, []);
 
-  // Load + subscribe; mark read while open.
+  // Load + subscribe; mark read while open. Scoped to the current workspace (re-runs on switch).
   useEffect(() => {
+    if (!currentWorkspaceId) return;
     let on = true;
-    messagesApi.list().then(list => { if (on) setItems(list); }).catch(e => console.error('Failed to load messages:', e)).finally(() => { if (on) setLoading(false); });
+    // ChatView remounts on workspace switch (shell shows the loading gate), so items/loading
+    // start fresh — no synchronous clear needed here.
+    messagesApi.list(200, currentWorkspaceId).then(list => { if (on) setItems(list); }).catch(e => console.error('Failed to load messages:', e)).finally(() => { if (on) setLoading(false); });
     markChatRead();
     const unsub = messagesApi.subscribe(({ type, message }) => {
       if (!message || !on) return;
@@ -2621,9 +2728,9 @@ function ChatView() {
         return prev.some(m => m.id === message.id) ? prev : [...prev, message];
       });
       markChatRead();
-    }, 'messages-thread');
+    }, 'messages-thread', currentWorkspaceId);
     return () => { on = false; unsub(); };
-  }, [markChatRead]);
+  }, [markChatRead, currentWorkspaceId]);
 
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }); }, [items.length]);
 
@@ -2660,7 +2767,7 @@ function ChatView() {
     setText('');
     stopTyping();
     try {
-      const created = await messagesApi.sendText(body);
+      const created = await messagesApi.sendText(body, currentWorkspaceId);
       setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
     } catch (e) { console.error('Send failed:', e); setText(body); }
   };
@@ -2690,7 +2797,7 @@ function ChatView() {
         if (cancelRef.current || blob.size === 0 || dur < 0.4) return;
         try {
           setSending(true);
-          const created = await messagesApi.sendVoice(blob, dur, ct);
+          const created = await messagesApi.sendVoice(blob, dur, ct, currentWorkspaceId);
           setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
         } catch (e) { console.error('Voice send failed:', e); setMicError('Failed to send voice note.'); }
         finally { setSending(false); }
@@ -2720,7 +2827,7 @@ function ChatView() {
   const remove = async (m) => {
     setItems(prev => prev.filter(x => x.id !== m.id));
     try { await messagesApi.remove(m); }
-    catch (e) { console.error('Delete failed:', e); messagesApi.list().then(setItems).catch(() => {}); }
+    catch (e) { console.error('Delete failed:', e); messagesApi.list(200, currentWorkspaceId).then(setItems).catch(() => {}); }
   };
 
   return (
@@ -2833,7 +2940,7 @@ function ChatView() {
 }
 
 function AppShell() {
-  const { view, theme, loading } = useApp();
+  const { view, theme, loading, currentWorkspaceId, onSignOut } = useApp();
 
   if (loading) {
     return (
@@ -2846,6 +2953,26 @@ function AppShell() {
             <Sparkles className="w-6 h-6 text-white" />
           </div>
           <div className="text-sm text-white/50">Loading your workspace…</div>
+        </div>
+      </div>
+    );
+  }
+
+  // The user belongs to no workspace — placeholder (no creation UI in this phase; don't crash).
+  if (!currentWorkspaceId) {
+    return (
+      <div className="min-h-screen bg-[#070810] text-white flex items-center justify-center p-6" data-theme={theme}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
+          body { font-family: 'Outfit', sans-serif; background: #070810; }`}</style>
+        <div className="max-w-sm text-center">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center mx-auto mb-4">
+            <FolderKanban className="w-6 h-6 text-white" />
+          </div>
+          <h1 className="text-lg font-semibold text-white mb-1.5">No workspace yet</h1>
+          <p className="text-sm text-white/50 mb-5">You're not a member of any workspace. Ask an owner to invite you and it'll show up here.</p>
+          <button onClick={() => onSignOut?.()} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">
+            <LogOut className="w-3.5 h-3.5" />Sign out
+          </button>
         </div>
       </div>
     );

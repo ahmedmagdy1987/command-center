@@ -19,6 +19,7 @@ export const fromDbTask = (row) => {
   if (!row || typeof row !== 'object') return null;
   return {
     id: row.id,
+    workspaceId: row.workspace_id,
     title: row.title,
     description: row.description || '',
     owner: row.owner,
@@ -122,6 +123,7 @@ export const fromDbNotification = (row) => {
   if (!row || typeof row !== 'object') return null;
   return {
     id: row.id,
+    workspaceId: row.workspace_id,
     recipientId: row.recipient_id,
     actorId: row.actor_id,
     taskId: row.task_id,
@@ -141,6 +143,7 @@ export const fromDbComment = (row) => {
   if (!row || typeof row !== 'object') return null;
   return {
     id: row.id,
+    workspaceId: row.workspace_id,
     taskId: row.task_id,
     authorId: row.author_id,
     body: row.body,
@@ -157,6 +160,7 @@ export const fromDbMessage = (row) => {
   if (!row || typeof row !== 'object') return null;
   return {
     id: row.id,
+    workspaceId: row.workspace_id,
     senderId: row.sender_id,
     body: row.body,
     audioPath: row.audio_path,
