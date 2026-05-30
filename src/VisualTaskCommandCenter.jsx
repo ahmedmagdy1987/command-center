@@ -4,7 +4,7 @@ import {
   LayoutDashboard, KanbanSquare, Grid3x3, FolderKanban, CalendarDays, Lock, UserCog,
   Plus, Search, Command, Settings, Sun, Moon, Download, Upload, RefreshCw, X, Check,
   Clock, AlertCircle, Flag, Tag, Link2, Trash2, Copy, Archive, ChevronRight, ChevronDown,
-  Circle, CheckCircle2, Calendar, Zap, Timer, MoreHorizontal, Edit3, Filter, Eye, EyeOff,
+  Circle, CheckCircle2, Calendar, Zap, Timer, MoreHorizontal, Edit3, Filter,
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
   Brain, Target, Hourglass, GripVertical, Info, Keyboard, LogOut, Wifi, WifiOff, Loader2,
   KeyRound, Bell
@@ -34,6 +34,12 @@ const OWNERS = {
   va: { id: 'va', label: 'VA', accent: 'emerald', hex: '#34d399', soft: 'rgba(52,211,153,0.14)' },
   shared: { id: 'shared', label: 'Shared', accent: 'fuchsia', hex: '#e879f9', soft: 'rgba(232,121,249,0.14)' },
 };
+
+// Role-aware category label. The single VA is the 'member': they see VA-category work as
+// their own ("My Tasks") and the Me category as their "Private" — and never a literal "VA".
+const ownerLabel = (id, isMember) =>
+  isMember ? ({ me: 'Private', va: 'My Tasks', shared: 'Shared' }[id] || OWNERS[id]?.label || id)
+           : (OWNERS[id]?.label || id);
 
 const PRIORITIES = {
   critical: { id: 'critical', label: 'Critical', rank: 4, hex: '#f43f5e', glow: 'rgba(244,63,94,0.35)', bg: 'rgba(244,63,94,0.12)', ring: 'rgba(244,63,94,0.4)' },
@@ -342,10 +348,11 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     reader.readAsText(file);
   };
 
+  const isMember = currentMember?.role === 'member';
   const value = {
     tasks, projects, theme, view, filters, compact, draggedId,
     paletteOpen, quickAddOpen, editingTask,
-    loading, syncStatus, session, currentMember, onSignOut,
+    loading, syncStatus, session, currentMember, isMember, onSignOut,
     setTheme, setView, setFilters, setCompact, setDraggedId,
     setPaletteOpen, setQuickAddOpen, setEditingTask,
     addTask, updateTask, deleteTask, duplicateTask, toggleSubtask,
@@ -647,7 +654,7 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showOwner 
    TASK MODAL
 ================================================================================= */
 function TaskModal() {
-  const { editingTask, setEditingTask, updateTask, deleteTask, duplicateTask, projects, toggleSubtask } = useApp();
+  const { editingTask, setEditingTask, updateTask, deleteTask, duplicateTask, projects, toggleSubtask, isMember } = useApp();
   const t = editingTask;
   const [newSub, setNewSub] = useState('');
   const [recurrenceOpen, setRecurrenceOpen] = useState(false);
@@ -691,8 +698,7 @@ function TaskModal() {
           <div className="flex flex-wrap gap-2">
             <SelectPill label="Status" value={t.status} options={Object.values(STATUSES).map(s => [s.id, s.label])} onChange={v => set({ status: v })} />
             <SelectPill label="Priority" value={t.priority} options={Object.values(PRIORITIES).map(p => [p.id, p.label])} onChange={v => set({ priority: v })} color={priority.hex} />
-            <SelectPill label="Owner" value={t.owner} options={Object.values(OWNERS).map(o => [o.id, o.label])} onChange={v => set({ owner: v })} color={OWNERS[t.owner].hex} />
-            <SelectPill label="Privacy" value={t.privacy} options={[['workspace','Workspace'],['private','Private']]} onChange={v => set({ privacy: v })} />
+            <SelectPill label="Category" value={t.owner} options={Object.values(OWNERS).map(o => [o.id, ownerLabel(o.id, isMember)])} onChange={v => set({ owner: v, privacy: v === 'me' ? 'private' : 'workspace' })} color={OWNERS[t.owner].hex} />
             <SelectPill label="Project" value={t.project} options={projects.map(p => [p.id, p.name])} onChange={v => set({ project: v })} />
             <SelectPill label="Effort" value={t.effort} options={Object.values(EFFORTS).map(e => [e.id, `${e.label} (${e.mins}m)`])} onChange={v => set({ effort: v, estimatedMinutes: EFFORTS[v].mins })} />
           </div>
@@ -975,30 +981,30 @@ function RecurrencePicker({ value, onChange, onClose }) {
    QUICK ADD
 ================================================================================= */
 function QuickAdd() {
-  const { quickAddOpen, setQuickAddOpen, addTask, projects, view } = useApp();
+  const { quickAddOpen, setQuickAddOpen, addTask, projects, view, isMember } = useApp();
   const [title, setTitle] = useState('');
   const [owner, setOwner] = useState('me');
   const [priority, setPriority] = useState('medium');
   const [project, setProject] = useState('other');
-  const [privacy, setPrivacy] = useState('workspace');
   const inputRef = useRef(null);
 
   useEffect(() => {
     if (quickAddOpen) {
       setTimeout(() => inputRef.current?.focus(), 50);
-      if (view === 'private') { setPrivacy('private'); setProject('personal'); }
-      else if (view === 'va') { setOwner('va'); setPrivacy('workspace'); }
-      else { setPrivacy('workspace'); }
+      // Category drives privacy now; pick a sensible default category per view + role.
+      if (view === 'private') { setOwner('me'); setProject('personal'); }
+      else if (view === 'va') { setOwner('va'); }
+      else { setOwner(isMember ? 'va' : 'me'); }
     } else {
       setTitle('');
     }
-  }, [quickAddOpen, view]);
+  }, [quickAddOpen, view, isMember]);
 
   if (!quickAddOpen) return null;
 
   const submit = () => {
     if (!title.trim()) return;
-    addTask({ title: title.trim(), owner, priority, project, privacy, status: 'inbox' });
+    addTask({ title: title.trim(), owner, priority, project, status: 'inbox' });
     setQuickAddOpen(false);
   };
 
@@ -1020,7 +1026,7 @@ function QuickAdd() {
                 className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
                   owner === o.id ? 'text-white' : 'text-white/50 border-white/10 bg-white/5')}
                 style={owner === o.id ? { background: o.soft, borderColor: o.hex + '55', color: o.hex } : {}}>
-                <span className="w-1.5 h-1.5 rounded-full" style={{ background: o.hex }} />{o.label}
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: o.hex }} />{ownerLabel(o.id, isMember)}
               </button>
             ))}
             <div className="w-px h-6 bg-white/10 self-center mx-1" />
@@ -1038,12 +1044,6 @@ function QuickAdd() {
               className="bg-white/5 border border-white/10 rounded-full px-3 h-8 text-xs text-white/80 outline-none cursor-pointer">
               {projects.map(p => <option key={p.id} value={p.id} className="bg-[#0f1017]">{p.icon} {p.name}</option>)}
             </select>
-            <button onClick={() => setPrivacy(p => p === 'private' ? 'workspace' : 'private')}
-              className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium',
-                privacy === 'private' ? 'border-white/20 bg-white/10 text-white' : 'border-white/10 bg-white/5 text-white/50')}>
-              {privacy === 'private' ? <Lock className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-              {privacy === 'private' ? 'Private' : 'Workspace'}
-            </button>
             <div className="flex-1" />
             <button onClick={submit} disabled={!title.trim()}
               className="inline-flex items-center gap-1.5 rounded-full px-4 h-8 text-xs font-semibold bg-white text-black hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity">
@@ -1061,7 +1061,7 @@ function QuickAdd() {
    COMMAND PALETTE
 ================================================================================= */
 function CommandPalette() {
-  const { paletteOpen, setPaletteOpen, tasks, setEditingTask, setView, setQuickAddOpen, setTheme, theme, resetDemo, exportJSON } = useApp();
+  const { paletteOpen, setPaletteOpen, tasks, setEditingTask, setView, setQuickAddOpen, setTheme, theme, resetDemo, exportJSON, isMember } = useApp();
   const [q, setQ] = useState('');
   const inputRef = useRef(null);
   const [idx, setIdx] = useState(0);
@@ -1076,11 +1076,11 @@ function CommandPalette() {
     { id: 'v-proj', label: 'Go to Projects', icon: FolderKanban, run: () => { setView('projects'); setPaletteOpen(false); } },
     { id: 'v-sched', label: 'Go to Schedule', icon: CalendarDays, run: () => { setView('schedule'); setPaletteOpen(false); } },
     { id: 'v-priv', label: 'Go to Private', icon: Lock, run: () => { setView('private'); setPaletteOpen(false); } },
-    { id: 'v-va', label: 'Go to VA Desk', icon: UserCog, run: () => { setView('va'); setPaletteOpen(false); } },
+    { id: 'v-va', label: isMember ? 'Go to My Tasks' : 'Go to VA Desk', icon: UserCog, run: () => { setView('va'); setPaletteOpen(false); } },
     { id: 'theme', label: `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`, icon: theme === 'dark' ? Sun : Moon, run: () => { setTheme(theme === 'dark' ? 'light' : 'dark'); setPaletteOpen(false); } },
     { id: 'export', label: 'Export JSON backup', icon: Download, run: () => { exportJSON(); setPaletteOpen(false); } },
     { id: 'reset', label: 'Clear all tasks', icon: RefreshCw, run: () => { setPaletteOpen(false); resetDemo(); } },
-  ], [theme]);
+  ], [theme, isMember]);
 
   const results = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -1167,7 +1167,7 @@ function CommandPalette() {
    SIDEBAR
 ================================================================================= */
 function Sidebar() {
-  const { view, setView, tasks } = useApp();
+  const { view, setView, tasks, isMember } = useApp();
 
   const counts = useMemo(() => {
     const open = tasks.filter(t => t.status !== 'done');
@@ -1215,7 +1215,7 @@ function Sidebar() {
         {item('schedule', CalendarDays, 'Schedule')}
 
         <div className="px-3 pt-5 pb-2 text-[10px] font-medium uppercase tracking-widest text-white/30">Lanes</div>
-        {item('va', UserCog, 'VA Desk', counts.va)}
+        {item('va', UserCog, isMember ? 'My Tasks' : 'VA Desk', counts.va)}
         {item('private', Lock, 'Private', counts.private)}
       </div>
 
@@ -1241,14 +1241,14 @@ function Sidebar() {
    MOBILE TAB BAR
 ================================================================================= */
 function MobileTabs() {
-  const { view, setView } = useApp();
+  const { view, setView, isMember } = useApp();
   const items = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Home' },
     { id: 'kanban',    icon: KanbanSquare,    label: 'Board' },
     { id: 'matrix',    icon: Grid3x3,         label: 'Matrix' },
     { id: 'projects',  icon: FolderKanban,    label: 'Projects' },
     { id: 'schedule',  icon: CalendarDays,    label: 'Plan' },
-    { id: 'va',        icon: UserCog,         label: 'VA' },
+    { id: 'va',        icon: UserCog,         label: isMember ? 'Mine' : 'VA' },
     { id: 'private',   icon: Lock,            label: 'Private' },
   ];
   return (
@@ -1452,7 +1452,7 @@ function NotificationBell() {
 }
 
 function TopBar() {
-  const { theme, setTheme, setPaletteOpen, setQuickAddOpen, filters, setFilters, view, compact, setCompact, exportJSON, importJSON, resetDemo, projects, syncStatus, currentMember, onSignOut } = useApp();
+  const { theme, setTheme, setPaletteOpen, setQuickAddOpen, filters, setFilters, view, compact, setCompact, exportJSON, importJSON, resetDemo, projects, syncStatus, currentMember, isMember, onSignOut } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const fileRef = useRef(null);
@@ -1491,7 +1491,7 @@ function TopBar() {
 
         {showFilters && (
           <div className="hidden sm:flex items-center gap-1 pl-2 overflow-x-auto no-scrollbar">
-            <FilterPill label="Owner" value={filters.owner} options={[['all','All'],['me','Me'],['va','VA'],['shared','Shared']]} onChange={v => setFilters(f => ({ ...f, owner: v }))} />
+            <FilterPill label="Owner" value={filters.owner} options={[['all','All'],['me',ownerLabel('me',isMember)],['va',ownerLabel('va',isMember)],['shared','Shared']]} onChange={v => setFilters(f => ({ ...f, owner: v }))} />
             <FilterPill label="View" value={filters.privacy} options={[['all','All'],['workspace','Business'],['private','Private']]} onChange={v => setFilters(f => ({ ...f, privacy: v }))} />
             <FilterPill label="Project" value={filters.project} options={[['all','All'], ...projects.map(p => [p.id, p.name])]} onChange={v => setFilters(f => ({ ...f, project: v }))} />
           </div>
@@ -1606,7 +1606,7 @@ function Card({ children, className, title, subtitle, action, accent }) {
    DASHBOARD
 ================================================================================= */
 function DashboardView() {
-  const { tasks, projects, setEditingTask, setView } = useApp();
+  const { tasks, projects, setEditingTask, setView, isMember } = useApp();
 
   const open = tasks.filter(t => t.status !== 'done');
   const ranked = [...open].map(t => ({ t, s: getNextBestScore(t, projects) })).sort((a,b) => b.s - a.s);
@@ -1656,8 +1656,8 @@ function DashboardView() {
       </Card>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="Me" value={counts.me} color={OWNERS.me.hex} icon={<span className="w-2 h-2 rounded-full" style={{background:OWNERS.me.hex}} />} onClick={() => setView('kanban')} />
-        <StatCard label="VA" value={counts.va} color={OWNERS.va.hex} icon={<span className="w-2 h-2 rounded-full" style={{background:OWNERS.va.hex}} />} onClick={() => setView('va')} />
+        <StatCard label={ownerLabel('me', isMember)} value={counts.me} color={OWNERS.me.hex} icon={<span className="w-2 h-2 rounded-full" style={{background:OWNERS.me.hex}} />} onClick={() => setView(isMember ? 'private' : 'kanban')} />
+        <StatCard label={ownerLabel('va', isMember)} value={counts.va} color={OWNERS.va.hex} icon={<span className="w-2 h-2 rounded-full" style={{background:OWNERS.va.hex}} />} onClick={() => setView('va')} />
         <StatCard label="Shared" value={counts.shared} color={OWNERS.shared.hex} icon={<span className="w-2 h-2 rounded-full" style={{background:OWNERS.shared.hex}} />} />
         <StatCard label="Completed this week" value={counts.doneWeek} color="#34d399" icon={<CheckCircle2 className="w-3 h-3 text-emerald-400" />} />
       </div>
@@ -1685,12 +1685,12 @@ function DashboardView() {
       </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card title="My upcoming" subtitle="Due dates coming for you" accent={OWNERS.me.hex} action={<button onClick={() => setView('kanban')} className="text-[11px] text-white/40 hover:text-white/80 inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
+        <Card title={isMember ? 'Private — upcoming' : 'My upcoming'} subtitle={isMember ? 'Your private due dates' : 'Due dates coming for you'} accent={OWNERS.me.hex} action={<button onClick={() => setView(isMember ? 'private' : 'kanban')} className="text-[11px] text-white/40 hover:text-white/80 inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
           {myUpcoming.length === 0 ? <EmptyState icon={Calendar} text="No upcoming — nothing on your plate." /> :
             <div className="space-y-2">{myUpcoming.map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}</div>}
         </Card>
-        <Card title="VA's upcoming" subtitle="What your VA is working on" accent={OWNERS.va.hex} action={<button onClick={() => setView('va')} className="text-[11px] text-white/40 hover:text-white/80 inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
-          {vaUpcoming.length === 0 ? <EmptyState icon={UserCog} text="VA desk is clear." /> :
+        <Card title={isMember ? 'My upcoming' : "VA's upcoming"} subtitle={isMember ? 'Your tasks coming due' : 'What your VA is working on'} accent={OWNERS.va.hex} action={<button onClick={() => setView('va')} className="text-[11px] text-white/40 hover:text-white/80 inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
+          {vaUpcoming.length === 0 ? <EmptyState icon={UserCog} text={isMember ? 'Nothing upcoming.' : 'VA desk is clear.'} /> :
             <div className="space-y-2">{vaUpcoming.map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}</div>}
         </Card>
       </div>
@@ -1993,7 +1993,7 @@ function PrivateSection({ title, accent, tasks }) {
    VA DESK
 ================================================================================= */
 function VAView() {
-  const { tasks, setEditingTask, updateTask, setQuickAddOpen } = useApp();
+  const { tasks, setEditingTask, updateTask, setQuickAddOpen, isMember } = useApp();
   const vaTasks = tasks.filter(t => t.owner === 'va');
   const byStatus = {
     active:   vaTasks.filter(t => ['must','should','inbox'].includes(t.status)),
@@ -2010,13 +2010,13 @@ function VAView() {
         <div className="relative flex items-start justify-between gap-4 flex-wrap">
           <div>
             <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 h-6 text-[10px] font-medium uppercase tracking-widest text-emerald-300 mb-3">
-              <UserCog className="w-3 h-3" />Manager view
+              <UserCog className="w-3 h-3" />{isMember ? 'My workspace' : 'Manager view'}
             </div>
-            <h1 className="text-3xl lg:text-4xl font-semibold text-white font-display tracking-tight">VA desk</h1>
-            <p className="text-sm text-white/50 mt-2">Assign, prioritize, and unblock your VA's work.</p>
+            <h1 className="text-3xl lg:text-4xl font-semibold text-white font-display tracking-tight">{isMember ? 'My Tasks' : 'VA desk'}</h1>
+            <p className="text-sm text-white/50 mt-2">{isMember ? 'Everything on your plate — prioritize and get it done.' : "Assign, prioritize, and unblock your VA's work."}</p>
           </div>
           <button onClick={() => setQuickAddOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-emerald-500 text-black text-xs font-semibold hover:bg-emerald-400">
-            <Plus className="w-3.5 h-3.5" />Assign task
+            <Plus className="w-3.5 h-3.5" />{isMember ? 'Add task' : 'Assign task'}
           </button>
         </div>
         <div className="relative grid grid-cols-2 md:grid-cols-4 gap-3 mt-6">
@@ -2037,7 +2037,7 @@ function VAView() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card title="Active" subtitle={`${byStatus.active.length} in motion`} accent={OWNERS.va.hex}>
-          {byStatus.active.length === 0 ? <EmptyState icon={Inbox} text="No active VA work. Time to assign." /> :
+          {byStatus.active.length === 0 ? <EmptyState icon={Inbox} text={isMember ? 'No active tasks. Add one.' : 'No active VA work. Time to assign.'} /> :
             <div className="space-y-2">{byStatus.active.map(t => <TaskCard key={t.id} task={t} compact onClick={() => setEditingTask(t)} />)}</div>}
         </Card>
         <Card title="Waiting / Blocked" subtitle="Needs your input to move" accent="#facc15">

@@ -81,7 +81,9 @@ export const sanitizeTask = (raw) => {
   const priority = PRIORITY_IDS.has(t.priority) ? t.priority : 'medium';
   const status = STATUS_IDS.has(t.status) ? t.status : 'inbox';
   const effort = EFFORT_IDS.has(t.effort) ? t.effort : 'medium';
-  const privacy = (t.privacy === 'private' || t.privacy === 'workspace') ? t.privacy : 'workspace';
+  // Category drives privacy: 'me' is private to its creator; 'va'/'shared' are workspace.
+  // Mirrors the DB tasks_align_privacy trigger so optimistic state matches what gets stored.
+  const privacy = owner === 'me' ? 'private' : 'workspace';
   const migratedProject = migrateProjectId(t.project);
   const project = DEFAULT_PROJECT_IDS.has(migratedProject) ? migratedProject : 'other';
   return {
