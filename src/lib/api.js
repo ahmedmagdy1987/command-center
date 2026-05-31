@@ -63,6 +63,23 @@ export const workspaces = {
 };
 
 /* =================================================================================
+   WORKSPACE MEMBERS — the caller's OWN membership rows (workspace_id + role).
+   RLS (workspace_members_select_self) scopes to the current user's rows. The role here is
+   PER-WORKSPACE and is the authority for owner-gated logic (a user can be owner of one
+   workspace and member of another) — unlike the vestigial global members.role.
+================================================================================= */
+export const workspaceMembers = {
+  /** The current user's memberships, as [{ workspaceId, role }]. */
+  async listMine() {
+    const { data, error } = await supabase
+      .from('workspace_members')
+      .select('workspace_id, role');
+    if (error) throw error;
+    return (data || []).map(r => ({ workspaceId: r.workspace_id, role: r.role }));
+  },
+};
+
+/* =================================================================================
    PROJECTS — scoped to a workspace.
 ================================================================================= */
 export const projects = {

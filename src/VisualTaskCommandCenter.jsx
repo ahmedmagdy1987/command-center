@@ -9,7 +9,7 @@ import {
   Brain, Target, Hourglass, GripVertical, Info, Keyboard, LogOut, Wifi, WifiOff, Loader2,
   KeyRound, Bell, MessageSquare, Send, Mic, Square, Play, Pause
 } from 'lucide-react';
-import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, workspaces as workspacesApi, auth } from './lib/api';
+import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, workspaces as workspacesApi, workspaceMembers as workspaceMembersApi, auth } from './lib/api';
 import { supabase } from './lib/supabase';
 import { sanitizeTask, uid, nowISO } from './lib/sanitize';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
@@ -178,6 +178,10 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   // Multi-tenancy: the workspaces the user belongs to + which one is currently shown.
   const [workspaces, setWorkspaces] = useState([]);
   const [currentWorkspaceId, setCurrentWorkspaceId] = useState(null);
+  // Per-workspace memberships ([{ workspaceId, role }]) — the authority for owner-gated logic.
+  // membershipsLoaded gates role-aware UI so it never renders with an unresolved role.
+  const [memberships, setMemberships] = useState([]);
+  const [membershipsLoaded, setMembershipsLoaded] = useState(false);
 
   const [theme, setTheme] = useState(() => {
     const t = themeStore.get(THEME_KEY) || 'dark';
@@ -217,9 +221,13 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     let mounted = true;
     (async () => {
       try {
-        const ws = await workspacesApi.listMine();
+        // Fetch the workspaces (names for the switcher) AND the caller's per-workspace roles
+        // together, so the active workspace's role is known before any role-aware UI renders.
+        const [ws, mine] = await Promise.all([workspacesApi.listMine(), workspaceMembersApi.listMine()]);
         if (!mounted) return;
         setWorkspaces(ws);
+        setMemberships(mine);
+        setMembershipsLoaded(true);
         if (!ws.length) { setCurrentWorkspaceId(null); setLoading(false); return; }   // no workspace -> placeholder
         const ids = new Set(ws.map(w => w.id));
         const urlWs = new URLSearchParams(window.location.search).get('ws');
@@ -443,11 +451,19 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     navigate(`${window.location.pathname}?ws=${id}`, { replace: true });
   }, [currentWorkspaceId, workspaces, userId, navigate]);
 
-  const isMember = currentMember?.role === 'member';
+  // Authoritative role for the CURRENTLY-selected workspace (from workspace_members) — NOT the
+  // vestigial global members.role. Recomputed on workspace switch, so a user who is owner in one
+  // workspace and member in another always sees the role matching the active workspace.
+  const myRole = useMemo(
+    () => memberships.find(m => m.workspaceId === currentWorkspaceId)?.role ?? null,
+    [memberships, currentWorkspaceId],
+  );
+  const isOwner = myRole === 'owner';
+  const isMember = myRole === 'member';
   const value = {
     tasks, projects, theme, view, filters, compact, draggedId,
     paletteOpen, quickAddOpen, editingTask,
-    loading, syncStatus, session, currentMember, isMember, onSignOut,
+    loading, membershipsLoaded, syncStatus, session, currentMember, isMember, isOwner, myRole, onSignOut,
     workspaces, currentWorkspaceId, switchWorkspace,
     setTheme, setView, setFilters, setCompact, setDraggedId,
     setPaletteOpen, setQuickAddOpen, setEditingTask,
@@ -1731,7 +1747,7 @@ function WorkspaceSwitcher() {
 }
 
 function TopBar() {
-  const { theme, setTheme, setPaletteOpen, setQuickAddOpen, filters, setFilters, view, compact, setCompact, exportJSON, importJSON, resetDemo, projects, syncStatus, currentMember, isMember, onSignOut } = useApp();
+  const { theme, setTheme, setPaletteOpen, setQuickAddOpen, filters, setFilters, view, compact, setCompact, exportJSON, importJSON, resetDemo, projects, syncStatus, currentMember, isMember, myRole, onSignOut } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const fileRef = useRef(null);
@@ -1804,7 +1820,7 @@ function TopBar() {
                   {currentMember && (
                     <div className="px-3 py-2.5 border-b border-white/5">
                       <div className="text-xs font-medium text-white/90 truncate">{currentMember.email}</div>
-                      <div className="text-[10px] text-white/40 mt-0.5 capitalize">{currentMember.role}</div>
+                      <div className="text-[10px] text-white/40 mt-0.5 capitalize">{myRole || currentMember.role}</div>
                     </div>
                   )}
                   <MenuItem icon={theme === 'dark' ? Sun : Moon} onClick={() => { setTheme(theme === 'dark' ? 'light' : 'dark'); setMenuOpen(false); }}>Switch to {theme === 'dark' ? 'light' : 'dark'}</MenuItem>
@@ -2940,9 +2956,11 @@ function ChatView() {
 }
 
 function AppShell() {
-  const { view, theme, loading, currentWorkspaceId, onSignOut } = useApp();
+  const { view, theme, loading, membershipsLoaded, currentWorkspaceId, onSignOut } = useApp();
 
-  if (loading) {
+  // Hold the loading state until the per-workspace role is resolved too, so role-aware UI never
+  // flashes the wrong role while memberships load (same gating discipline as workspace resolution).
+  if (loading || (currentWorkspaceId && !membershipsLoaded)) {
     return (
       <div className="min-h-screen bg-[#070810] text-white flex items-center justify-center">
         <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');

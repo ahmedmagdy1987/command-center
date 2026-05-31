@@ -75,6 +75,10 @@ public/anon). Live in the **`private`** (non-PostgREST/non-API) schema so they d
   almost every policy. (Originally `public`; moved to `private` in migration `…172221`.)
 - `private.shares_workspace(target_user uuid) → bool` — caller shares a workspace with target. Powers
   members' co-worker visibility.
+- `private.is_workspace_owner(ws_id uuid) → bool` — caller is an **owner** of that workspace
+  (`workspace_members.role='owner'`). The per-workspace owner gate (Phase 3B-2, migration `…100320`);
+  used by `projects_delete_owner`. Implies membership, so it stands alone — replaced the old global
+  `members.role` check.
 
 ### Triggers (all present & verified)
 - `set_workspace_id` (BEFORE INSERT) on **tasks, comments, messages, notifications, projects** →
@@ -133,25 +137,43 @@ the `members_lock_role` trigger. DB-only; no app change.
   - **notifications → recipient + workspace.** Server-side `recipient_id=eq.<uid>` (the security gate)
     plus a client-side current-workspace check on top.
 
+**Phase 3B-2 — make "owner" per-workspace** (`20260531100320` + app). Authorization no longer reads the
+global `members.role`; it reads `workspace_members.role` for the relevant workspace — the prerequisite
+for letting a new signup create a workspace and be its owner.
+- **DB:** added `private.is_workspace_owner(ws_id)`; re-pointed the one owner-gated policy
+  `projects_delete_owner` from the global-`members.role` EXISTS check to
+  `private.is_workspace_owner(workspace_id)`. Nothing else changed; `members.role` + `members_lock_role`
+  left as-is (now vestigial for authz).
+- **App:** `workspaceMembers.listMine()` reads the caller's `{workspaceId, role}` rows (RLS
+  `workspace_members_select_self` self-scopes); `AppProvider` derives `myRole` / `isOwner` / `isMember`
+  from the membership row for the **current** workspace, recomputed on switch. Role-aware UI is gated
+  behind `membershipsLoaded` so it never flashes the wrong role. Global `members` is still read, but
+  **only for profile** (email/display_name).
+- **Verified behavior-preserving:** `is_workspace_owner` = true for Tony & Ahmed Magdy, false for the
+  VA; a rolled-back temp-WS2 proof showed no cross-workspace owner leakage (WS1 owners can't delete WS2
+  projects; the WS2 owner isn't an owner of WS1); per-user baseline identical after.
+
 ## Behavior-preservation baselines (the gate)
 
 The discipline on every DB change is: **per-user visible row counts must not change in ways the
-migration didn't intend.** Recorded baseline at the 3B-1 commit
+migration didn't intend.** **Re-capture a FRESH baseline immediately before each change** — never reuse
+the numbers below as fixed constants. This is a live app, so ordinary use ratchets the absolute counts
+up between sessions (e.g. tasks were VA 13 / Tony 39 / Ahmed Magdy 15 at the 3B-1 commit; the fresh
+3B-2 capture below is higher — both fine, because what's gated is the *deltas*, which must all be
+explained by the change).
+
+Latest snapshot — **2026-05-31**, identical before and after the 3B-2 DB + app change
 (tasks / projects / members / messages / notifications):
 
 | User | tasks | projects | members | messages | notifications |
 |------|------:|---------:|--------:|---------:|--------------:|
-| VA (member) | 13 | 9 | 3 | 3 | 4 |
-| Tony (owner) | 39 | 9 | 3 | 3 | 5 |
-| Ahmed Magdy (owner) | 15 | 9 | 3 | 3 | 4 |
+| Tony (owner) | 40 | 9 | 3 | 5 | 6 |
+| Ahmed Magdy (owner) | 16 | 9 | 3 | 5 | 5 |
+| VA (member) | 14 | 9 | 3 | 5 | 5 |
 
-**These are a snapshot, not constants.** This is a live app — normal use moves the absolute numbers.
-As of 2026-05-31 the live counts had drifted up by deltas fully explained by ordinary usage since the
-snapshot (one new workspace-visible task → +1 for everyone; +2 chat messages → +2 for everyone; +1
-notification per recipient): VA 14/9/3/5/5 · Tony 40/9/3/5/6 · Ahmed Magdy 16/9/3/5/5. **Structure was
-intact** — projects (9) and members (3) unchanged for all; the *relationships* held (workspace tasks
-visible to all; private tasks only to their creator; projects/members/messages shared per workspace;
-notifications recipient-scoped).
+The invariants that must always hold (the *relationships*, not the absolute numbers): projects + members
++ messages are equal across all members of a workspace; tasks = workspace-visible + own-private;
+notifications are recipient-scoped.
 
 So the gate is: **re-snapshot per-user counts immediately before a change, then confirm the only
 deltas after are the ones the change intended.** Don't hard-code the table above. Re-derive read-only
@@ -190,6 +212,10 @@ For a true behavior-preservation proof, also run a temporary **second-workspace 
   `(select auth.uid())` so they're evaluated once (avoids the `auth_rls_initplan` perf advisor).
 - **SECURITY DEFINER helpers** live in the **`private`** schema, `search_path=''`, EXECUTE to
   `authenticated` only (revoked from public/anon) — keeps them off the API and advisor-clean.
+- **Authorization is per-workspace, not global.** Owner-gated logic keys off
+  `private.is_workspace_owner(workspace_id)` (DB) and the current workspace's `workspace_members.role`
+  (app) — **never** the global `members.role` (vestigial since 3B-2). The app reads global `members`
+  only for profile (email/display_name).
 - **Trigger functions hardened:** `search_path=''` + EXECUTE revoked from public/anon/authenticated.
   Known outliers (faithful to migrations, harmless, fix if doing a hardening pass):
   `tasks_align_privacy` has `search_path=''` but EXECUTE was **not** revoked (still default-PUBLIC) —
@@ -204,21 +230,37 @@ For a true behavior-preservation proof, also run a temporary **second-workspace 
   Phase 2/2b/3A migrations.
 - **DB change discipline:** propose SQL → **wait for approval** → apply (`apply_migration`) → verify
   (preserve baselines with a STOP-on-unexpected-change check + the rolled-back temp-2nd-workspace
-  isolation proof; re-run security advisors) → commit + push. Migrations are idempotent
-  (create-if-not-exists / drop-if-exists / create-or-replace) and named `<timestamp>_<description>.sql`.
+  isolation proof; re-run security advisors) → **add the matching file to `supabase/migrations/`**
+  (named `<version>_<description>.sql`, version = the one the remote ledger assigned via
+  `list_migrations`, since `apply_migration` does NOT write the file) → commit + push. Migrations are
+  idempotent (create-if-not-exists / drop-if-exists / create-or-replace). *(Pre-existing ledger quirk:
+  the remote has 2 early entries with no local file — `20260529185644` and a duplicate `…233941` — the
+  live schema still matches the repo's files; left as-is.)*
 - **Deep Freeze wipes this machine on reboot.** The DB is safe on Supabase, but local code is not —
   **always push to GitHub.** Don't leave work uncommitted/unpushed.
 
 ## Roadmap / next
 
 Public signup must stay **CLOSED** until onboarding + invitations exist (no orphan/no-workspace users,
-no self-join). Order:
+no self-join).
 
-1. **Phase 3B-2 — workspace creation + onboarding + membership-on-signup.** A controlled
-   **SECURITY DEFINER RPC** that atomically creates a workspace and makes the creator its owner
-   (workspace + `workspace_members` row, role 'owner'); an onboarding screen for users with no
-   workspace (the 3B-1 placeholder becomes real). *(Awaiting go-ahead before starting.)*
-2. **Invitations** — invite a user into an existing workspace.
-3. **Per-workspace roles** — move owner-gated actions off the **global** `members.role` onto
-   **`workspace_members.role`** (a user can be owner of one workspace, member of another).
-4. **Billing** — Stripe, per-workspace subscriptions + general product-readiness.
+**Done:** Phase 3B-2 — per-workspace owner authority (see Phases above). This also subsumes the old
+"per-workspace roles" roadmap item for the owner case; `members.role` is now vestigial for authz.
+
+**Required before invitations** — must land before any real multi-member / multi-workspace situation:
+1. **(higher) Make the notify_* triggers workspace-aware.** `notify_on_task_created` /
+   `notify_on_task_completed` read the **global** `members` table + `members.role` unscoped, so with 2+
+   workspaces they'd route notifications to the wrong workspace's members (recipients are still shielded
+   by the notifications workspace check, but it produces junk rows + wrong routing + bloat at scale).
+   Route only to the task's-workspace members, using per-workspace roles.
+2. **(lower) Scope the storage `voice_notes_*` policies to the workspace.** They currently gate on
+   global members-existence, not workspace. Low severity (a voice-note path is only learnable from a
+   message that's already workspace-scoped, so path-guessing is infeasible), but tighten before public
+   launch.
+
+**Next phases:**
+1. **Workspace creation + onboarding + membership-on-signup** — a controlled **SECURITY DEFINER RPC**
+   that atomically creates a workspace and makes the creator its owner (workspace + `workspace_members`
+   row, role 'owner'); turn the 3B-1 no-workspace placeholder into a real onboarding screen.
+2. **Invitations** — invite a user into an existing workspace (do "Required before invitations" #1 first).
+3. **Billing** — Stripe, per-workspace subscriptions + general product-readiness.
