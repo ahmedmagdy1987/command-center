@@ -203,6 +203,32 @@ URLs and made the reset-email link actually land somewhere that can set a new pa
 - **Ops note:** `/reset-password` must be added to Supabase **Auth → Redirect URLs** (dashboard step).
   `vercel.json` already SPA-rewrites every path to `index.html`, so the deep link serves the app.
 
+**Phase 2A — generalize task assignment, DB** (`20260531205730`; additive, non-breaking). First of three
+stages (2B app + its DB companion, and 2C cleanup, are queued). Breaks the `owner`⟷`privacy` weld and adds a
+real assignee.
+- **`tasks.assignee_id uuid NULL` → `auth.users(id)` ON DELETE SET NULL** (matches every other user FK; RLS
+  compares it to `auth.uid()`) + index `tasks_assignee_id_idx`. Backfill: `owner='me'`→`assignee=created_by`;
+  `owner='va'`→the workspace's sole `role='member'` (the VA, `0598a0bc…`); `owner='shared'`→NULL (unassigned).
+- **Dropped the `tasks_align_privacy` trigger** — privacy is no longer derived from owner. (The client's
+  `sanitizeTask` still sets privacy, so the current UI is unchanged until 2B; the orphaned function is dropped
+  in 2C.)
+- **New tasks RLS predicate ⟨P2⟩** on all four policies: `is_workspace_member(workspace_id) AND (privacy=
+  'workspace' OR (privacy='private' AND (created_by=(select auth.uid()) OR assignee_id=(select auth.uid()))))`
+  — i.e. **private = creator OR assignee** (the only access meaning assignment gains; otherwise
+  visibility-neutral, and `is_workspace_member` is ANDed first so a stray non-member assignee is harmless).
+- **`public.workspace_members_list(p_workspace_id)`** — advisor-clean RPC (private `SECURITY DEFINER` impl
+  `private._workspace_members_list` + public `INVOKER` wrapper, like `create_workspace`) returning a
+  workspace's members+profiles for the 2B assignee picker, guarded by `is_workspace_member`. Deliberately does
+  NOT touch the self-scoped `workspace_members_select_self` policy, so `workspaceMembers.listMine()` / the
+  `isOwner` derivation are unaffected.
+- **Left intact for later:** the `owner` column + `tasks_owner_check` (dropped in 2C) and the `notify_*`
+  triggers (they still read `owner`; rewritten to assignee/creator/participant targeting + workspace-scoped in
+  2B's DB companion).
+- **Verified (rolled-back proof, then post-commit):** per-user visible-task counts identical (Tony 42 / Ahmed
+  Magdy 18 / VA 16, new predicate == old == baseline); an assignee sees a private task assigned to them, a
+  third member does not, an unassigned private task stays creator-only; the member RPC returns the workspace's
+  members for a member and 0 for a non-member with no cross-workspace leak; security advisors clean.
+
 ## Behavior-preservation baselines (the gate)
 
 The discipline on every DB change is: **per-user visible row counts must not change in ways the
@@ -313,12 +339,16 @@ RPC + onboarding); `members.role` is vestigial for authz. Public sign-up is stil
    launch.
 
 **Next phases:**
-1. **Generalize task assignment** *(next major phase)* — replace the hardcoded **Me / VA / Shared**
-   owner model with **per-member assignment**: tasks assigned to specific workspace member(s) chosen by
-   the creator; dynamic lanes/views derived from the workspace's actual members (not the fixed Me/VA/
-   Shared trio); privacy stays the simple **private-vs-shared** split. Pairs with the notify_*
-   workspace-awareness fix (#1 under "Required before invitations") — both must reason about real
-   per-workspace members rather than the global owner/VA assumption.
+1. **Generalize task assignment** *(in progress)* — replace the hardcoded **Me / VA / Shared** owner model
+   with **per-member assignment** (private-vs-shared visibility stays). **2A (DB) is DONE** (`20260531205730`:
+   `assignee_id` + ⟨P2⟩ RLS + the `workspace_members_list` RPC — see Phases above). **Queued:** **2B (app)** —
+   switch UI `owner`→`assignee_id` (member picker via `workspace_members_list`), independent privacy toggle,
+   member-aware views, `/va-desk`→`/my-tasks` (keep a redirect), new-task defaults assignee=me / privacy=Shared;
+   **plus 2B's DB companion** rewriting the `notify_*` triggers to assignee/creator/participant targeting +
+   workspace-scoped (this discharges the "make notify_* workspace-aware" item under "Required before
+   invitations"). **2C (DB cleanup)** — drop the `owner` column + `tasks_owner_check` + the orphaned
+   `tasks_align_privacy` function. Decisions locked: FK→auth.users SET NULL; reassign governed by RLS (a
+   private task's assignee can't reassign to a third party, only the creator can); member list via the RPC.
 2. **Invitations** — invite a user into an existing workspace (do "Required before invitations" #1 first).
 3. **Billing** — Stripe, per-workspace subscriptions + general product-readiness.
 
