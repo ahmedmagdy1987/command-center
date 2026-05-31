@@ -1,7 +1,8 @@
 # Command Center — project guide for Claude
 
 > Orientation file so any future session is instantly up to speed. Last verified against the
-> live DB on **2026-05-31** (latest commit at that point: `880fc8a`, Phase 3B-1).
+> live DB on **2026-05-31** (latest phase: migration `20260531143755`, Phase 3B-3 — workspace
+> creation + onboarding + auth polish).
 
 ## What this is
 
@@ -79,6 +80,16 @@ public/anon). Live in the **`private`** (non-PostgREST/non-API) schema so they d
   (`workspace_members.role='owner'`). The per-workspace owner gate (Phase 3B-2, migration `…100320`);
   used by `projects_delete_owner`. Implies membership, so it stands alone — replaced the old global
   `members.role` check.
+- `private._create_workspace(p_name text) → public.workspaces` (Phase 3B-3, migration `…143755`) — the
+  privileged body of the workspace-creation RPC. Same hardening, but it WRITES: creates one workspace
+  owned by `auth.uid()` + one `workspace_members` row making the caller its `'owner'` (owner/member are
+  ALWAYS `auth.uid()`, never params; name trimmed, non-empty, ≤80, else raises). Exposed to the app as
+  the thin SECURITY INVOKER passthrough `public.create_workspace(p_name)` — the DEFINER body stays in
+  `private` (so it doesn't trip the advisor) and the public wrapper is invoker (so it doesn't either).
+
+**Sanctioned write path:** `create_workspace` is the **ONLY** way to write `workspaces` /
+`workspace_members` — both are SELECT-only under RLS for `authenticated` (no INSERT/UPDATE/DELETE policy
+or grant). Direct inserts are denied (verified); all creation goes through the RPC.
 
 ### Triggers (all present & verified)
 - `set_workspace_id` (BEFORE INSERT) on **tasks, comments, messages, notifications, projects** →
@@ -152,6 +163,26 @@ for letting a new signup create a workspace and be its owner.
 - **Verified behavior-preserving:** `is_workspace_owner` = true for Tony & Ahmed Magdy, false for the
   VA; a rolled-back temp-WS2 proof showed no cross-workspace owner leakage (WS1 owners can't delete WS2
   projects; the WS2 owner isn't an owner of WS1); per-user baseline identical after.
+
+**Phase 3B-3 — workspace creation + onboarding + auth polish** (`20260531143755` + app). The "front
+door" that makes a brand-new user viable.
+- **DB:** `public.create_workspace(p_name)` — the sanctioned, atomic, caller-scoped workspace-creation
+  RPC (see Private helper functions / Sanctioned write path). Advisor-clean (Option B): public SECURITY
+  INVOKER wrapper → `private._create_workspace` DEFINER impl. `handle_new_user` untouched — signup still
+  creates only the members profile, never a workspace.
+- **App:** `workspaces.create(name)` calls the RPC; `AppProvider.createWorkspace` does create →
+  **re-fetch `workspaces.listMine` + `workspaceMembers.listMine` → switch** to the new workspace. The
+  re-fetch-before-switch is CRITICAL: `isOwner`/`isMember` derive from `memberships`, so switching with
+  a stale list would resolve the brand-new workspace as NOT its owner (React 18 batches the two state
+  sets, so the render has new id + new memberships together → `isOwner` true). Real **onboarding** screen
+  for no-workspace users (replaces the 3B-1 placeholder, `OnboardingScreen` + `CreateWorkspaceForm`);
+  **"+ Create workspace"** always in the `WorkspaceSwitcher` (`CreateWorkspaceModal`; real dropdown once
+  >1); new workspace lands on the dashboard with the existing clean empty states. Professional
+  **welcome/sign-in** screen with a forgot-password reset flow (`auth.resetPassword`); **public sign-up
+  stays CLOSED**, behind the single `SIGNUP_ENABLED` flag in `AuthScreen.jsx` (the one place to flip it).
+- **Verified:** rolled-back DB tests (exactly 1 workspace + 1 caller-owner membership, name trimmed, WS1
+  untouched; rejects empty/whitespace/null/>80-char; rejects null auth; direct INSERT denied on both
+  tables; EXECUTE auth-only; security advisors clean); per-user baselines unchanged; `npm run build` clean.
 
 ## Behavior-preservation baselines (the gate)
 
@@ -246,8 +277,10 @@ For a true behavior-preservation proof, also run a temporary **second-workspace 
 Public signup must stay **CLOSED** until onboarding + invitations exist (no orphan/no-workspace users,
 no self-join).
 
-**Done:** Phase 3B-2 — per-workspace owner authority (see Phases above). This also subsumes the old
-"per-workspace roles" roadmap item for the owner case; `members.role` is now vestigial for authz.
+**Done:** Phase 3B-2 (per-workspace owner authority) and **Phase 3B-3 (workspace creation + onboarding +
+auth polish)** — see Phases above. Workspace creation is now a real sanctioned flow (`create_workspace`
+RPC + onboarding); `members.role` is vestigial for authz. Public sign-up is still CLOSED (single
+`SIGNUP_ENABLED` flag in `AuthScreen.jsx`).
 
 **Required before invitations** — must land before any real multi-member / multi-workspace situation:
 1. **(higher) Make the notify_* triggers workspace-aware.** `notify_on_task_created` /
@@ -261,8 +294,15 @@ no self-join).
    launch.
 
 **Next phases:**
-1. **Workspace creation + onboarding + membership-on-signup** — a controlled **SECURITY DEFINER RPC**
-   that atomically creates a workspace and makes the creator its owner (workspace + `workspace_members`
-   row, role 'owner'); turn the 3B-1 no-workspace placeholder into a real onboarding screen.
+1. **Generalize task assignment** *(next major phase)* — replace the hardcoded **Me / VA / Shared**
+   owner model with **per-member assignment**: tasks assigned to specific workspace member(s) chosen by
+   the creator; dynamic lanes/views derived from the workspace's actual members (not the fixed Me/VA/
+   Shared trio); privacy stays the simple **private-vs-shared** split. Pairs with the notify_*
+   workspace-awareness fix (#1 under "Required before invitations") — both must reason about real
+   per-workspace members rather than the global owner/VA assumption.
 2. **Invitations** — invite a user into an existing workspace (do "Required before invitations" #1 first).
 3. **Billing** — Stripe, per-workspace subscriptions + general product-readiness.
+
+**Reaffirmed gate:** the notify_* routing fix **and** the voice-notes storage scoping (both under
+"Required before invitations" above) must land **before public sign-up opens** (the `SIGNUP_ENABLED`
+flip) — they're the last correctness/isolation gaps for a real multi-workspace, multi-member world.

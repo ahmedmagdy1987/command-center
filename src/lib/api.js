@@ -19,6 +19,13 @@ export const auth = {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   },
+  /** Send a password-reset email; the link returns the user to the app to set a new password. */
+  async resetPassword(email) {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+    });
+    if (error) throw error;
+  },
   async getSession() {
     const { data } = await supabase.auth.getSession();
     return data.session;
@@ -59,6 +66,18 @@ export const workspaces = {
       .order('created_at', { ascending: true });
     if (error) throw error;
     return data || [];
+  },
+  /**
+   * Create a workspace via the sanctioned SECURITY DEFINER RPC — the ONLY write path into
+   * workspaces / workspace_members (both are otherwise SELECT-only under RLS). The DB makes the
+   * caller the new workspace's owner; name validation (non-empty, <=80) and the auth check run
+   * server-side, so those errors surface here. Returns { id, name, created_at } (listMine() shape).
+   */
+  async create(name) {
+    const { data, error } = await supabase.rpc('create_workspace', { p_name: name });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;   // single-composite RPC; tolerate either shape
+    return row ? { id: row.id, name: row.name, created_at: row.created_at } : null;
   },
 };
 

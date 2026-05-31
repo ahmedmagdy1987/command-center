@@ -451,6 +451,26 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     navigate(`${window.location.pathname}?ws=${id}`, { replace: true });
   }, [currentWorkspaceId, workspaces, userId, navigate]);
 
+  // Create a workspace, then land in it as its OWNER. CRITICAL ordering: after the RPC succeeds we
+  // RE-FETCH both the workspaces list AND the per-workspace memberships BEFORE switching, because
+  // isOwner/isMember are derived from `memberships`. Switching with a stale memberships list would
+  // resolve the brand-new workspace as NOT its owner. Errors (validation / auth) propagate to the
+  // caller's form so it can surface them cleanly.
+  const createWorkspace = useCallback(async (name) => {
+    const created = await workspacesApi.create(name);
+    const [ws, mine] = await Promise.all([workspacesApi.listMine(), workspaceMembersApi.listMine()]);
+    setWorkspaces(ws);
+    setMemberships(mine);
+    setMembershipsLoaded(true);
+    const targetId = created?.id ?? ws[ws.length - 1]?.id ?? null;
+    if (targetId) {
+      setCurrentWorkspaceId(targetId);          // triggers the data-load effect -> clean empty states
+      writeStoredWorkspace(userId, targetId);
+      navigate(`${VIEW_TO_PATH.dashboard}?ws=${targetId}`, { replace: true });
+    }
+    return created;
+  }, [userId, navigate]);
+
   // Authoritative role for the CURRENTLY-selected workspace (from workspace_members) — NOT the
   // vestigial global members.role. Recomputed on workspace switch, so a user who is owner in one
   // workspace and member in another always sees the role matching the active workspace.
@@ -464,7 +484,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     tasks, projects, theme, view, filters, compact, draggedId,
     paletteOpen, quickAddOpen, editingTask,
     loading, membershipsLoaded, syncStatus, session, currentMember, isMember, isOwner, myRole, onSignOut,
-    workspaces, currentWorkspaceId, switchWorkspace,
+    workspaces, currentWorkspaceId, switchWorkspace, createWorkspace,
     setTheme, setView, setFilters, setCompact, setDraggedId,
     setPaletteOpen, setQuickAddOpen, setEditingTask,
     addTask, updateTask, deleteTask, duplicateTask, toggleSubtask,
@@ -1707,26 +1727,87 @@ function NotificationBell() {
   );
 }
 
-/** Current-workspace label + switcher. Collapses to a static label when there's only one. */
+/** Shared "name your workspace" form. Calls the sanctioned RPC via AppProvider.createWorkspace,
+ *  which (on success) re-fetches workspaces + memberships and switches into the new workspace as
+ *  its owner. Validates non-empty client-side; surfaces server-side errors (auth / >80 chars). */
+function CreateWorkspaceForm({ onCreated, submitLabel = 'Create workspace', autoFocus = true }) {
+  const { createWorkspace } = useApp();
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const trimmed = name.trim();
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!trimmed || busy) return;
+    setBusy(true); setError(null);
+    try {
+      const ws = await createWorkspace(trimmed);
+      onCreated?.(ws);
+      // On success the workspace switches and this form unmounts; leave busy=true to avoid a flash.
+    } catch (err) {
+      setError(err?.message || 'Could not create the workspace. Please try again.');
+      setBusy(false);
+    }
+  };
+  return (
+    <form onSubmit={submit} className="space-y-3">
+      <input value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus={autoFocus}
+        placeholder="e.g. Acme Marketing"
+        className="w-full bg-black/30 border border-white/10 rounded-xl px-3 h-11 text-sm text-white placeholder-white/30 outline-none focus:border-violet-400/50 focus:bg-black/40 transition-colors" />
+      {error && (
+        <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-px" />
+          <span>{error}</span>
+        </div>
+      )}
+      <button type="submit" disabled={!trimmed || busy}
+        className="w-full h-11 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Plus className="w-4 h-4" />{submitLabel}</>}
+      </button>
+    </form>
+  );
+}
+
+/** Modal launched from the WorkspaceSwitcher's "+ Create workspace". */
+function CreateWorkspaceModal({ open, onClose }) {
+  if (!open) return null;
+  return (
+    <>
+      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-6 pointer-events-none">
+        <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5"
+          style={{ animation: 'slideUp .2s ease' }} onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-base font-semibold text-white">Create workspace</h2>
+            <button onClick={onClose} className="text-white/40 hover:text-white/80 transition-colors"><X className="w-4 h-4" /></button>
+          </div>
+          <p className="text-xs text-white/45 mb-4">A fresh space for a team's tasks, projects, and chat. You'll be its owner.</p>
+          <CreateWorkspaceForm submitLabel="Create workspace" onCreated={onClose} />
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** Current-workspace label + switcher. Always offers "+ Create workspace"; becomes a real
+ *  dropdown of workspaces once the user belongs to more than one. */
 function WorkspaceSwitcher() {
   const { workspaces, currentWorkspaceId, switchWorkspace } = useApp();
   const [open, setOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const current = workspaces.find(w => w.id === currentWorkspaceId);
   if (!current) return null;
-  const single = workspaces.length <= 1;
   const badgeCls = 'w-4 h-4 rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-[8px] font-bold text-white shrink-0';
   const initial = (name) => (name || 'W').slice(0, 1).toUpperCase();
   return (
     <div className="relative shrink-0">
-      <button onClick={() => !single && setOpen(o => !o)} disabled={single}
-        title={single ? current.name : 'Switch workspace'}
-        className={cx('inline-flex items-center gap-1.5 h-9 px-2.5 rounded-xl border border-white/10 bg-white/[0.03] text-xs transition-colors',
-          single ? 'cursor-default' : 'hover:bg-white/[0.06] cursor-pointer')}>
+      <button onClick={() => setOpen(o => !o)} title="Switch or create workspace"
+        className="inline-flex items-center gap-1.5 h-9 px-2.5 rounded-xl border border-white/10 bg-white/[0.03] text-xs hover:bg-white/[0.06] cursor-pointer transition-colors">
         <span className={badgeCls}>{initial(current.name)}</span>
         <span className="font-medium text-white/90 max-w-[90px] sm:max-w-[140px] truncate">{current.name}</span>
-        {!single && <ChevronDown className="w-3 h-3 text-white/40 shrink-0" />}
+        <ChevronDown className="w-3 h-3 text-white/40 shrink-0" />
       </button>
-      {open && !single && (
+      {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
           <div className="absolute left-0 top-11 z-40 w-56 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1.5">
@@ -1739,9 +1820,16 @@ function WorkspaceSwitcher() {
                 {w.id === currentWorkspaceId && <Check className="w-3.5 h-3.5 text-violet-400 shrink-0" />}
               </button>
             ))}
+            <div className="my-1 h-px bg-white/10" />
+            <button onClick={() => { setOpen(false); setCreateOpen(true); }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/80 hover:bg-white/5 hover:text-white transition-colors">
+              <span className="w-4 h-4 rounded-md border border-dashed border-white/30 flex items-center justify-center shrink-0"><Plus className="w-2.5 h-2.5" /></span>
+              <span className="flex-1 text-left">Create workspace</span>
+            </button>
           </div>
         </>
       )}
+      <CreateWorkspaceModal open={createOpen} onClose={() => setCreateOpen(false)} />
     </div>
   );
 }
@@ -2955,6 +3043,43 @@ function ChatView() {
   );
 }
 
+/** Shown to an authenticated user who belongs to no workspace yet: create your first one.
+ *  Creation is the path today; joining by invitation comes in a later phase. */
+function OnboardingScreen({ theme, onSignOut }) {
+  return (
+    <div className="min-h-screen bg-[#070810] text-white flex items-center justify-center p-6 relative overflow-hidden" data-theme={theme}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
+        body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; background: #070810; }
+        .font-display { font-family: 'Fraunces', ui-serif, serif; font-optical-sizing: auto; font-weight: 500; }
+        @keyframes float { 0%,100% { transform: translateY(0px); } 50% { transform: translateY(-20px); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+      `}</style>
+      <div className="absolute top-1/4 -left-32 w-96 h-96 rounded-full bg-violet-500/10 blur-3xl pointer-events-none" style={{ animation: 'float 8s ease-in-out infinite' }} />
+      <div className="absolute bottom-1/4 -right-32 w-96 h-96 rounded-full bg-fuchsia-500/10 blur-3xl pointer-events-none" style={{ animation: 'float 8s ease-in-out infinite reverse' }} />
+
+      <div className="relative w-full max-w-md" style={{ animation: 'fadeIn .4s ease' }}>
+        <div className="flex flex-col items-center mb-7">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-2xl shadow-fuchsia-500/30 mb-4">
+            <FolderKanban className="w-7 h-7 text-white" />
+          </div>
+          <h1 className="text-2xl font-semibold text-white font-display tracking-tight">Create your workspace</h1>
+          <p className="text-sm text-white/45 mt-1.5 text-center">A workspace is where your team's tasks, projects, and chat live. Name it to get started — you'll be its owner.</p>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-[#0f1017]/80 backdrop-blur p-6 shadow-2xl">
+          <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">Workspace name</label>
+          <CreateWorkspaceForm submitLabel="Create workspace & continue" />
+        </div>
+
+        <button onClick={() => onSignOut?.()} className="mt-6 mx-auto block text-[11px] text-white/30 hover:text-white/60 transition-colors">
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AppShell() {
   const { view, theme, loading, membershipsLoaded, currentWorkspaceId, onSignOut } = useApp();
 
@@ -2976,25 +3101,8 @@ function AppShell() {
     );
   }
 
-  // The user belongs to no workspace — placeholder (no creation UI in this phase; don't crash).
-  if (!currentWorkspaceId) {
-    return (
-      <div className="min-h-screen bg-[#070810] text-white flex items-center justify-center p-6" data-theme={theme}>
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
-          body { font-family: 'Outfit', sans-serif; background: #070810; }`}</style>
-        <div className="max-w-sm text-center">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center mx-auto mb-4">
-            <FolderKanban className="w-6 h-6 text-white" />
-          </div>
-          <h1 className="text-lg font-semibold text-white mb-1.5">No workspace yet</h1>
-          <p className="text-sm text-white/50 mb-5">You're not a member of any workspace. Ask an owner to invite you and it'll show up here.</p>
-          <button onClick={() => onSignOut?.()} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">
-            <LogOut className="w-3.5 h-3.5" />Sign out
-          </button>
-        </div>
-      </div>
-    );
-  }
+  // The user belongs to no workspace — onboarding: create your first one (invitations come later).
+  if (!currentWorkspaceId) return <OnboardingScreen theme={theme} onSignOut={onSignOut} />;
 
   return (
     <div className="min-h-screen flex bg-[#070810] text-white" data-theme={theme}>
