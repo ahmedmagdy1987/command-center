@@ -237,7 +237,9 @@ For a true behavior-preservation proof, also run a temporary **second-workspace 
   the remote has 2 early entries with no local file — `20260529185644` and a duplicate `…233941` — the
   live schema still matches the repo's files; left as-is.)*
 - **Deep Freeze wipes this machine on reboot.** The DB is safe on Supabase, but local code is not —
-  **always push to GitHub.** Don't leave work uncommitted/unpushed.
+  **always push to GitHub.** Don't leave work uncommitted/unpushed. After a wipe, follow
+  **[`RESTORE.md`](RESTORE.md)** to rebuild the local env (toolchain → clone → git TLS fix →
+  `npm install` → launch Claude *inside* the repo so `.mcp.json` loads → recreate `.env` → MCP auth).
 
 ## Roadmap / next
 
