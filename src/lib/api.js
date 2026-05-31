@@ -103,6 +103,17 @@ export const workspaceMembers = {
     if (error) throw error;
     return (data || []).map(r => ({ workspaceId: r.workspace_id, role: r.role }));
   },
+  /**
+   * All members of a workspace the caller belongs to, with profiles — for the assignee picker /
+   * member-aware views. Uses the sanctioned SECURITY DEFINER RPC (the self-scoped workspace_members
+   * SELECT policy only returns the caller's own row). Returns [{ userId, displayName, email, role }].
+   */
+  async listForWorkspace(workspaceId) {
+    if (!workspaceId) return [];
+    const { data, error } = await supabase.rpc('workspace_members_list', { p_workspace_id: workspaceId });
+    if (error) throw error;
+    return (data || []).map(r => ({ userId: r.user_id, displayName: r.display_name, email: r.email, role: r.role }));
+  },
 };
 
 /* =================================================================================

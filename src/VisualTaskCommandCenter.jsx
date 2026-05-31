@@ -21,7 +21,7 @@ const VIEW_TO_PATH = {
   matrix: '/priority-matrix',
   projects: '/projects',
   schedule: '/schedule',
-  va: '/va-desk',
+  mine: '/my-tasks',
   private: '/private',
   chat: '/chat',
 };
@@ -37,17 +37,27 @@ const shortcutLabel = (key) => (IS_MAC ? `⌘${key}` : `Ctrl+${key}`);
 /* =================================================================================
    CONSTANTS
 ================================================================================= */
-const OWNERS = {
-  me: { id: 'me', label: 'Me', accent: 'violet', hex: '#a78bfa', soft: 'rgba(167,139,250,0.14)' },
-  va: { id: 'va', label: 'VA', accent: 'emerald', hex: '#34d399', soft: 'rgba(52,211,153,0.14)' },
-  shared: { id: 'shared', label: 'Shared', accent: 'fuchsia', hex: '#e879f9', soft: 'rgba(232,121,249,0.14)' },
-};
+// Per-assignee color, deterministic from the user id, + the neutral "unassigned" style.
+const ASSIGNEE_PALETTE = [
+  { hex: '#a78bfa', soft: 'rgba(167,139,250,0.14)' },
+  { hex: '#34d399', soft: 'rgba(52,211,153,0.14)' },
+  { hex: '#e879f9', soft: 'rgba(232,121,249,0.14)' },
+  { hex: '#38bdf8', soft: 'rgba(56,189,248,0.14)' },
+  { hex: '#fb923c', soft: 'rgba(251,146,60,0.14)' },
+  { hex: '#f43f5e', soft: 'rgba(244,63,94,0.14)' },
+  { hex: '#facc15', soft: 'rgba(250,204,21,0.14)' },
+];
+const UNASSIGNED_STYLE = { hex: '#8b92a8', soft: 'rgba(139,146,168,0.14)' };
+const hashStr = (s) => { let h = 0; for (let i = 0; i < (s || '').length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); };
+const assigneeColor = (userId) => (userId ? ASSIGNEE_PALETTE[hashStr(userId) % ASSIGNEE_PALETTE.length] : UNASSIGNED_STYLE);
+const initialsOf = (s) => (s || '?').trim().slice(0, 1).toUpperCase();
 
-// Role-aware category label. The single VA is the 'member': they see VA-category work as
-// their own ("My Tasks") and the Me category as their "Private" — and never a literal "VA".
-const ownerLabel = (id, isMember) =>
-  isMember ? ({ me: 'Private', va: 'My Tasks', shared: 'Shared' }[id] || OWNERS[id]?.label || id)
-           : (OWNERS[id]?.label || id);
+// Assignee-filter match: 'all' | 'me' | 'unassigned' | <userId>.
+const matchesAssignee = (task, filterVal, meId) =>
+  filterVal === 'all' ? true
+  : filterVal === 'me' ? task.assigneeId === meId
+  : filterVal === 'unassigned' ? !task.assigneeId
+  : task.assigneeId === filterVal;
 
 const PRIORITIES = {
   critical: { id: 'critical', label: 'Critical', rank: 4, hex: '#f43f5e', glow: 'rgba(244,63,94,0.35)', bg: 'rgba(244,63,94,0.12)', ring: 'rgba(244,63,94,0.4)' },
@@ -182,6 +192,9 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   // membershipsLoaded gates role-aware UI so it never renders with an unresolved role.
   const [memberships, setMemberships] = useState([]);
   const [membershipsLoaded, setMembershipsLoaded] = useState(false);
+  // All members of the CURRENT workspace ([{userId, displayName, email, role}]) — for the assignee
+  // picker + member-aware views/labels. Loaded per workspace via the workspace_members_list RPC.
+  const [members, setMembers] = useState([]);
 
   const [theme, setTheme] = useState(() => {
     const t = themeStore.get(THEME_KEY) || 'dark';
@@ -196,7 +209,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     const path = VIEW_TO_PATH[v] ?? '/';
     navigate(currentWorkspaceId ? `${path}?ws=${currentWorkspaceId}` : path);
   }, [navigate, currentWorkspaceId]);
-  const [filters, setFilters] = useState({ owner: 'all', privacy: 'all', project: 'all', search: '' });
+  const [filters, setFilters] = useState({ assignee: 'all', privacy: 'all', project: 'all', search: '' });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
@@ -270,6 +283,18 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     return () => { mounted = false; };
   }, [currentWorkspaceId]);
 
+  // Load the current workspace's members for the assignee picker + member-aware views/labels.
+  useEffect(() => {
+    if (!currentWorkspaceId) return;
+    let on = true;
+    workspaceMembersApi.listForWorkspace(currentWorkspaceId)
+      .then(m => { if (on) setMembers(m); })
+      .catch(e => console.error('Failed to load workspace members:', e));
+    // Clear on switch/unmount so a workspace change can't briefly show the prior workspace's roster
+    // (mirrors the tasks/projects reset in the data-load effect).
+    return () => { on = false; setMembers([]); };
+  }, [currentWorkspaceId]);
+
   useEffect(() => {
     if (!currentWorkspaceId) return;
     setSyncStatus('connecting');
@@ -338,7 +363,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       ...sanitizeTask({
         id: uid(),
         title: 'New task',
-        owner: 'me',
+        assigneeId: session?.user?.id ?? null,
         privacy: 'workspace',
         project: 'other',
         status: 'inbox',
@@ -480,11 +505,23 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   );
   const isOwner = myRole === 'owner';
   const isMember = myRole === 'member';
+
+  // Resolve an assignee id -> { id, label, hex, soft, initials } for chips/labels. 'Me' for self,
+  // 'Unassigned' (neutral) for null, display name otherwise. Color is deterministic per user id.
+  const resolveAssignee = useCallback((assigneeId) => {
+    if (!assigneeId) return { id: null, label: 'Unassigned', hex: UNASSIGNED_STYLE.hex, soft: UNASSIGNED_STYLE.soft, initials: '·' };
+    const m = members.find(x => x.userId === assigneeId);
+    const name = m?.displayName || m?.email || 'Member';
+    const c = assigneeColor(assigneeId);
+    return { id: assigneeId, label: assigneeId === userId ? 'Me' : name, hex: c.hex, soft: c.soft, initials: initialsOf(name) };
+  }, [members, userId]);
+
   const value = {
     tasks, projects, theme, view, filters, compact, draggedId,
     paletteOpen, quickAddOpen, editingTask,
     loading, membershipsLoaded, syncStatus, session, currentMember, isMember, isOwner, myRole, onSignOut,
     workspaces, currentWorkspaceId, switchWorkspace, createWorkspace,
+    members, meId: userId, resolveAssignee,
     setTheme, setView, setFilters, setCompact, setDraggedId,
     setPaletteOpen, setQuickAddOpen, setEditingTask,
     addTask, updateTask, deleteTask, duplicateTask, toggleSubtask,
@@ -520,15 +557,15 @@ function PriorityDot({ priority, size = 8, glow = true }) {
   return <span className="inline-block rounded-full shrink-0" style={{ width: size, height: size, background: p.hex, boxShadow: glow ? `0 0 10px ${p.glow}` : 'none' }} />;
 }
 
-function OwnerChip({ owner, showLabel = true, size = 'sm' }) {
-  const { isMember } = useApp();
-  const o = OWNERS[owner];
+function AssigneeChip({ assigneeId, showLabel = true, size = 'sm' }) {
+  const { resolveAssignee } = useApp();
+  const a = resolveAssignee(assigneeId);
   const dims = size === 'sm' ? 'h-5 px-2 text-[10px]' : 'h-6 px-2.5 text-xs';
   return (
     <span className={cx('inline-flex items-center gap-1.5 rounded-full font-medium tracking-wide', dims)}
-      style={{ background: o.soft, color: o.hex, border: `1px solid ${o.hex}33` }}>
-      <span className="w-1.5 h-1.5 rounded-full" style={{ background: o.hex }} />
-      {showLabel && ownerLabel(owner, isMember)}
+      style={{ background: a.soft, color: a.hex, border: `1px solid ${a.hex}33` }}>
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: a.hex }} />
+      {showLabel && a.label}
     </span>
   );
 }
@@ -692,9 +729,9 @@ function ChangePasswordModal({ open, onClose }) {
    TASK CARD
 ================================================================================= */
 function TaskCard({ task, compact = false, onClick, draggable = true, showOwner = true }) {
-  const { setDraggedId, updateTask, projects } = useApp();
+  const { setDraggedId, updateTask, projects, resolveAssignee } = useApp();
   const priority = PRIORITIES[task.priority];
-  const owner = OWNERS[task.owner];
+  const assignee = resolveAssignee(task.assigneeId);
   const project = projects.find(p => p.id === task.project);
   const due = formatDue(task.dueDate);
   const overdue = isOverdue(task);
@@ -744,7 +781,7 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showOwner 
           {isRecurring(task.recurring) && <RefreshCw className="w-3 h-3 text-white/30 shrink-0" />}
           {task.blocked && <PauseCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
         </div>
-        {showOwner && <OwnerChip owner={task.owner} showLabel={!compact} size="sm" />}
+        {showOwner && <AssigneeChip assigneeId={task.assigneeId} showLabel={!compact} size="sm" />}
       </div>
 
       <div className={cx('font-medium leading-snug text-white/95 mb-2', done && 'line-through text-white/50', compact ? 'text-sm' : 'text-[15px]')}>
@@ -758,7 +795,7 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showOwner 
       {totalSub > 0 && !compact && (
         <div className="mb-3">
           <div className="h-1 bg-white/5 rounded-full overflow-hidden">
-            <div className="h-full rounded-full transition-all" style={{ width: `${(doneCount/totalSub)*100}%`, background: `linear-gradient(90deg, ${priority.hex}, ${owner.hex})` }} />
+            <div className="h-full rounded-full transition-all" style={{ width: `${(doneCount/totalSub)*100}%`, background: `linear-gradient(90deg, ${priority.hex}, ${assignee.hex})` }} />
           </div>
           <div className="text-[10px] text-white/40 mt-1 font-medium tracking-wide">{doneCount}/{totalSub} subtasks</div>
         </div>
@@ -922,7 +959,7 @@ function TaskComments({ taskId }) {
 }
 
 function TaskModal() {
-  const { editingTask, setEditingTask, updateTask, deleteTask, duplicateTask, projects, toggleSubtask, isMember } = useApp();
+  const { editingTask, setEditingTask, updateTask, deleteTask, duplicateTask, projects, toggleSubtask, members, meId, resolveAssignee } = useApp();
   const t = editingTask;
   const [newSub, setNewSub] = useState('');
   const [recurrenceOpen, setRecurrenceOpen] = useState(false);
@@ -946,7 +983,7 @@ function TaskModal() {
       <div onClick={e => e.stopPropagation()} className="w-full sm:max-w-2xl max-h-screen sm:max-h-[85vh] overflow-hidden rounded-t-2xl sm:rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl flex flex-col">
         <div className="px-6 pt-5 pb-3 border-b border-white/5" style={{ background: `linear-gradient(180deg, ${priority.bg}, transparent)` }}>
           <div className="flex items-center gap-2 mb-3">
-            <OwnerChip owner={t.owner} />
+            <AssigneeChip assigneeId={t.assigneeId} />
             {t.privacy === 'private' && <Badge icon={Lock}>Private</Badge>}
             {isRecurring(t.recurring) && <Badge icon={RefreshCw}>{formatRecurrence(t.recurring) || 'Repeats'}</Badge>}
             <div className="flex-1" />
@@ -966,7 +1003,8 @@ function TaskModal() {
           <div className="flex flex-wrap gap-2">
             <SelectPill label="Status" value={t.status} options={Object.values(STATUSES).map(s => [s.id, s.label])} onChange={v => set({ status: v })} />
             <SelectPill label="Priority" value={t.priority} options={Object.values(PRIORITIES).map(p => [p.id, p.label])} onChange={v => set({ priority: v })} color={priority.hex} />
-            <SelectPill label="Category" value={t.owner} options={Object.values(OWNERS).map(o => [o.id, ownerLabel(o.id, isMember)])} onChange={v => set({ owner: v, privacy: v === 'me' ? 'private' : 'workspace' })} color={OWNERS[t.owner].hex} />
+            <SelectPill label="Assignee" value={t.assigneeId || ''} options={[['', 'Unassigned'], ...(t.assigneeId && !members.some(m => m.userId === t.assigneeId) ? [[t.assigneeId, resolveAssignee(t.assigneeId).label]] : []), ...members.map(m => [m.userId, m.userId === meId ? 'Me' : (m.displayName || m.email)])]} onChange={v => set({ assigneeId: v || null })} color={resolveAssignee(t.assigneeId).hex} />
+            <SelectPill label="Visibility" value={t.privacy} options={[['workspace', 'Shared'], ['private', 'Private']]} onChange={v => set({ privacy: v })} />
             <SelectPill label="Project" value={t.project} options={projects.map(p => [p.id, p.name])} onChange={v => set({ project: v })} />
             <SelectPill label="Effort" value={t.effort} options={Object.values(EFFORTS).map(e => [e.id, `${e.label} (${e.mins}m)`])} onChange={v => set({ effort: v, estimatedMinutes: EFFORTS[v].mins })} />
           </div>
@@ -1251,9 +1289,10 @@ function RecurrencePicker({ value, onChange, onClose }) {
    QUICK ADD
 ================================================================================= */
 function QuickAdd() {
-  const { quickAddOpen, setQuickAddOpen, addTask, projects, view, isMember } = useApp();
+  const { quickAddOpen, setQuickAddOpen, addTask, projects, view, members, meId } = useApp();
   const [title, setTitle] = useState('');
-  const [owner, setOwner] = useState('me');
+  const [assigneeId, setAssigneeId] = useState(null);
+  const [privacy, setPrivacy] = useState('workspace');
   const [priority, setPriority] = useState('medium');
   const [project, setProject] = useState('other');
   const inputRef = useRef(null);
@@ -1261,20 +1300,20 @@ function QuickAdd() {
   useEffect(() => {
     if (quickAddOpen) {
       setTimeout(() => inputRef.current?.focus(), 50);
-      // Category drives privacy now; pick a sensible default category per view + role.
-      if (view === 'private') { setOwner('me'); setProject('personal'); }
-      else if (view === 'va') { setOwner('va'); }
-      else { setOwner(isMember ? 'va' : 'me'); }
+      // New-task defaults: assigned to me, Shared. The Private view defaults to Private (+ personal project).
+      setAssigneeId(meId ?? null);
+      if (view === 'private') { setPrivacy('private'); setProject('personal'); }
+      else { setPrivacy('workspace'); }
     } else {
       setTitle('');
     }
-  }, [quickAddOpen, view, isMember]);
+  }, [quickAddOpen, view, meId]);
 
   if (!quickAddOpen) return null;
 
   const submit = () => {
     if (!title.trim()) return;
-    addTask({ title: title.trim(), owner, priority, project, status: 'inbox' });
+    addTask({ title: title.trim(), assigneeId, privacy, priority, project, status: 'inbox' });
     setQuickAddOpen(false);
   };
 
@@ -1291,15 +1330,45 @@ function QuickAdd() {
         </div>
         <div className="p-4 space-y-3">
           <div className="flex flex-wrap gap-2">
-            {Object.values(OWNERS).map(o => (
-              <button key={o.id} onClick={() => setOwner(o.id)}
-                className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
-                  owner === o.id ? 'text-white' : 'text-white/50 border-white/10 bg-white/5')}
-                style={owner === o.id ? { background: o.soft, borderColor: o.hex + '55', color: o.hex } : {}}>
-                <span className="w-1.5 h-1.5 rounded-full" style={{ background: o.hex }} />{ownerLabel(o.id, isMember)}
-              </button>
-            ))}
+            <button onClick={() => setAssigneeId(null)}
+              className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
+                assigneeId === null ? 'text-white' : 'text-white/50 border-white/10 bg-white/5')}
+              style={assigneeId === null ? { background: UNASSIGNED_STYLE.soft, borderColor: UNASSIGNED_STYLE.hex + '55', color: UNASSIGNED_STYLE.hex } : {}}>
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: UNASSIGNED_STYLE.hex }} />Unassigned
+            </button>
+            {meId && (() => {
+              const c = assigneeColor(meId);
+              const sel = assigneeId === meId;
+              return (
+                <button onClick={() => setAssigneeId(meId)}
+                  className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
+                    sel ? 'text-white' : 'text-white/50 border-white/10 bg-white/5')}
+                  style={sel ? { background: c.soft, borderColor: c.hex + '55', color: c.hex } : {}}>
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: c.hex }} />Me
+                </button>
+              );
+            })()}
+            {members.filter(m => m.userId !== meId).map(m => {
+              const c = assigneeColor(m.userId);
+              const sel = assigneeId === m.userId;
+              return (
+                <button key={m.userId} onClick={() => setAssigneeId(m.userId)}
+                  className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
+                    sel ? 'text-white' : 'text-white/50 border-white/10 bg-white/5')}
+                  style={sel ? { background: c.soft, borderColor: c.hex + '55', color: c.hex } : {}}>
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: c.hex }} />{m.displayName || m.email}
+                </button>
+              );
+            })}
             <div className="w-px h-6 bg-white/10 self-center mx-1" />
+            <button onClick={() => setPrivacy(privacy === 'private' ? 'workspace' : 'private')}
+              className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
+                privacy === 'private' ? 'text-white' : 'text-white/50 border-white/10 bg-white/5')}
+              style={privacy === 'private' ? { background: 'rgba(167,139,250,0.14)', borderColor: '#a78bfa55', color: '#a78bfa' } : {}}>
+              <Lock className="w-3 h-3" />{privacy === 'private' ? 'Private' : 'Shared'}
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
             {Object.values(PRIORITIES).map(p => (
               <button key={p.id} onClick={() => setPriority(p.id)}
                 className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
@@ -1331,7 +1400,7 @@ function QuickAdd() {
    COMMAND PALETTE
 ================================================================================= */
 function CommandPalette() {
-  const { paletteOpen, setPaletteOpen, tasks, setEditingTask, setView, setQuickAddOpen, setTheme, theme, resetDemo, exportJSON, isMember } = useApp();
+  const { paletteOpen, setPaletteOpen, tasks, setEditingTask, setView, setQuickAddOpen, setTheme, theme, resetDemo, exportJSON } = useApp();
   const [q, setQ] = useState('');
   const inputRef = useRef(null);
   const [idx, setIdx] = useState(0);
@@ -1346,12 +1415,12 @@ function CommandPalette() {
     { id: 'v-proj', label: 'Go to Projects', icon: FolderKanban, run: () => { setView('projects'); setPaletteOpen(false); } },
     { id: 'v-sched', label: 'Go to Schedule', icon: CalendarDays, run: () => { setView('schedule'); setPaletteOpen(false); } },
     { id: 'v-priv', label: 'Go to Private', icon: Lock, run: () => { setView('private'); setPaletteOpen(false); } },
-    { id: 'v-va', label: isMember ? 'Go to My Tasks' : 'Go to VA Desk', icon: UserCog, run: () => { setView('va'); setPaletteOpen(false); } },
+    { id: 'v-mine', label: 'Go to My Tasks', icon: UserCog, run: () => { setView('mine'); setPaletteOpen(false); } },
     { id: 'v-chat', label: 'Go to Chat', icon: MessageSquare, run: () => { setView('chat'); setPaletteOpen(false); } },
     { id: 'theme', label: `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`, icon: theme === 'dark' ? Sun : Moon, run: () => { setTheme(theme === 'dark' ? 'light' : 'dark'); setPaletteOpen(false); } },
     { id: 'export', label: 'Export JSON backup', icon: Download, run: () => { exportJSON(); setPaletteOpen(false); } },
     { id: 'reset', label: 'Clear all tasks', icon: RefreshCw, run: () => { setPaletteOpen(false); resetDemo(); } },
-  ], [theme, isMember]);
+  ], [theme]);
 
   const results = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -1421,7 +1490,7 @@ function CommandPalette() {
                       active ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5')}>
                     <PriorityDot priority={t.priority} />
                     <span className="flex-1 truncate">{t.title}</span>
-                    <OwnerChip owner={t.owner} showLabel={false} />
+                    <AssigneeChip assigneeId={t.assigneeId} showLabel={false} />
                   </button>
                 );
               })}
@@ -1438,18 +1507,17 @@ function CommandPalette() {
    SIDEBAR
 ================================================================================= */
 function Sidebar() {
-  const { view, setView, tasks, isMember, chatUnread } = useApp();
+  const { view, setView, tasks, meId, chatUnread } = useApp();
 
   const counts = useMemo(() => {
     const open = tasks.filter(t => t.status !== 'done');
     return {
       all: open.length,
-      me: open.filter(t => t.owner === 'me').length,
-      va: open.filter(t => t.owner === 'va').length,
+      mine: open.filter(t => t.assigneeId === meId).length,
       private: open.filter(t => t.privacy === 'private').length,
       overdue: open.filter(isOverdue).length,
     };
-  }, [tasks]);
+  }, [tasks, meId]);
 
   const item = (id, icon, label, badge) => (
     <button onClick={() => setView(id)}
@@ -1487,7 +1555,7 @@ function Sidebar() {
         {item('chat', MessageSquare, 'Chat', chatUnread)}
 
         <div className="px-3 pt-5 pb-2 text-[10px] font-medium uppercase tracking-widest text-white/30">Lanes</div>
-        {item('va', UserCog, isMember ? 'My Tasks' : 'VA Desk', counts.va)}
+        {item('mine', UserCog, 'My Tasks', counts.mine)}
         {item('private', Lock, 'Private', counts.private)}
       </div>
 
@@ -1513,14 +1581,14 @@ function Sidebar() {
    MOBILE TAB BAR
 ================================================================================= */
 function MobileTabs() {
-  const { view, setView, isMember, chatUnread } = useApp();
+  const { view, setView, chatUnread } = useApp();
   const items = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Home' },
     { id: 'kanban',    icon: KanbanSquare,    label: 'Board' },
     { id: 'matrix',    icon: Grid3x3,         label: 'Matrix' },
     { id: 'projects',  icon: FolderKanban,    label: 'Projects' },
     { id: 'schedule',  icon: CalendarDays,    label: 'Plan' },
-    { id: 'va',        icon: UserCog,         label: isMember ? 'Mine' : 'VA' },
+    { id: 'mine',      icon: UserCog,         label: 'Mine' },
     { id: 'private',   icon: Lock,            label: 'Private' },
     { id: 'chat',      icon: MessageSquare,   label: 'Chat' },
   ];
@@ -1835,7 +1903,7 @@ function WorkspaceSwitcher() {
 }
 
 function TopBar() {
-  const { theme, setTheme, setPaletteOpen, setQuickAddOpen, filters, setFilters, view, compact, setCompact, exportJSON, importJSON, resetDemo, projects, syncStatus, currentMember, isMember, myRole, onSignOut } = useApp();
+  const { theme, setTheme, setPaletteOpen, setQuickAddOpen, filters, setFilters, view, compact, setCompact, exportJSON, importJSON, resetDemo, projects, syncStatus, currentMember, myRole, onSignOut, members, meId } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const fileRef = useRef(null);
@@ -1876,8 +1944,8 @@ function TopBar() {
 
         {showFilters && (
           <div className="hidden sm:flex items-center gap-1 pl-2 overflow-x-auto no-scrollbar">
-            <FilterPill label="Owner" value={filters.owner} options={[['all','All'],['me',ownerLabel('me',isMember)],['va',ownerLabel('va',isMember)],['shared','Shared']]} onChange={v => setFilters(f => ({ ...f, owner: v }))} />
-            <FilterPill label="View" value={filters.privacy} options={[['all','All'],['workspace','Business'],['private','Private']]} onChange={v => setFilters(f => ({ ...f, privacy: v }))} />
+            <FilterPill label="Assignee" value={filters.assignee} options={[['all','All'],['me','Me'], ...members.filter(m => m.userId !== meId).map(m => [m.userId, m.displayName || m.email]), ['unassigned','Unassigned']]} onChange={v => setFilters(f => ({ ...f, assignee: v }))} />
+            <FilterPill label="Visibility" value={filters.privacy} options={[['all','All'],['workspace','Shared'],['private','Private']]} onChange={v => setFilters(f => ({ ...f, privacy: v }))} />
             <FilterPill label="Project" value={filters.project} options={[['all','All'], ...projects.map(p => [p.id, p.name])]} onChange={v => setFilters(f => ({ ...f, project: v }))} />
           </div>
         )}
@@ -1991,22 +2059,22 @@ function Card({ children, className, title, subtitle, action, accent }) {
    DASHBOARD
 ================================================================================= */
 function DashboardView() {
-  const { tasks, projects, setEditingTask, setView, isMember } = useApp();
+  const { tasks, projects, setEditingTask, setView, meId } = useApp();
 
   const open = tasks.filter(t => t.status !== 'done');
   const ranked = [...open].map(t => ({ t, s: getNextBestScore(t, projects) })).sort((a,b) => b.s - a.s);
   const top3 = ranked.slice(0, 3);
-  const myUpcoming = open.filter(t => t.owner === 'me' && t.dueDate).sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 5);
-  const vaUpcoming = open.filter(t => t.owner === 'va' && t.dueDate).sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 5);
-  const sharedPriority = open.filter(t => t.owner === 'shared').sort((a,b) => PRIORITIES[b.priority].rank - PRIORITIES[a.priority].rank).slice(0, 4);
+  const myUpcoming = open.filter(t => t.assigneeId === meId && t.dueDate).sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 5);
+  const othersUpcoming = open.filter(t => t.assigneeId && t.assigneeId !== meId && t.dueDate).sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 5);
+  const unassignedPriority = open.filter(t => !t.assigneeId).sort((a,b) => PRIORITIES[b.priority].rank - PRIORITIES[a.priority].rank).slice(0, 4);
   const overdue = open.filter(isOverdue).sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate));
   const stuck = open.filter(t => t.blocked || t.status === 'waiting').slice(0, 5);
   const recent = [...tasks].sort((a,b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 5);
 
   const counts = {
-    me: open.filter(t => t.owner === 'me').length,
-    va: open.filter(t => t.owner === 'va').length,
-    shared: open.filter(t => t.owner === 'shared').length,
+    mine: open.filter(t => t.assigneeId === meId).length,
+    others: open.filter(t => t.assigneeId && t.assigneeId !== meId).length,
+    unassigned: open.filter(t => !t.assigneeId).length,
     critical: open.filter(t => t.priority === 'critical').length,
     high: open.filter(t => t.priority === 'high').length,
     medium: open.filter(t => t.priority === 'medium').length,
@@ -2041,9 +2109,9 @@ function DashboardView() {
       </Card>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label={ownerLabel('me', isMember)} value={counts.me} color={OWNERS.me.hex} icon={<span className="w-2 h-2 rounded-full" style={{background:OWNERS.me.hex}} />} onClick={() => setView(isMember ? 'private' : 'kanban')} />
-        <StatCard label={ownerLabel('va', isMember)} value={counts.va} color={OWNERS.va.hex} icon={<span className="w-2 h-2 rounded-full" style={{background:OWNERS.va.hex}} />} onClick={() => setView('va')} />
-        <StatCard label="Shared" value={counts.shared} color={OWNERS.shared.hex} icon={<span className="w-2 h-2 rounded-full" style={{background:OWNERS.shared.hex}} />} />
+        <StatCard label="My tasks" value={counts.mine} color="#a78bfa" icon={<span className="w-2 h-2 rounded-full" style={{background:'#a78bfa'}} />} onClick={() => setView('mine')} />
+        <StatCard label="Assigned to others" value={counts.others} color="#34d399" icon={<span className="w-2 h-2 rounded-full" style={{background:'#34d399'}} />} onClick={() => setView('kanban')} />
+        <StatCard label="Unassigned" value={counts.unassigned} color={UNASSIGNED_STYLE.hex} icon={<span className="w-2 h-2 rounded-full" style={{background:UNASSIGNED_STYLE.hex}} />} onClick={() => setView('kanban')} />
         <StatCard label="Completed this week" value={counts.doneWeek} color="#34d399" icon={<CheckCircle2 className="w-3 h-3 text-emerald-400" />} />
       </div>
 
@@ -2070,20 +2138,20 @@ function DashboardView() {
       </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card title={isMember ? 'Private — upcoming' : 'My upcoming'} subtitle={isMember ? 'Your private due dates' : 'Due dates coming for you'} accent={OWNERS.me.hex} action={<button onClick={() => setView(isMember ? 'private' : 'kanban')} className="text-[11px] text-white/40 hover:text-white/80 inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
+        <Card title="My upcoming" subtitle="Tasks assigned to you, by due date" accent="#a78bfa" action={<button onClick={() => setView('mine')} className="text-[11px] text-white/40 hover:text-white/80 inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
           {myUpcoming.length === 0 ? <EmptyState icon={Calendar} text="No upcoming — nothing on your plate." /> :
             <div className="space-y-2">{myUpcoming.map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}</div>}
         </Card>
-        <Card title={isMember ? 'My upcoming' : "VA's upcoming"} subtitle={isMember ? 'Your tasks coming due' : 'What your VA is working on'} accent={OWNERS.va.hex} action={<button onClick={() => setView('va')} className="text-[11px] text-white/40 hover:text-white/80 inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
-          {vaUpcoming.length === 0 ? <EmptyState icon={UserCog} text={isMember ? 'Nothing upcoming.' : 'VA desk is clear.'} /> :
-            <div className="space-y-2">{vaUpcoming.map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}</div>}
+        <Card title="Assigned to others — upcoming" subtitle="What your teammates are working on" accent="#34d399" action={<button onClick={() => setView('kanban')} className="text-[11px] text-white/40 hover:text-white/80 inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
+          {othersUpcoming.length === 0 ? <EmptyState icon={UserCog} text="Nothing assigned to others." /> :
+            <div className="space-y-2">{othersUpcoming.map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}</div>}
         </Card>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card title="Shared priorities" subtitle="Both of you touch these" accent={OWNERS.shared.hex}>
-          {sharedPriority.length === 0 ? <EmptyState icon={Sparkles} text="No shared items — add collaborative work here." /> :
-            <div className="space-y-2">{sharedPriority.map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}</div>}
+        <Card title="Unassigned — needs an owner" subtitle="Pick these up or assign them out" accent={UNASSIGNED_STYLE.hex}>
+          {unassignedPriority.length === 0 ? <EmptyState icon={Sparkles} text="Nothing unassigned — everything has an owner." /> :
+            <div className="space-y-2">{unassignedPriority.map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}</div>}
         </Card>
         <Card title="Overdue" subtitle={overdue.length ? "Needs attention" : "All clear"} accent="#f43f5e">
           {overdue.length === 0 ? <EmptyState icon={CheckCircle2} text="Nothing overdue. Keep it up." /> :
@@ -2165,7 +2233,7 @@ function MiniRow({ task, onClick, showBlocked, showTime }) {
           {showBlocked && task.blocked && <><span>·</span><span className="text-rose-400">blocked</span></>}
         </div>
       </div>
-      <OwnerChip owner={task.owner} showLabel={false} />
+      <AssigneeChip assigneeId={task.assigneeId} showLabel={false} />
     </button>
   );
 }
@@ -2184,12 +2252,12 @@ function EmptyState({ icon: Icon, text }) {
    KANBAN
 ================================================================================= */
 function KanbanView() {
-  const { tasks, filters, draggedId, updateTask, setEditingTask, compact } = useApp();
+  const { tasks, filters, draggedId, updateTask, setEditingTask, compact, meId } = useApp();
 
   const filtered = useMemo(() => {
     const term = (filters.search || '').toLowerCase();
     return tasks.filter(t => {
-      if (filters.owner !== 'all' && t.owner !== filters.owner) return false;
+      if (!matchesAssignee(t, filters.assignee, meId)) return false;
       if (filters.privacy !== 'all' && t.privacy !== filters.privacy) return false;
       if (filters.project !== 'all' && t.project !== filters.project) return false;
       if (term) {
@@ -2198,7 +2266,7 @@ function KanbanView() {
       }
       return true;
     });
-  }, [tasks, filters]);
+  }, [tasks, filters, meId]);
 
   const byStatus = useMemo(() => {
     const g = {};
@@ -2210,7 +2278,7 @@ function KanbanView() {
 
   return (
     <div className="space-y-4">
-      <ViewHeader title="Kanban board" subtitle="Drag between columns. Priority color on the left, owner chip on the right." />
+      <ViewHeader title="Kanban board" subtitle="Drag between columns. Priority color on the left, assignee chip on the right." />
       <div className="flex gap-3 overflow-x-auto pb-4 -mx-4 lg:-mx-6 px-4 lg:px-6 snap-x">
         {Object.values(STATUSES).map(col => (
           <KanbanColumn key={col.id} column={col} tasks={byStatus[col.id] || []} />
@@ -2221,7 +2289,7 @@ function KanbanView() {
 }
 
 function ColumnQuickAdd({ status }) {
-  const { addTask, filters } = useApp();
+  const { addTask, filters, meId } = useApp();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
   const inputRef = useRef(null);
@@ -2233,7 +2301,7 @@ function ColumnQuickAdd({ status }) {
     addTask({
       title: title.trim(),
       status,
-      owner: filters.owner !== 'all' ? filters.owner : 'me',
+      assigneeId: filters.assignee === 'me' ? meId : (filters.assignee === 'unassigned' ? null : (filters.assignee !== 'all' ? filters.assignee : meId)),
       project: filters.project !== 'all' ? filters.project : 'other',
       privacy: filters.privacy !== 'all' ? filters.privacy : 'workspace',
     });
@@ -2327,10 +2395,10 @@ function PrivateView() {
         <div className="relative flex items-start justify-between gap-4 flex-wrap">
           <div>
             <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/30 backdrop-blur px-2.5 h-6 text-[10px] font-medium uppercase tracking-widest text-white/70 mb-3">
-              <Lock className="w-3 h-3" />Private space · only you
+              <Lock className="w-3 h-3" />Private · you + assignee
             </div>
             <h1 className="text-3xl lg:text-4xl font-semibold text-white font-display tracking-tight" style={{letterSpacing:'-0.02em'}}>My private list</h1>
-            <p className="text-sm text-white/50 mt-2 max-w-md">Personal tasks that never appear in any workspace view. Your VA cannot see this.</p>
+            <p className="text-sm text-white/50 mt-2 max-w-md">Private tasks are visible only to you and anyone they're assigned to — never the whole workspace.</p>
           </div>
           <button onClick={() => setQuickAddOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-white text-black text-xs font-semibold hover:bg-white/90">
             <Plus className="w-3.5 h-3.5" />Add private task
@@ -2377,16 +2445,16 @@ function PrivateSection({ title, accent, tasks }) {
 /* =================================================================================
    VA DESK
 ================================================================================= */
-function VAView() {
-  const { tasks, setEditingTask, updateTask, setQuickAddOpen, isMember } = useApp();
-  const vaTasks = tasks.filter(t => t.owner === 'va');
+function MyTasksView() {
+  const { tasks, setEditingTask, updateTask, setQuickAddOpen, meId } = useApp();
+  const myTasks = tasks.filter(t => t.assigneeId === meId);
   const byStatus = {
-    active:   vaTasks.filter(t => ['must','should','inbox'].includes(t.status)),
-    waiting:  vaTasks.filter(t => t.status === 'waiting' || t.blocked),
-    scheduled: vaTasks.filter(t => t.status === 'scheduled'),
-    done:     vaTasks.filter(t => t.status === 'done'),
+    active:   myTasks.filter(t => ['must','should','inbox'].includes(t.status)),
+    waiting:  myTasks.filter(t => t.status === 'waiting' || t.blocked),
+    scheduled: myTasks.filter(t => t.status === 'scheduled'),
+    done:     myTasks.filter(t => t.status === 'done'),
   };
-  const overdue = vaTasks.filter(isOverdue);
+  const overdue = myTasks.filter(isOverdue);
 
   return (
     <div className="space-y-6">
@@ -2395,13 +2463,13 @@ function VAView() {
         <div className="relative flex items-start justify-between gap-4 flex-wrap">
           <div>
             <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 h-6 text-[10px] font-medium uppercase tracking-widest text-emerald-300 mb-3">
-              <UserCog className="w-3 h-3" />{isMember ? 'My workspace' : 'Manager view'}
+              <UserCog className="w-3 h-3" />My workspace
             </div>
-            <h1 className="text-3xl lg:text-4xl font-semibold text-white font-display tracking-tight">{isMember ? 'My Tasks' : 'VA desk'}</h1>
-            <p className="text-sm text-white/50 mt-2">{isMember ? 'Everything on your plate — prioritize and get it done.' : "Assign, prioritize, and unblock your VA's work."}</p>
+            <h1 className="text-3xl lg:text-4xl font-semibold text-white font-display tracking-tight">My Tasks</h1>
+            <p className="text-sm text-white/50 mt-2">Everything assigned to you — prioritize and get it done.</p>
           </div>
           <button onClick={() => setQuickAddOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-emerald-500 text-black text-xs font-semibold hover:bg-emerald-400">
-            <Plus className="w-3.5 h-3.5" />{isMember ? 'Add task' : 'Assign task'}
+            <Plus className="w-3.5 h-3.5" />Add task
           </button>
         </div>
         <div className="relative grid grid-cols-2 md:grid-cols-4 gap-3 mt-6">
@@ -2421,8 +2489,8 @@ function VAView() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card title="Active" subtitle={`${byStatus.active.length} in motion`} accent={OWNERS.va.hex}>
-          {byStatus.active.length === 0 ? <EmptyState icon={Inbox} text={isMember ? 'No active tasks. Add one.' : 'No active VA work. Time to assign.'} /> :
+        <Card title="Active" subtitle={`${byStatus.active.length} in motion`} accent="#34d399">
+          {byStatus.active.length === 0 ? <EmptyState icon={Inbox} text="No active tasks. Add one." /> :
             <div className="space-y-2">{byStatus.active.map(t => <TaskCard key={t.id} task={t} compact onClick={() => setEditingTask(t)} />)}</div>}
         </Card>
         <Card title="Waiting / Blocked" subtitle="Needs your input to move" accent="#facc15">
@@ -2494,14 +2562,14 @@ function MatrixQuad({ id, title, subtitle, tasks, accent }) {
 }
 
 function MatrixView() {
-  const { tasks, filters } = useApp();
+  const { tasks, filters, meId } = useApp();
 
   const open = useMemo(() => tasks.filter(t => {
     if (t.status === 'done') return false;
-    if (filters.owner !== 'all' && t.owner !== filters.owner) return false;
+    if (!matchesAssignee(t, filters.assignee, meId)) return false;
     if (filters.privacy !== 'all' && t.privacy !== filters.privacy) return false;
     return true;
-  }), [tasks, filters]);
+  }), [tasks, filters, meId]);
 
   const quadrants = useMemo(() => ({
     q1: open.filter(t => t.urgent && t.important),
@@ -2549,10 +2617,10 @@ function MatrixView() {
    PROJECTS VIEW
 ================================================================================= */
 function ProjectsView() {
-  const { tasks, projects, setEditingTask, filters } = useApp();
+  const { tasks, projects, setEditingTask, filters, meId } = useApp();
 
   const filtered = tasks.filter(t => {
-    if (filters.owner !== 'all' && t.owner !== filters.owner) return false;
+    if (!matchesAssignee(t, filters.assignee, meId)) return false;
     if (filters.privacy !== 'all' && t.privacy !== filters.privacy) return false;
     return true;
   });
@@ -2602,11 +2670,11 @@ function ProjectsView() {
    SCHEDULE
 ================================================================================= */
 function ScheduleView() {
-  const { tasks, setEditingTask, filters } = useApp();
+  const { tasks, setEditingTask, filters, meId } = useApp();
 
   const filtered = tasks.filter(t => {
     if (t.status === 'done') return false;
-    if (filters.owner !== 'all' && t.owner !== filters.owner) return false;
+    if (!matchesAssignee(t, filters.assignee, meId)) return false;
     if (filters.privacy !== 'all' && t.privacy !== filters.privacy) return false;
     return true;
   });
@@ -3080,6 +3148,12 @@ function OnboardingScreen({ theme, onSignOut }) {
   );
 }
 
+/** Redirect old /va-desk links to /my-tasks, preserving the ?ws= workspace query param. */
+function RedirectToMyTasks() {
+  const location = useLocation();
+  return <Navigate to={`/my-tasks${location.search}`} replace />;
+}
+
 function AppShell() {
   const { view, theme, loading, membershipsLoaded, currentWorkspaceId, onSignOut } = useApp();
 
@@ -3187,7 +3261,8 @@ function AppShell() {
               <Route path="/priority-matrix" element={<MatrixView />} />
               <Route path="/projects" element={<ProjectsView />} />
               <Route path="/schedule" element={<ScheduleView />} />
-              <Route path="/va-desk" element={<VAView />} />
+              <Route path="/my-tasks" element={<MyTasksView />} />
+              <Route path="/va-desk" element={<RedirectToMyTasks />} />
               <Route path="/private" element={<PrivateView />} />
               <Route path="/chat" element={<ChatView />} />
               {/* Has a workspace, so onboarding isn't applicable — send it back to the app. */}

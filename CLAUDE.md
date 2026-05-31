@@ -40,9 +40,9 @@
   RLS-protected realtime is delivered; loads `currentMember`.
 - `src/lib/api.js` — all DB access (`auth`, `members`, `workspaces`, `projects`, `tasks`,
   `notifications`, `comments`, `messages`), realtime subscriptions, voice-note storage.
-- `src/lib/sanitize.js` — DB⇄app shape mapping (snake_case⇄camelCase) + task normalization. Mirrors
-  the DB `tasks_align_privacy` trigger client-side (`owner==='me' → privacy='private'`, else
-  `'workspace'`) so optimistic UI matches what the DB stores.
+- `src/lib/sanitize.js` — DB⇄app shape mapping (snake_case⇄camelCase) + task normalization. Maps
+  `assignee_id`⇄`assigneeId`; `privacy` is an INDEPENDENT field (`workspace`=Shared | `private`), no longer
+  derived from the legacy `owner` (the app dropped `owner` entirely in 2B-2; DB column dropped in 2C).
 - `src/lib/supabase.js` — the client (persistSession, autoRefreshToken, realtime 10 eps).
 
 ## People (the one workspace today)
@@ -252,6 +252,28 @@ reference out of the triggers (so 2C is safe). Locked semantics:
   `assignee_id=NULL` → assignment notifications stay quiet for new tasks in that window; completion + comment
   notifications work.
 
+**Phase 2B-2 — make the app assignee-aware** (app only; no DB). The UI now runs entirely on `assignee_id` +
+independent privacy; the legacy `owner` category is gone from the client (the DB `owner` column is dropped in 2C).
+- **Data layer:** `sanitize.js` maps `assignee_id`⇄`assigneeId` and treats `privacy` as independent (no owner
+  derivation); `toDbTask` stops writing `owner` (DB default fills it until 2C). `api.js` adds
+  `workspaceMembers.listForWorkspace(wsId)` → the `workspace_members_list` RPC.
+- **AppProvider** loads the current workspace's members (cleared on switch) and exposes `members`, `meId`, and
+  `resolveAssignee(id) → {label,hex,soft}` ('Me' for self, 'Unassigned' for null, display name otherwise; color
+  deterministic per user id).
+- **UI:** `OwnerChip`→`AssigneeChip`; QuickAdd + TaskModal use an **assignee picker + a separate Shared/Private
+  toggle** (decoupled — no owner→privacy weld); the Owner filter → a dynamic **Assignee** filter (All / Me / each
+  member / Unassigned) via `matchesAssignee`; Dashboard buckets **My / Assigned-to-others / Unassigned**; **VA Desk
+  → "My Tasks"** (`assigneeId===meId`) at **`/my-tasks`** (old `/va-desk` redirects, preserving `?ws=`); Sidebar/
+  MobileTabs/CommandPalette nav `va`→`mine`. New-task defaults: **assignee = me, privacy = Shared**.
+  `SIGNUP_ENABLED` stays closed.
+- **Two intended visible changes:** (a) new quick-adds default to **Shared** (was effectively private-by-default);
+  (b) former `owner='shared'` tasks now show as **Unassigned**.
+- **Verified:** build clean; lint unchanged from baseline (35 errors / 2 warnings); existing-team mapping confirmed
+  against live data (former `me`→creator's My Tasks, `va`→the VA's My Tasks, `shared`→Unassigned, Private view
+  unchanged; per-user totals unchanged — Tony 42 / Ahmed Magdy 18 / VA 16); a 5-dimension adversarial review found
+  no high/medium bugs (4 low edge-cases fixed: members cleared on switch; TaskModal label for a non-member assignee;
+  `/va-desk` redirect preserves `?ws=`; QuickAdd always renders a "Me" pill).
+
 ## Behavior-preservation baselines (the gate)
 
 The discipline on every DB change is: **per-user visible row counts must not change in ways the
@@ -360,15 +382,14 @@ RPC + onboarding); `members.role` is vestigial for authz. Public sign-up is stil
    launch.
 
 **Next phases:**
-1. **Generalize task assignment** *(in progress)* — replace the hardcoded **Me / VA / Shared** owner model
-   with **per-member assignment** (private-vs-shared visibility stays). **DONE:** **2A** (`20260531205730`:
-   `assignee_id` + ⟨P2⟩ RLS + the `workspace_members_list` RPC) and **2B-1** (`20260531211450`: the notify_*
-   triggers rewritten off `owner` onto `assignee_id` — see Phases). **Queued: 2B-2 (app)** — switch UI
-   `owner`→`assignee_id` (member picker via `workspace_members_list`), independent privacy toggle, member-aware
-   views, `/va-desk`→`/my-tasks` (keep a redirect), new-task defaults assignee=me / privacy=Shared. **2C (DB
-   cleanup)** — drop the `owner` column + `tasks_owner_check` + the orphaned `tasks_align_privacy` function.
-   Decisions locked: FK→auth.users SET NULL; reassign governed by RLS (a private task's assignee can't reassign
-   to a third party, only the creator can); member list via the RPC.
+1. **Generalize task assignment** *(in progress)* — replace the hardcoded **Me / VA / Shared** owner model with
+   **per-member assignment** (private-vs-shared visibility stays). **DONE:** **2A** (`20260531205730`: `assignee_id`
+   + ⟨P2⟩ RLS + `workspace_members_list` RPC), **2B-1** (`20260531211450`: notify_* rewritten off `owner` onto
+   `assignee_id`), and **2B-2 (app)** — the whole UI now runs on `assignee_id` + independent privacy (see Phases).
+   **Only 2C (DB cleanup) remains:** drop the `owner` column + `tasks_owner_check` + the orphaned
+   `tasks_align_privacy` function (the app no longer reads `owner`, so this is purely DB). Decisions locked:
+   FK→auth.users SET NULL; reassign governed by RLS (a private task's assignee can't reassign to a third party,
+   only the creator can); member list via the RPC.
 2. **Invitations** — invite a user into an existing workspace ("Required before invitations" #1 is now done in
    2B-1; only #2 voice-notes scoping remains).
 3. **Billing** — Stripe, per-workspace subscriptions + general product-readiness.

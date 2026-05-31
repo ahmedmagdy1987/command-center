@@ -2,7 +2,6 @@
    SANITIZE — normalize task/project shapes regardless of source (DB, import, etc)
 ================================================================================= */
 
-const OWNER_IDS = new Set(['me', 'va', 'shared']);
 const PRIORITY_IDS = new Set(['critical', 'high', 'medium', 'low']);
 const STATUS_IDS = new Set(['inbox', 'must', 'should', 'waiting', 'scheduled', 'done']);
 const EFFORT_IDS = new Set(['quick', 'medium', 'deep']);
@@ -22,7 +21,7 @@ export const fromDbTask = (row) => {
     workspaceId: row.workspace_id,
     title: row.title,
     description: row.description || '',
-    owner: row.owner,
+    assigneeId: row.assignee_id,
     privacy: row.privacy,
     project: row.project,
     status: row.status,
@@ -53,7 +52,7 @@ export const toDbTask = (task) => {
     id: task.id,
     title: task.title,
     description: task.description,
-    owner: task.owner,
+    assignee_id: task.assigneeId,
     privacy: task.privacy,
     project: task.project,
     status: task.status,
@@ -78,20 +77,20 @@ export const toDbTask = (task) => {
 
 export const sanitizeTask = (raw) => {
   const t = raw && typeof raw === 'object' ? raw : {};
-  const owner = OWNER_IDS.has(t.owner) ? t.owner : 'me';
   const priority = PRIORITY_IDS.has(t.priority) ? t.priority : 'medium';
   const status = STATUS_IDS.has(t.status) ? t.status : 'inbox';
   const effort = EFFORT_IDS.has(t.effort) ? t.effort : 'medium';
-  // Category drives privacy: 'me' is private to its creator; 'va'/'shared' are workspace.
-  // Mirrors the DB tasks_align_privacy trigger so optimistic state matches what gets stored.
-  const privacy = owner === 'me' ? 'private' : 'workspace';
+  // Visibility is now INDEPENDENT of assignment: 'workspace' (shared) or 'private' (creator + assignee).
+  const privacy = (t.privacy === 'private' || t.privacy === 'workspace') ? t.privacy : 'workspace';
+  // Assignee: a single workspace member (auth user id) or null (unassigned).
+  const assigneeId = (typeof t.assigneeId === 'string' && t.assigneeId) ? t.assigneeId : null;
   const migratedProject = migrateProjectId(t.project);
   const project = DEFAULT_PROJECT_IDS.has(migratedProject) ? migratedProject : 'other';
   return {
     id: typeof t.id === 'string' && t.id ? t.id : uid(),
     title: typeof t.title === 'string' ? t.title : 'Untitled task',
     description: typeof t.description === 'string' ? t.description : '',
-    owner, privacy, project, status, priority, effort,
+    assigneeId, privacy, project, status, priority, effort,
     urgent: !!t.urgent,
     important: !!t.important,
     blocked: !!t.blocked,
