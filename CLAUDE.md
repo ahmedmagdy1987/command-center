@@ -184,6 +184,25 @@ door" that makes a brand-new user viable.
   untouched; rejects empty/whitespace/null/>80-char; rejects null auth; direct INSERT denied on both
   tables; EXECUTE auth-only; security advisors clean); per-user baselines unchanged; `npm run build` clean.
 
+**Auth routing + working password reset** (frontend only, no DB). Gave the auth/onboarding states real
+URLs and made the reset-email link actually land somewhere that can set a new password.
+- **Routing:** top-level `<Routes>` in `App.jsx`, gated behind the `checking` session-check so no auth
+  screen flashes before session state is known: `/login`, `/forgot-password`, `/reset-password` (the
+  last two reachable WITHOUT a normal session — the recovery link arrives independent of one), and
+  `/*` → the authed app (`<Navigate to="/login">` when signed out). `AppShell` gives `/onboarding` a
+  real route (no workspace → it; has workspace → redirect to `/`). The 8 existing view routes are
+  unchanged and resolve as **descendant routes** under the `/*` splat (verified empirically: absolute
+  child paths work in react-router 7 — no relativizing needed).
+- **Password reset:** `auth.resetPassword` sends `redirectTo = ${window.location.origin}/reset-password`
+  (origin-based; works on prod + localhost). `ResetPasswordScreen` detects the Supabase recovery session
+  — `getSession()` primary, raw `supabase.auth.onAuthStateChange` `PASSWORD_RECOVERY` as the timing-race
+  fallback (the `api.js` `onAuthChange` wrapper drops the event) — sets the new password via
+  `auth.updatePassword` (= `supabase.auth.updateUser({ password })`), then navigates to `/` (the
+  recovery session is a full session, so normal gating routes the user in). `AuthScreen` is now
+  route-driven via a `mode` prop (sign-in vs reset); `SIGNUP_ENABLED` stays closed.
+- **Ops note:** `/reset-password` must be added to Supabase **Auth → Redirect URLs** (dashboard step).
+  `vercel.json` already SPA-rewrites every path to `index.html`, so the deep link serves the app.
+
 ## Behavior-preservation baselines (the gate)
 
 The discipline on every DB change is: **per-user visible row counts must not change in ways the

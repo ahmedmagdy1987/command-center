@@ -19,12 +19,19 @@ export const auth = {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   },
-  /** Send a password-reset email; the link returns the user to the app to set a new password. */
+  /** Send a password-reset email. The link lands on /reset-password (origin-based so it works on
+   *  prod + localhost); that route detects the recovery session and lets the user set a new password. */
   async resetPassword(email) {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+      redirectTo: typeof window !== 'undefined' ? `${window.location.origin}/reset-password` : undefined,
     });
     if (error) throw error;
+  },
+  /** Set a new password for the currently-authenticated user (including a Supabase recovery session). */
+  async updatePassword(password) {
+    const { data, error } = await supabase.auth.updateUser({ password });
+    if (error) throw error;
+    return data;
   },
   async getSession() {
     const { data } = await supabase.auth.getSession();

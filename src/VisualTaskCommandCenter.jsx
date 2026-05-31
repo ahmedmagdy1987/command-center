@@ -3101,8 +3101,16 @@ function AppShell() {
     );
   }
 
-  // The user belongs to no workspace — onboarding: create your first one (invitations come later).
-  if (!currentWorkspaceId) return <OnboardingScreen theme={theme} onSignOut={onSignOut} />;
+  // The user belongs to no workspace — onboarding lives at /onboarding (create your first one;
+  // invitations come later). Any other path bounces there so the URL always reflects the state.
+  if (!currentWorkspaceId) {
+    return (
+      <Routes>
+        <Route path="/onboarding" element={<OnboardingScreen theme={theme} onSignOut={onSignOut} />} />
+        <Route path="*" element={<Navigate to="/onboarding" replace />} />
+      </Routes>
+    );
+  }
 
   return (
     <div className="min-h-screen flex bg-[#070810] text-white" data-theme={theme}>
@@ -3182,6 +3190,8 @@ function AppShell() {
               <Route path="/va-desk" element={<VAView />} />
               <Route path="/private" element={<PrivateView />} />
               <Route path="/chat" element={<ChatView />} />
+              {/* Has a workspace, so onboarding isn't applicable — send it back to the app. */}
+              <Route path="/onboarding" element={<Navigate to="/" replace />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </div>

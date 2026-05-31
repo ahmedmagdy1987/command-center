@@ -1,9 +1,25 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Sparkles } from 'lucide-react';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { auth, members } from './lib/api';
 import AuthScreen from './AuthScreen';
+import ResetPasswordScreen from './ResetPasswordScreen';
 import VisualTaskCommandCenter from './VisualTaskCommandCenter';
 import { supabase } from './lib/supabase';
+
+function FullScreenSpinner() {
+  return (
+    <div className="min-h-screen bg-[#070810] text-white flex items-center justify-center">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300..700&display=swap');
+        body { font-family: 'Outfit', sans-serif; background: #070810; }
+      `}</style>
+      <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-2xl shadow-fuchsia-500/30 animate-pulse">
+        <Sparkles className="w-6 h-6 text-white" />
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -22,7 +38,7 @@ export default function App() {
 
     const unsub = auth.onAuthChange((s) => {
       if (!mounted) return;
-      // Keep the Realtime socket's JWT in sync on login / token refresh / logout.
+      // Keep the Realtime socket's JWT in sync on login / token refresh / logout / recovery.
       supabase.realtime.setAuth(s?.access_token ?? null);
       setSession(s);
       if (!s) setCurrentMember(null);
@@ -44,21 +60,28 @@ export default function App() {
     try { await auth.signOut(); } catch (err) { console.error('Sign out failed:', err); }
   };
 
-  if (checking) {
-    return (
-      <div className="min-h-screen bg-[#070810] text-white flex items-center justify-center">
-        <style>{`
-          @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300..700&display=swap');
-          body { font-family: 'Outfit', sans-serif; background: #070810; }
-        `}</style>
-        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-2xl shadow-fuchsia-500/30 animate-pulse">
-          <Sparkles className="w-6 h-6 text-white" />
-        </div>
-      </div>
-    );
-  }
+  // Gate ALL routing behind the initial session check, so no auth screen flashes before we know
+  // whether a session exists (prevents a /login flash for already-signed-in users on reload).
+  if (checking) return <FullScreenSpinner />;
 
-  if (!session) return <AuthScreen />;
+  return (
+    <Routes>
+      {/* Public auth routes. /forgot-password + /reset-password must stay reachable without a normal
+          session — the recovery link arrives before/independent of one (and may itself establish a
+          recovery session, which is why /reset-password is never gated on session). */}
+      <Route path="/login" element={session ? <Navigate to="/" replace /> : <AuthScreen key="signin" mode="signin" />} />
+      <Route path="/forgot-password" element={<AuthScreen key="reset" mode="reset" />} />
+      <Route path="/reset-password" element={<ResetPasswordScreen />} />
 
-  return <VisualTaskCommandCenter session={session} currentMember={currentMember} onSignOut={handleSignOut} />;
+      {/* Everything else is the authenticated app; its own view routes live in AppShell. */}
+      <Route
+        path="/*"
+        element={
+          session
+            ? <VisualTaskCommandCenter session={session} currentMember={currentMember} onSignOut={handleSignOut} />
+            : <Navigate to="/login" replace />
+        }
+      />
+    </Routes>
+  );
 }
