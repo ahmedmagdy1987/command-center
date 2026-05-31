@@ -95,16 +95,20 @@ or grant). Direct inserts are denied (verified); all creation goes through the R
 - `set_workspace_id` (BEFORE INSERT) on **tasks, comments, messages, notifications, projects** →
   `public.set_workspace_id_from_membership()` (SECURITY DEFINER, `search_path=''`, EXECUTE revoked):
   stamps `workspace_id` from the inserter's membership when NULL.
-- `tasks_align_privacy` (BEFORE INSERT/UPDATE on tasks) → forces `privacy='private'` for `owner='me'`,
-  else `'workspace'`. (Plain trigger fn, not DEFINER.)
+- ~~`tasks_align_privacy`~~ — **trigger DROPPED in Phase 2A**: privacy is no longer derived from `owner`
+  (the two dimensions are now independent). The function is orphaned (dropped in 2C).
 - `members_lock_role` (BEFORE UPDATE on members) → blocks ANY `role` change via UPDATE (closes
   self-promotion to owner). Owner-managed role changes are a later phase.
-- `notify_on_task_created` (AFTER INSERT on tasks) → when an **owner** creates a non-private va/shared
-  task, notify every non-owner member (the VA).
-- `notify_on_comment_added` (AFTER INSERT on comments) → on a workspace (va/shared) task, notify all
-  members except the author. Private 'me' tasks notify no one.
-- `notify_on_task_completed` (AFTER UPDATE on tasks) → on transition into `done` of a va/shared task by
-  a **non-owner** (the VA), notify the owner(s).
+- `notify_on_task_assigned` (AFTER INSERT OR UPDATE OF assignee_id on tasks; **replaced
+  `notify_on_task_created` in Phase 2B-1**) → on create, or when `assignee_id` changes, notify the
+  **assignee** — unless the assignee is the acting user (`auth.uid()`).
+- `notify_on_comment_added` (AFTER INSERT on comments) → notify the task's **participants
+  {created_by, assignee_id}** (distinct) minus the comment author. Self-assigned → notified once.
+- `notify_on_task_completed` (AFTER UPDATE on tasks) → on transition into `done` by an actor **other
+  than the creator**, notify the **creator**.
+- All three (rewritten in 2B-1): key off **`assignee_id`, never `owner`**; stamp
+  `notifications.workspace_id` = the task's `workspace_id`; types `task_assigned` / `comment_added` /
+  `task_completed`.
 - `notify_*` fns are SECURITY DEFINER with EXECUTE revoked; clients have **no INSERT grant** on
   `notifications` (rows come only from these triggers). RLS lets a recipient read/update/delete only
   their own rows.
@@ -229,6 +233,25 @@ real assignee.
   third member does not, an unassigned private task stays creator-only; the member RPC returns the workspace's
   members for a member and 0 for a non-member with no cross-workspace leak; security advisors clean.
 
+**Phase 2B-1 — notify_* rewrite (DB companion of 2B, landed in isolation)** (`20260531211450`). Rewrote the
+three notification triggers off `owner` onto `assignee_id` + the task's workspace, clearing the last `owner`
+reference out of the triggers (so 2C is safe). Locked semantics:
+- **`notify_on_task_assigned`** (replaced `notify_on_task_created`; `AFTER INSERT OR UPDATE OF assignee_id`) —
+  notify the assignee on create/reassignment, unless assignee == the acting user.
+- **`notify_on_task_completed`** — notify the creator when a task goes to `done` by anyone other than the creator.
+- **`notify_on_comment_added`** — notify the distinct participants {created_by, assignee_id} minus the comment
+  author (self-assigned → exactly one).
+- All three stamp `notifications.workspace_id` = the task's workspace; functions stay SECURITY DEFINER /
+  `search_path=''` / EXECUTE-revoked. New `notifications.type` value `task_assigned` (the column has no CHECK
+  and the app doesn't branch on type, so it's transition-safe).
+- **Verified (rolled-back proof, then post-commit):** assigned→assignee (self/unassigned→none; reassign→new
+  assignee); completed→creator (own→none); comment→participants minus author (self-assigned deduped to one);
+  every notification carried the right workspace_id; task/comment writes still succeed; no `owner` reference
+  remains in any notify fn; advisors clean.
+- **Transient gap (expected, until 2B-2):** the app doesn't set `assignee_id` yet, so new tasks have
+  `assignee_id=NULL` → assignment notifications stay quiet for new tasks in that window; completion + comment
+  notifications work.
+
 ## Behavior-preservation baselines (the gate)
 
 The discipline on every DB change is: **per-user visible row counts must not change in ways the
@@ -292,11 +315,11 @@ For a true behavior-preservation proof, also run a temporary **second-workspace 
   `private.is_workspace_owner(workspace_id)` (DB) and the current workspace's `workspace_members.role`
   (app) — **never** the global `members.role` (vestigial since 3B-2). The app reads global `members`
   only for profile (email/display_name).
-- **Trigger functions hardened:** `search_path=''` + EXECUTE revoked from public/anon/authenticated.
-  Known outliers (faithful to migrations, harmless, fix if doing a hardening pass):
-  `tasks_align_privacy` has `search_path=''` but EXECUTE was **not** revoked (still default-PUBLIC) —
-  fine because it's a plain non-DEFINER trigger fn; and `notify_on_task_created` uses
-  `search_path=public` (the other two notify_* use `''`) — fine, it fully-qualifies `public.*`.
+- **Trigger functions hardened:** `search_path=''` + EXECUTE revoked from public/anon/authenticated —
+  now uniform across all DEFINER trigger fns (the former outliers are gone: `tasks_align_privacy`'s
+  trigger was dropped in 2A, and `notify_on_task_created`'s `search_path=public` quirk was retired in
+  2B-1 when it became `notify_on_task_assigned` with `search_path=''`). The orphaned
+  `tasks_align_privacy` function is dropped in 2C.
 - **Realtime needs `supabase.realtime.setAuth(token)`** (done in `App.jsx` on session change) AND
   **REPLICA IDENTITY FULL** on any table whose UPDATE/DELETE must sync with a server-side filter or
   carry full old rows (set on `comments` + `messages`; `tasks` is DEFAULT → see the tasks realtime
@@ -328,11 +351,9 @@ RPC + onboarding); `members.role` is vestigial for authz. Public sign-up is stil
 `SIGNUP_ENABLED` flag in `AuthScreen.jsx`).
 
 **Required before invitations** — must land before any real multi-member / multi-workspace situation:
-1. **(higher) Make the notify_* triggers workspace-aware.** `notify_on_task_created` /
-   `notify_on_task_completed` read the **global** `members` table + `members.role` unscoped, so with 2+
-   workspaces they'd route notifications to the wrong workspace's members (recipients are still shielded
-   by the notifications workspace check, but it produces junk rows + wrong routing + bloat at scale).
-   Route only to the task's-workspace members, using per-workspace roles.
+1. ~~**Make the notify_* triggers workspace-aware.**~~ **DONE in Phase 2B-1** (`20260531211450`): the three
+   notify_* triggers now route off `assignee_id` to specific task participants (assignee / creator) and stamp
+   the task's `workspace_id` — no more global-`members` blast or wrong-workspace routing.
 2. **(lower) Scope the storage `voice_notes_*` policies to the workspace.** They currently gate on
    global members-existence, not workspace. Low severity (a voice-note path is only learnable from a
    message that's already workspace-scoped, so path-guessing is infeasible), but tighten before public
@@ -340,18 +361,18 @@ RPC + onboarding); `members.role` is vestigial for authz. Public sign-up is stil
 
 **Next phases:**
 1. **Generalize task assignment** *(in progress)* — replace the hardcoded **Me / VA / Shared** owner model
-   with **per-member assignment** (private-vs-shared visibility stays). **2A (DB) is DONE** (`20260531205730`:
-   `assignee_id` + ⟨P2⟩ RLS + the `workspace_members_list` RPC — see Phases above). **Queued:** **2B (app)** —
-   switch UI `owner`→`assignee_id` (member picker via `workspace_members_list`), independent privacy toggle,
-   member-aware views, `/va-desk`→`/my-tasks` (keep a redirect), new-task defaults assignee=me / privacy=Shared;
-   **plus 2B's DB companion** rewriting the `notify_*` triggers to assignee/creator/participant targeting +
-   workspace-scoped (this discharges the "make notify_* workspace-aware" item under "Required before
-   invitations"). **2C (DB cleanup)** — drop the `owner` column + `tasks_owner_check` + the orphaned
-   `tasks_align_privacy` function. Decisions locked: FK→auth.users SET NULL; reassign governed by RLS (a
-   private task's assignee can't reassign to a third party, only the creator can); member list via the RPC.
-2. **Invitations** — invite a user into an existing workspace (do "Required before invitations" #1 first).
+   with **per-member assignment** (private-vs-shared visibility stays). **DONE:** **2A** (`20260531205730`:
+   `assignee_id` + ⟨P2⟩ RLS + the `workspace_members_list` RPC) and **2B-1** (`20260531211450`: the notify_*
+   triggers rewritten off `owner` onto `assignee_id` — see Phases). **Queued: 2B-2 (app)** — switch UI
+   `owner`→`assignee_id` (member picker via `workspace_members_list`), independent privacy toggle, member-aware
+   views, `/va-desk`→`/my-tasks` (keep a redirect), new-task defaults assignee=me / privacy=Shared. **2C (DB
+   cleanup)** — drop the `owner` column + `tasks_owner_check` + the orphaned `tasks_align_privacy` function.
+   Decisions locked: FK→auth.users SET NULL; reassign governed by RLS (a private task's assignee can't reassign
+   to a third party, only the creator can); member list via the RPC.
+2. **Invitations** — invite a user into an existing workspace ("Required before invitations" #1 is now done in
+   2B-1; only #2 voice-notes scoping remains).
 3. **Billing** — Stripe, per-workspace subscriptions + general product-readiness.
 
-**Reaffirmed gate:** the notify_* routing fix **and** the voice-notes storage scoping (both under
-"Required before invitations" above) must land **before public sign-up opens** (the `SIGNUP_ENABLED`
-flip) — they're the last correctness/isolation gaps for a real multi-workspace, multi-member world.
+**Reaffirmed gate:** the notify_* routing fix is **done (2B-1)**; the remaining **voice-notes storage
+scoping** (#2 under "Required before invitations" above) must still land **before public sign-up opens**
+(the `SIGNUP_ENABLED` flip) — it's the last isolation gap for a real multi-workspace, multi-member world.
