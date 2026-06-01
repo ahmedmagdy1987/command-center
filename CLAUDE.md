@@ -284,6 +284,22 @@ independent privacy; the legacy `owner` category is gone from the client (the DB
   create/update/complete + comment succeed; advisors clean; per-user counts unchanged from the current 26/0/0
   baseline (the old 42/18/16 is void — see the baselines note).
 
+**UX polish — Bundle 1** (frontend only; no DB). Five small changes, all in `VisualTaskCommandCenter.jsx`:
+- **`ConfirmModal`** — reusable app-styled destructive-confirm modal (replaces the native `confirm()` on
+  per-task delete; z-[60], Delete focused/rose, Cancel/Esc/backdrop cancel, Esc stops bubbling). **Use it for
+  future destructive confirms** instead of `confirm()`/`alert()`.
+- **Kanban "+ Add task"** opens the full `TaskModal` with status pre-set (via `AppProvider.startDraftTask`:
+  create a row with an empty title → open the modal). Abandoning it (closing with a still-empty title)
+  auto-deletes the draft — `AppProvider.closeEditing`, routed from the modal backdrop/X and the global Esc.
+- **Kanban board shows 5 columns** — Scheduled dropped from the **board only** (`STATUSES.scheduled` + `/schedule`
+  intact); columns are `flex-1 min-w-[220px]` so the five fill the width with **no horizontal scrollbar** on
+  desktop (5×220 + gaps = 1148px ≪ ~1300px board width).
+- **"Added by X"** (read-only) on the task card + modal via `creatorLabel(createdBy)` (you / member name /
+  "a former member" / fallback).
+- **Removal animations** — `deleteTask` is **two-phase** (mark `exitingIds` → `fadeSlideOut` ~180ms → remove +
+  persist; reconciles via refetch on failure) and `NotificationToast` fades out on dismiss; both **respect
+  `prefers-reduced-motion`** (instant, JS-guarded via `prefersReducedMotion()`).
+
 ## Behavior-preservation baselines (the gate)
 
 > **Current live data (2026-06-01): WS1 = 26 tasks, all Tony's private** (per-user visible **Tony 26 · Ahmed

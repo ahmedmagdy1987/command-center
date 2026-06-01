@@ -195,6 +195,11 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   // All members of the CURRENT workspace ([{userId, displayName, email, role}]) — for the assignee
   // picker + member-aware views/labels. Loaded per workspace via the workspace_members_list RPC.
   const [members, setMembers] = useState([]);
+  // Tasks mid-exit-animation (id present -> the card renders its fade/slide-out before actual removal).
+  const [exitingIds, setExitingIds] = useState(() => new Set());
+  // Refs: the just-created "+ Add task" draft (auto-deleted if abandoned empty) + a stable Esc-time closer.
+  const draftIdRef = useRef(null);
+  const closeEditingRef = useRef(null);
 
   const [theme, setTheme] = useState(() => {
     const t = themeStore.get(THEME_KEY) || 'dark';
@@ -352,7 +357,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       else if (mod && e.key.toLowerCase() === 'n') { e.preventDefault(); setQuickAddOpen(true); }
       else if (!inField && e.key === '/') { e.preventDefault(); document.getElementById('global-search')?.focus(); }
       else if (!inField && e.key.toLowerCase() === 'n' && !mod) { e.preventDefault(); setQuickAddOpen(true); }
-      else if (e.key === 'Escape') { setPaletteOpen(false); setQuickAddOpen(false); setEditingTask(null); }
+      else if (e.key === 'Escape') { setPaletteOpen(false); setQuickAddOpen(false); closeEditingRef.current?.(); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -404,16 +409,20 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     }
   }, []);
 
-  const deleteTask = useCallback(async (id) => {
-    const prev = tasks;
-    setTasks(p => p.filter(t => t.id !== id));
-    try {
-      await tasksApi.delete(id);
-    } catch (err) {
-      console.error('Delete failed:', err);
-      setTasks(prev);
-    }
-  }, [tasks]);
+  // Two-phase delete: fade/slide the card out (~180ms), then remove + persist. Reduced-motion -> immediate.
+  const deleteTask = useCallback((id) => {
+    const finish = () => {
+      setTasks(p => p.filter(t => t.id !== id));
+      setExitingIds(p => { const n = new Set(p); n.delete(id); return n; });
+      tasksApi.delete(id).catch(err => {
+        console.error('Delete failed:', err);
+        tasksApi.list(currentWorkspaceId).then(setTasks).catch(() => {});   // reconcile with server on failure
+      });
+    };
+    if (prefersReducedMotion()) { finish(); return; }
+    setExitingIds(p => new Set(p).add(id));
+    setTimeout(finish, 180);
+  }, [currentWorkspaceId]);
 
   const duplicateTask = useCallback(async (id) => {
     const original = tasks.find(t => t.id === id);
@@ -506,6 +515,31 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     return { id: assigneeId, label: assigneeId === userId ? 'Me' : name, hex: c.hex, soft: c.soft, initials: initialsOf(name) };
   }, [members, userId]);
 
+  // "Added by X" label for a task's creator: 'you' for self, the member's name, or a graceful fallback.
+  const creatorLabel = useCallback((id) => {
+    if (!id) return 'someone';
+    if (id === userId) return 'you';
+    const m = members.find(x => x.userId === id);
+    return m ? (m.displayName || m.email) : 'a former member';
+  }, [members, userId]);
+
+  // "+ Add task" (Kanban): create a row immediately (empty title) and open the full TaskModal on it.
+  const startDraftTask = useCallback(async (partial) => {
+    const real = await addTask({ title: '', ...partial });
+    if (real) { draftIdRef.current = real.id; setEditingTask(real); }
+    return real;
+  }, [addTask]);
+
+  // Close the task modal; if the open task is an abandoned "+ Add task" draft with an empty title, delete it.
+  const closeEditing = () => {
+    if (editingTask && editingTask.id === draftIdRef.current && !(editingTask.title || '').trim()) {
+      deleteTask(editingTask.id);
+    }
+    draftIdRef.current = null;
+    setEditingTask(null);
+  };
+  useEffect(() => { closeEditingRef.current = closeEditing; });   // keep the Esc-time closer current (ref write off-render)
+
   const value = {
     tasks, projects, theme, view, filters, compact, draggedId,
     paletteOpen, quickAddOpen, editingTask,
@@ -515,6 +549,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     setTheme, setView, setFilters, setCompact, setDraggedId,
     setPaletteOpen, setQuickAddOpen, setEditingTask,
     addTask, updateTask, deleteTask, duplicateTask, toggleSubtask,
+    startDraftTask, closeEditing, exitingIds, creatorLabel,
     exportJSON, importJSON,
     chatUnread, markChatRead,
   };
@@ -525,6 +560,9 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
    SHARED UI PRIMITIVES
 ================================================================================= */
 const cx = (...xs) => xs.filter(Boolean).join(' ');
+
+// Respect the user's reduced-motion preference (skip exit animations + their delays entirely).
+const prefersReducedMotion = () => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /** Relative "time ago" label for notifications (e.g. "just now", "5m ago", "Apr 3"). */
 const timeAgo = (iso) => {
@@ -719,9 +757,10 @@ function ChangePasswordModal({ open, onClose }) {
    TASK CARD
 ================================================================================= */
 function TaskCard({ task, compact = false, onClick, draggable = true, showOwner = true }) {
-  const { setDraggedId, updateTask, projects, resolveAssignee } = useApp();
+  const { setDraggedId, updateTask, projects, resolveAssignee, exitingIds, creatorLabel } = useApp();
   const priority = PRIORITIES[task.priority];
   const assignee = resolveAssignee(task.assigneeId);
+  const exiting = exitingIds.has(task.id);
   const project = projects.find(p => p.id === task.project);
   const due = formatDue(task.dueDate);
   const overdue = isOverdue(task);
@@ -749,6 +788,7 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showOwner 
         'hover:border-white/15 hover:from-white/[0.06] hover:to-white/[0.02]',
         'hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/30',
         done && 'opacity-50',
+        exiting && 'animate-[fadeSlideOut_.18s_ease_forwards] pointer-events-none',
         compact ? 'p-3' : 'p-4',
       )}
       style={{
@@ -806,6 +846,7 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showOwner 
         {task.tags.slice(0, compact ? 0 : 2).map(t => (
           <span key={t} className="text-[10px] text-white/40">#{t}</span>
         ))}
+        {!compact && task.createdBy && <span className="text-[10px] text-white/30">· by {creatorLabel(task.createdBy)}</span>}
       </div>
     </div>
   );
@@ -949,10 +990,11 @@ function TaskComments({ taskId }) {
 }
 
 function TaskModal() {
-  const { editingTask, setEditingTask, updateTask, deleteTask, duplicateTask, projects, toggleSubtask, members, meId, resolveAssignee } = useApp();
+  const { editingTask, setEditingTask, updateTask, deleteTask, duplicateTask, projects, toggleSubtask, members, meId, resolveAssignee, closeEditing, creatorLabel } = useApp();
   const t = editingTask;
   const [newSub, setNewSub] = useState('');
   const [recurrenceOpen, setRecurrenceOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   useEffect(() => { setNewSub(''); setRecurrenceOpen(false); }, [editingTask?.id]);
 
   if (!t) return null;
@@ -969,7 +1011,7 @@ function TaskModal() {
   const priority = PRIORITIES[t.priority];
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center p-0 sm:p-6 animate-[fadeIn_.15s_ease]" onClick={() => setEditingTask(null)}>
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center p-0 sm:p-6 animate-[fadeIn_.15s_ease]" onClick={closeEditing}>
       <div onClick={e => e.stopPropagation()} className="w-full sm:max-w-2xl max-h-screen sm:max-h-[85vh] overflow-hidden rounded-t-2xl sm:rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl flex flex-col">
         <div className="px-6 pt-5 pb-3 border-b border-white/5" style={{ background: `linear-gradient(180deg, ${priority.bg}, transparent)` }}>
           <div className="flex items-center gap-2 mb-3">
@@ -978,8 +1020,8 @@ function TaskModal() {
             {isRecurring(t.recurring) && <Badge icon={RefreshCw}>{formatRecurrence(t.recurring) || 'Repeats'}</Badge>}
             <div className="flex-1" />
             <IconButton icon={Copy} label="Duplicate" onClick={() => { duplicateTask(t.id); setEditingTask(null); }} />
-            <IconButton icon={Trash2} label="Delete" onClick={() => { if (confirm('Delete this task?')) { deleteTask(t.id); setEditingTask(null); } }} />
-            <IconButton icon={X} label="Close" onClick={() => setEditingTask(null)} />
+            <IconButton icon={Trash2} label="Delete" onClick={() => setConfirmOpen(true)} />
+            <IconButton icon={X} label="Close" onClick={closeEditing} />
           </div>
           <input
             value={t.title}
@@ -987,7 +1029,13 @@ function TaskModal() {
             className="w-full bg-transparent text-xl sm:text-2xl font-semibold text-white placeholder-white/30 outline-none font-display"
             placeholder="Task title"
           />
+          {t.createdBy && <div className="mt-1.5 text-[11px] text-white/35">Added by {creatorLabel(t.createdBy)}</div>}
         </div>
+
+        <ConfirmModal open={confirmOpen} title="Delete task"
+          message={`"${(t.title || '').trim() || 'Untitled task'}" will be permanently deleted. This can't be undone.`}
+          onConfirm={() => { setConfirmOpen(false); deleteTask(t.id); setEditingTask(null); }}
+          onClose={() => setConfirmOpen(false)} />
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
           <div className="flex flex-wrap gap-2">
@@ -1608,13 +1656,19 @@ function MobileTabs() {
    (which establishes a containing block for fixed descendants) cannot clip it. */
 function NotificationToast({ n, light, onOpen, onDismiss }) {
   const { id } = n;
+  const [leaving, setLeaving] = useState(false);
   useEffect(() => {
-    const t = setTimeout(() => onDismiss(id), 5000);
+    const t = setTimeout(() => {
+      if (prefersReducedMotion()) { onDismiss(id); return; }
+      setLeaving(true);
+      setTimeout(() => onDismiss(id), 180);   // remove after the fade/slide-out
+    }, 5000);
     return () => clearTimeout(t);
   }, [id, onDismiss]);
   return (
     <button onClick={() => onOpen(n)}
-      className="pointer-events-auto flex items-start gap-2.5 w-full text-left px-3.5 py-3 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl hover:border-white/20 transition-colors animate-[slideUp_.2s_ease]">
+      className={cx('pointer-events-auto flex items-start gap-2.5 w-full text-left px-3.5 py-3 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl hover:border-white/20 transition-colors',
+        leaving ? 'animate-[fadeSlideOut_.18s_ease_forwards]' : 'animate-[slideUp_.2s_ease]')}>
       <span className="mt-0.5 w-7 h-7 rounded-lg border flex items-center justify-center shrink-0" style={{
         background: light ? 'rgba(124,58,237,0.12)' : 'rgba(139,92,246,0.15)',
         borderColor: light ? 'rgba(124,58,237,0.35)' : 'rgba(139,92,246,0.30)',
@@ -1822,6 +1876,37 @@ function CreateWorkspaceForm({ onCreated, submitLabel = 'Create workspace', auto
         {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Plus className="w-4 h-4" />{submitLabel}</>}
       </button>
     </form>
+  );
+}
+
+/** Reusable app-styled confirmation modal for destructive actions (same style family as
+ *  CreateWorkspaceModal). Renders above other modals (z-[60]); Delete is auto-focused + destructive;
+ *  Cancel / backdrop / Esc cancel. Esc is stopped from bubbling so it doesn't also close an underlying modal. */
+function ConfirmModal({ open, title, message, confirmLabel = 'Delete', onConfirm, onClose }) {
+  const btnRef = useRef(null);
+  useEffect(() => { if (open) setTimeout(() => btnRef.current?.focus(), 30); }, [open]);
+  if (!open) return null;
+  return (
+    <>
+      <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
+        <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5"
+          style={{ animation: 'slideUp .2s ease' }}
+          onClick={e => e.stopPropagation()}
+          onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}>
+          <h2 className="text-base font-semibold text-white mb-1">{title}</h2>
+          {message && <p className="text-xs text-white/55 mb-4 break-words">{message}</p>}
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={onClose}
+              className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">Cancel</button>
+            <button ref={btnRef} onClick={onConfirm}
+              className="h-9 px-4 rounded-xl bg-rose-500 text-white text-xs font-semibold hover:bg-rose-400 transition-colors inline-flex items-center gap-1.5">
+              <Trash2 className="w-3.5 h-3.5" />{confirmLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -2269,7 +2354,7 @@ function KanbanView() {
     <div className="space-y-4">
       <ViewHeader title="Kanban board" subtitle="Drag between columns. Priority color on the left, assignee chip on the right." />
       <div className="flex gap-3 overflow-x-auto pb-4 -mx-4 lg:-mx-6 px-4 lg:px-6 snap-x">
-        {Object.values(STATUSES).map(col => (
+        {Object.values(STATUSES).filter(col => col.id !== 'scheduled').map(col => (
           <KanbanColumn key={col.id} column={col} tasks={byStatus[col.id] || []} />
         ))}
       </div>
@@ -2278,45 +2363,20 @@ function KanbanView() {
 }
 
 function ColumnQuickAdd({ status }) {
-  const { addTask, filters, meId } = useApp();
-  const [open, setOpen] = useState(false);
-  const [title, setTitle] = useState('');
-  const inputRef = useRef(null);
-
-  useEffect(() => { if (open) setTimeout(() => inputRef.current?.focus(), 30); }, [open]);
-
-  const submit = () => {
-    if (!title.trim()) return;
-    addTask({
-      title: title.trim(),
-      status,
-      assigneeId: filters.assignee === 'me' ? meId : (filters.assignee === 'unassigned' ? null : (filters.assignee !== 'all' ? filters.assignee : meId)),
-      project: filters.project !== 'all' ? filters.project : 'other',
-      privacy: filters.privacy !== 'all' ? filters.privacy : 'workspace',
-    });
-    setTitle('');
-    setTimeout(() => inputRef.current?.focus(), 0);
-  };
-
-  if (!open) {
-    return (
-      <button onClick={() => setOpen(true)} type="button"
-        className="w-full flex items-center justify-center gap-1.5 py-2 text-[11px] text-white/40 hover:text-white/90 hover:bg-white/[0.04] border border-dashed border-white/10 hover:border-white/20 rounded-lg transition-colors">
-        <Plus className="w-3 h-3" /> Add task
-      </button>
-    );
-  }
+  const { startDraftTask, filters, meId } = useApp();
+  // "+ Add task" creates a row (status pre-set to this column, defaults from the active filters) and opens
+  // the full TaskModal on it; an abandoned empty draft is auto-removed on close (AppProvider.closeEditing).
+  const add = () => startDraftTask({
+    status,
+    assigneeId: filters.assignee === 'me' ? meId : (filters.assignee === 'unassigned' ? null : (filters.assignee !== 'all' ? filters.assignee : meId)),
+    project: filters.project !== 'all' ? filters.project : 'other',
+    privacy: filters.privacy !== 'all' ? filters.privacy : 'workspace',
+  });
   return (
-    <div className="rounded-lg border border-violet-400/30 bg-white/[0.05] p-1.5">
-      <input ref={inputRef} value={title} onChange={e => setTitle(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === 'Enter') { e.preventDefault(); submit(); }
-          else if (e.key === 'Escape') { setOpen(false); setTitle(''); }
-        }}
-        onBlur={() => { if (!title.trim()) setOpen(false); }}
-        placeholder="New task — Enter to add"
-        className="w-full bg-transparent text-sm text-white outline-none placeholder-white/30 px-2 py-1" />
-    </div>
+    <button onClick={add} type="button"
+      className="w-full flex items-center justify-center gap-1.5 py-2 text-[11px] text-white/40 hover:text-white/90 hover:bg-white/[0.04] border border-dashed border-white/10 hover:border-white/20 rounded-lg transition-colors">
+      <Plus className="w-3 h-3" /> Add task
+    </button>
   );
 }
 
@@ -2339,7 +2399,7 @@ function KanbanColumn({ column, tasks }) {
       onDragOver={e => { e.preventDefault(); if (!over) setOver(true); }}
       onDragLeave={() => setOver(false)}
       onDrop={onDrop}
-      className={cx('shrink-0 w-[290px] snap-start rounded-2xl border transition-all duration-200',
+      className={cx('flex-1 min-w-[220px] snap-start rounded-2xl border transition-all duration-200',
         over ? 'border-white/25 bg-white/[0.04]' : 'border-white/[0.06] bg-white/[0.015]')}>
       <div className="px-4 pt-4 pb-3 border-b border-white/5 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -3184,6 +3244,7 @@ function AppShell() {
         .tabular-nums { font-variant-numeric: tabular-nums; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeSlideOut { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(-6px) scale(0.97); } }
         ::-webkit-scrollbar { width: 10px; height: 10px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
