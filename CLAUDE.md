@@ -274,7 +274,23 @@ independent privacy; the legacy `owner` category is gone from the client (the DB
   no high/medium bugs (4 low edge-cases fixed: members cleared on switch; TaskModal label for a non-member assignee;
   `/va-desk` redirect preserves `?ws=`; QuickAdd always renders a "Me" pill).
 
+**Phase 2C — drop the legacy `owner` column** (`20260601023453`; DB only — **completes Phase 2**).
+- `alter table public.tasks drop column owner` (also dropped the dependent `tasks_owner_check`) +
+  `drop function tasks_align_privacy()` (orphaned since 2A). `assignee_id` + the ⟨P2⟩ task policies are the model.
+- **Pre-req gate (re-confirmed, not assumed):** app had zero task-`owner` references; the only function touching
+  `tasks.owner` was `tasks_align_privacy` (dropped here) — the notify_* triggers reference no `owner`.
+- **Verified:** rolled-back proof (drop → insert/complete/comment all fire → counts) then post-commit: `owner` +
+  `tasks_owner_check` + `tasks_align_privacy` gone; `assignee_id` + FK + 4 policies + the 3 task triggers intact;
+  create/update/complete + comment succeed; advisors clean; per-user counts unchanged from the current 26/0/0
+  baseline (the old 42/18/16 is void — see the baselines note).
+
 ## Behavior-preservation baselines (the gate)
+
+> **Current live data (2026-06-01): WS1 = 26 tasks, all Tony's private** (per-user visible **Tony 26 · Ahmed
+> Magdy 0 · VA 0**). A manual "Clear all tasks" run as Ahmed Magdy during 2B-2 smoke-testing deleted the 16
+> workspace tasks + his 2 private; only Tony's private (RLS-hidden from him) survived. That destructive command
+> has since been removed (see the *No bulk-delete* landmine). **So the current baseline is 26 / 0 / 0** — the
+> 42/18/16 (and the 40/16/14 table below) are historical, void after that clear.
 
 The discipline on every DB change is: **per-user visible row counts must not change in ways the
 migration didn't intend.** **Re-capture a FRESH baseline immediately before each change** — never reuse
@@ -347,7 +363,7 @@ For a true behavior-preservation proof, also run a temporary **second-workspace 
   now uniform across all DEFINER trigger fns (the former outliers are gone: `tasks_align_privacy`'s
   trigger was dropped in 2A, and `notify_on_task_created`'s `search_path=public` quirk was retired in
   2B-1 when it became `notify_on_task_assigned` with `search_path=''`). The orphaned
-  `tasks_align_privacy` function is dropped in 2C.
+  `tasks_align_privacy` function was dropped in 2C (`20260601023453`).
 - **Realtime needs `supabase.realtime.setAuth(token)`** (done in `App.jsx` on session change) AND
   **REPLICA IDENTITY FULL** on any table whose UPDATE/DELETE must sync with a server-side filter or
   carry full old rows (set on `comments` + `messages`; `tasks` is DEFAULT → see the tasks realtime
@@ -373,10 +389,12 @@ For a true behavior-preservation proof, also run a temporary **second-workspace 
 Public signup must stay **CLOSED** until onboarding + invitations exist (no orphan/no-workspace users,
 no self-join).
 
-**Done:** Phase 3B-2 (per-workspace owner authority) and **Phase 3B-3 (workspace creation + onboarding +
-auth polish)** — see Phases above. Workspace creation is now a real sanctioned flow (`create_workspace`
-RPC + onboarding); `members.role` is vestigial for authz. Public sign-up is still CLOSED (single
-`SIGNUP_ENABLED` flag in `AuthScreen.jsx`).
+**Done:** Phase 3B-2 (per-workspace owner authority), **Phase 3B-3 (workspace creation + onboarding + auth
+polish)**, and **Phase 2 — generalize task assignment, now FULLY DONE** (2A `20260531205730`, 2B-1
+`20260531211450`, 2B-2 app, 2C `20260601023453`): tasks use per-member `assignee_id` + independent privacy;
+the legacy `owner` column/model is gone. Workspace creation is a real sanctioned flow (`create_workspace` RPC +
+onboarding); `members.role` is vestigial for authz. Public sign-up is still CLOSED (single `SIGNUP_ENABLED` flag
+in `AuthScreen.jsx`).
 
 **Required before invitations** — must land before any real multi-member / multi-workspace situation:
 1. ~~**Make the notify_* triggers workspace-aware.**~~ **DONE in Phase 2B-1** (`20260531211450`): the three
@@ -388,17 +406,9 @@ RPC + onboarding); `members.role` is vestigial for authz. Public sign-up is stil
    launch.
 
 **Next phases:**
-1. **Generalize task assignment** *(in progress)* — replace the hardcoded **Me / VA / Shared** owner model with
-   **per-member assignment** (private-vs-shared visibility stays). **DONE:** **2A** (`20260531205730`: `assignee_id`
-   + ⟨P2⟩ RLS + `workspace_members_list` RPC), **2B-1** (`20260531211450`: notify_* rewritten off `owner` onto
-   `assignee_id`), and **2B-2 (app)** — the whole UI now runs on `assignee_id` + independent privacy (see Phases).
-   **Only 2C (DB cleanup) remains:** drop the `owner` column + `tasks_owner_check` + the orphaned
-   `tasks_align_privacy` function (the app no longer reads `owner`, so this is purely DB). Decisions locked:
-   FK→auth.users SET NULL; reassign governed by RLS (a private task's assignee can't reassign to a third party,
-   only the creator can); member list via the RPC.
-2. **Invitations** — invite a user into an existing workspace ("Required before invitations" #1 is now done in
-   2B-1; only #2 voice-notes scoping remains).
-3. **Billing** — Stripe, per-workspace subscriptions + general product-readiness.
+1. **Invitations** — invite a user into an existing workspace. ("Required before invitations" #1 (notify_*
+   workspace-awareness) is done in 2B-1; only #2 — voice-notes storage scoping — remains before this.)
+2. **Billing** — Stripe, per-workspace subscriptions + general product-readiness.
 
 **Reaffirmed gate:** the notify_* routing fix is **done (2B-1)**; the remaining **voice-notes storage
 scoping** (#2 under "Required before invitations" above) must still land **before public sign-up opens**
