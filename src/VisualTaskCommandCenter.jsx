@@ -436,16 +436,6 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     await updateTask(taskId, { subtasks: newSubs });
   }, [tasks, updateTask]);
 
-  const resetDemo = async () => {
-    if (!confirm('This will delete ALL tasks. Are you sure?')) return;
-    try {
-      await tasksApi.bulkDelete();
-      setTasks([]);
-    } catch (err) {
-      alert('Failed to clear: ' + err.message);
-    }
-  };
-
   const exportJSON = () => {
     const blob = new Blob([JSON.stringify({ tasks, projects, exportedAt: nowISO() }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -525,7 +515,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     setTheme, setView, setFilters, setCompact, setDraggedId,
     setPaletteOpen, setQuickAddOpen, setEditingTask,
     addTask, updateTask, deleteTask, duplicateTask, toggleSubtask,
-    resetDemo, exportJSON, importJSON,
+    exportJSON, importJSON,
     chatUnread, markChatRead,
   };
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
@@ -1400,7 +1390,7 @@ function QuickAdd() {
    COMMAND PALETTE
 ================================================================================= */
 function CommandPalette() {
-  const { paletteOpen, setPaletteOpen, tasks, setEditingTask, setView, setQuickAddOpen, setTheme, theme, resetDemo, exportJSON } = useApp();
+  const { paletteOpen, setPaletteOpen, tasks, setEditingTask, setView, setQuickAddOpen, setTheme, theme, exportJSON } = useApp();
   const [q, setQ] = useState('');
   const inputRef = useRef(null);
   const [idx, setIdx] = useState(0);
@@ -1419,7 +1409,6 @@ function CommandPalette() {
     { id: 'v-chat', label: 'Go to Chat', icon: MessageSquare, run: () => { setView('chat'); setPaletteOpen(false); } },
     { id: 'theme', label: `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`, icon: theme === 'dark' ? Sun : Moon, run: () => { setTheme(theme === 'dark' ? 'light' : 'dark'); setPaletteOpen(false); } },
     { id: 'export', label: 'Export JSON backup', icon: Download, run: () => { exportJSON(); setPaletteOpen(false); } },
-    { id: 'reset', label: 'Clear all tasks', icon: RefreshCw, run: () => { setPaletteOpen(false); resetDemo(); } },
   ], [theme]);
 
   const results = useMemo(() => {
@@ -1903,7 +1892,7 @@ function WorkspaceSwitcher() {
 }
 
 function TopBar() {
-  const { theme, setTheme, setPaletteOpen, setQuickAddOpen, filters, setFilters, view, compact, setCompact, exportJSON, importJSON, resetDemo, projects, syncStatus, currentMember, myRole, onSignOut, members, meId } = useApp();
+  const { theme, setTheme, setPaletteOpen, setQuickAddOpen, filters, setFilters, view, compact, setCompact, exportJSON, importJSON, projects, syncStatus, currentMember, myRole, onSignOut, members, meId } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const fileRef = useRef(null);

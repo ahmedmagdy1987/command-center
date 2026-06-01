@@ -196,11 +196,6 @@ export const tasks = {
     return (data || []).map(fromDbTask);
   },
 
-  async bulkDelete() {
-    const { error } = await supabase.from('tasks').delete().neq('id', '__nope__');
-    if (error) throw error;
-  },
-
   /**
    * Subscribe to real-time changes. Returns an unsubscribe function.
    * cb is called with { type: 'INSERT' | 'UPDATE' | 'DELETE', task }

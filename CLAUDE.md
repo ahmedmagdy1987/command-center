@@ -328,6 +328,12 @@ For a true behavior-preservation proof, also run a temporary **second-workspace 
 - **RLS is the gate, not the app filter.** App-side `workspace_id` filters are convenience; policies
   enforce isolation. Supabase auto-enables RLS on new tables — **a new table with no policy is
   invisible to clients.** Always add policies.
+- **No bulk-delete exists** — the dev-only `resetDemo` / "Clear all tasks" command (a match-all
+  `tasks.bulkDelete()` reachable by ANY member via the command palette, deleting across every workspace the
+  caller could under RLS) was removed after it wiped live data. Only id-scoped per-task delete remains. Don't
+  reintroduce a bulk delete without: **workspace-scoping** (`.eq('workspace_id', …)`, never match-all),
+  **owner-only + DB enforcement** (a `SECURITY DEFINER` RPC gated on `is_workspace_owner`), and a
+  **typed-confirmation modal** (never one-click / native `confirm()` / an always-on palette command).
 - **Policy naming:** `<table>_<verb>_<qualifier>` (e.g. `tasks_select_workspace_or_own_private`,
   `projects_delete_owner`). `to authenticated`. Keep advisor-clean: wrap auth calls as
   `(select auth.uid())` so they're evaluated once (avoids the `auth_rls_initplan` perf advisor).
