@@ -1,8 +1,8 @@
 # Command Center — project guide for Claude
 
 > Orientation file so any future session is instantly up to speed. Last verified against the
-> live DB on **2026-05-31** (latest phase: migration `20260531143755`, Phase 3B-3 — workspace
-> creation + onboarding + auth polish).
+> live DB on **2026-06-02** (latest migration `20260602024124`, Bundle 3 — projects
+> create/rename/delete + the `project_task_count` deletion-gate RPC).
 
 ## What this is
 
@@ -86,6 +86,12 @@ public/anon). Live in the **`private`** (non-PostgREST/non-API) schema so they d
   ALWAYS `auth.uid()`, never params; name trimmed, non-empty, ≤80, else raises). Exposed to the app as
   the thin SECURITY INVOKER passthrough `public.create_workspace(p_name)` — the DEFINER body stays in
   `private` (so it doesn't trip the advisor) and the public wrapper is invoker (so it doesn't either).
+- `private._project_task_count(p_project_id text, p_workspace_id uuid) → int` (Bundle 3, migration
+  `…024124`) — owner-gated (`is_workspace_owner`, else raises `42501`) RELIABLE count of a project's tasks,
+  bypassing the caller's RLS blind spots so the app can **block** deleting a project that still holds tasks
+  (incl. other members' private tasks the deleter can't see). Exposed as the SECURITY INVOKER passthrough
+  `public.project_task_count(p_project_id, p_workspace_id)` — same Option-B advisor-clean shape as
+  `create_workspace`. Read-only (no writes); it's the deletion gate, not a write path.
 
 **Sanctioned write path:** `create_workspace` is the **ONLY** way to write `workspaces` /
 `workspace_members` — both are SELECT-only under RLS for `authenticated` (no INSERT/UPDATE/DELETE policy
@@ -300,6 +306,48 @@ independent privacy; the legacy `owner` category is gone from the client (the DB
   persist; reconciles via refetch on failure) and `NotificationToast` fades out on dismiss; both **respect
   `prefers-reduced-motion`** (instant, JS-guarded via `prefersReducedMotion()`).
 
+**Notification management — Bundle 2** (`0dc5ee3`; frontend only — the recipient+workspace own-row DELETE
+policy + grant on `notifications` already existed, so no migration). Per-notification **delete** + **clear
+all** in the `NotificationBell` panel: `api.js notifications.delete(id)` (id-scoped, RLS-gated) and
+`clearAll(workspaceId)` (recipient + workspace scoped; **throws if no workspaceId** — never a bare/match-all
+delete). Each panel row was restructured from a single `<button>` into a wrapper with two **sibling** buttons
+(open + a hover-revealed, always-visible-on-touch, aria-labeled rose delete) to avoid a nested `<button>`; a
+"Clear all" header control sits behind the Bundle-1 `ConfirmModal`; two-phase `fadeSlideOut` (local
+`exitingNotifIds`, `prefers-reduced-motion` → instant). Also fixed a latent bug: `markAll`'s failure-reconcile
+now passes `currentWorkspaceId` to `list()`. (Notifications realtime stays INSERT-only — deletes don't
+cross-device; left as a separate realtime task.)
+
+**Projects add / delete / rename — Bundle 3** (`ef5b1c8` DB + `223155f` app). Projects were list-only; now
+**members create + rename/recolor** and **owners delete**, all RLS-enforced by the Phase-3A policies
+(`projects_insert_member` / `projects_update_member` / `projects_delete_owner` — the last re-pointed to
+`is_workspace_owner` in 3B-2). No new CRUD migration; the only DB change is the deletion-gate RPC.
+- **`tasks.project` is FREE-TEXT** (`text NOT NULL`, holds the project **id** slug, e.g. `personal`/`other`)
+  with **NO FK** to `projects`. So deleting a project strands nothing at the DB layer; the UI resolves a task's
+  project via `projects.find(p => p.id === task.project)` and degrades gracefully (the chip just disappears,
+  no crash) when the id no longer resolves.
+- **Deletion model = BLOCK-if-has-tasks**, counted reliably via the **`project_task_count` RPC** (see Private
+  helper fns). A frontend/owner-RLS count would be UNRELIABLE — an owner can't see another member's private
+  tasks in a project, so a naive count could delete-and-strand them; the DEFINER RPC counts ALL workspace
+  tasks. The delete `ConfirmModal` fetches the count on open and **disables confirm** ("move N tasks first")
+  when >0; only an empty project deletes (two-phase `fadeSlideOut`, local `exitingProjectIds`).
+- **api.js `projects`** gained `create({name,color,icon}, ws)`, `update(id, patch)`, `delete(id)`,
+  `taskCount(id, ws)`. New `ProjectModal` (name / color swatch / icon) drives create + edit; `ProjectsView`
+  has a "+ New project" (member), per-card owner-only delete + member inline edit. `ConfirmModal` gained a
+  backward-compatible `confirmDisabled` prop.
+- **sanitize.js clamp relaxed (REQUIRED):** `sanitizeTask` no longer clamps `task.project` to a hardcoded
+  9-id whitelist — it accepts any non-empty id, keeps `migrateProjectId` for legacy, and defaults `'other'`
+  only when blank. Without this, a task filed under a newly-created project id was silently coerced to
+  `'other'` (the clamp runs on create/import via `sanitizeTask`, not on reads via `fromDbTask`).
+- **Seed-default edge (flagged, not fixed):** new projects get a `uid()` id, but QuickAdd's new-task defaults
+  are still the hardcoded seed ids (`'other'`, and `'personal'` in the private view). Deleting those seed
+  projects leaves new-task defaults pointing at a missing id → graceful (no chip, no crash) but new tasks land
+  "project-less" until re-filed. Keep `other`/`personal` as de-facto system defaults (or make the defaults
+  dynamic) before relying on it.
+- **Verified:** rolled-back proof (owner_visible=0 vs rpc=1 on a member's hidden private task; non-owner RPC
+  caller rejected; member INSERT ok, non-owner DELETE denied, owner DELETE ok — all rolled back); advisors
+  clean (only `auth_leaked_password_protection`); per-user baseline unchanged; build clean; lint at the 34/2
+  baseline.
+
 ## Behavior-preservation baselines (the gate)
 
 > **Current live data (2026-06-01): WS1 = 26 tasks, all Tony's private** (per-user visible **Tony 26 · Ahmed
@@ -410,7 +458,10 @@ polish)**, and **Phase 2 — generalize task assignment, now FULLY DONE** (2A `2
 `20260531211450`, 2B-2 app, 2C `20260601023453`): tasks use per-member `assignee_id` + independent privacy;
 the legacy `owner` column/model is gone. Workspace creation is a real sanctioned flow (`create_workspace` RPC +
 onboarding); `members.role` is vestigial for authz. Public sign-up is still CLOSED (single `SIGNUP_ENABLED` flag
-in `AuthScreen.jsx`).
+in `AuthScreen.jsx`). **Feature bundles since:** Bundle 1 (confirm modal, Kanban add/5-col board, added-by,
+exit anims), Bundle 2 (notification delete + clear-all), Bundle 3 (projects create/rename/delete + the
+`project_task_count` deletion gate) — all frontend except Bundle 3's one RPC migration. **(Current lint
+baseline: 34 errors / 2 warnings.)**
 
 **Required before invitations** — must land before any real multi-member / multi-workspace situation:
 1. ~~**Make the notify_* triggers workspace-aware.**~~ **DONE in Phase 2B-1** (`20260531211450`): the three
