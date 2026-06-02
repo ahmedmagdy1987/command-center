@@ -4,10 +4,11 @@ import { Sparkles, Mail, Lock, ArrowRight, AlertCircle, Loader2, CheckCircle2 } 
 import { auth } from './lib/api';
 
 // ── Public sign-up switch ─────────────────────────────────────────────────────
-// Sign-up is intentionally CLOSED while we build onboarding + invitations (no orphan /
-// no-workspace users, no self-join). THIS is the single place to open it: flip to `true`
-// to reveal the "Create account" flow on the welcome screen. Keep closed until invitations exist.
-const SIGNUP_ENABLED = false;
+// Public sign-up is OPEN: invitations shipped, and onboarding routes a no-workspace user to
+// create their first workspace (becoming its owner). This is the single APP-side gate — the
+// Supabase project must ALSO have "Allow new users to sign up" + Confirm email ON (with working
+// SMTP) for signups to actually land. The invited-signup path (InviteScreen) is independent of this.
+const SIGNUP_ENABLED = true;
 
 /**
  * Welcome / sign-in screen. `mode` ('signin' | 'reset') is driven by the route (/login vs
