@@ -117,6 +117,60 @@ export const workspaceMembers = {
 };
 
 /* =================================================================================
+   INVITATIONS — email-bound invite + token link. ALL writes go through the sanctioned
+   SECURITY DEFINER RPCs (the table is SELECT-only under RLS): create_invitation (owner),
+   accept_invitation (email-bound; inserts the workspace_members row as auth.uid()),
+   invitation_preview (authenticated; minimal), revoke_invitation (owner).
+================================================================================= */
+export const invitations = {
+  /** Owner view: all invitations for a workspace (RLS invitations_select_owner). */
+  async listForWorkspace(workspaceId) {
+    if (!workspaceId) return [];
+    const { data, error } = await supabase
+      .from('invitations')
+      .select('id, email, role, status, token, created_at, expires_at')
+      .eq('workspace_id', workspaceId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+  /** Invitee view: the caller's own pending invites (RLS invitations_select_invitee, by auth.email()). */
+  async listMine() {
+    const { data, error } = await supabase
+      .from('invitations')
+      .select('id, workspace_id, email, token, created_at, expires_at')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+  /** Owner-only: create (or refresh) the single pending invite for an email. Returns the row incl. token. */
+  async create(workspaceId, email) {
+    const { data, error } = await supabase.rpc('create_invitation', { p_workspace_id: workspaceId, p_email: email });
+    if (error) throw error;
+    return Array.isArray(data) ? data[0] : data;
+  },
+  /** Email-bound accept. Returns the joined workspace { id, name, created_at }. */
+  async accept(token) {
+    const { data, error } = await supabase.rpc('accept_invitation', { p_token: token });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    return row ? { id: row.id, name: row.name, created_at: row.created_at } : null;
+  },
+  /** Authenticated minimal preview of a token: { workspace_name, email, status, is_expired } or null. */
+  async preview(token) {
+    const { data, error } = await supabase.rpc('invitation_preview', { p_token: token });
+    if (error) throw error;
+    return Array.isArray(data) ? (data[0] ?? null) : (data ?? null);
+  },
+  /** Owner-only: revoke a pending invite. */
+  async revoke(id) {
+    const { error } = await supabase.rpc('revoke_invitation', { p_id: id });
+    if (error) throw error;
+  },
+};
+
+/* =================================================================================
    PROJECTS — scoped to a workspace.
 ================================================================================= */
 export const projects = {

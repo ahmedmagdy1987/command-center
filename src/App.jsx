@@ -4,6 +4,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { auth, members } from './lib/api';
 import AuthScreen from './AuthScreen';
 import ResetPasswordScreen from './ResetPasswordScreen';
+import InviteScreen from './InviteScreen';
 import VisualTaskCommandCenter from './VisualTaskCommandCenter';
 import { supabase } from './lib/supabase';
 
@@ -72,6 +73,10 @@ export default function App() {
       <Route path="/login" element={session ? <Navigate to="/" replace /> : <AuthScreen key="signin" mode="signin" />} />
       <Route path="/forgot-password" element={<AuthScreen key="reset" mode="reset" />} />
       <Route path="/reset-password" element={<ResetPasswordScreen />} />
+
+      {/* Email-bound invite acceptance. Public (like the recovery routes): reachable without a
+          session — a signed-out invitee signs in / creates an account here, then accepts. */}
+      <Route path="/invite/:token" element={<InviteScreen session={session} />} />
 
       {/* Everything else is the authenticated app; its own view routes live in AppShell. */}
       <Route

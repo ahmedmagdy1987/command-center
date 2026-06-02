@@ -7,9 +7,9 @@ import {
   Circle, CheckCircle2, Calendar, Zap, Timer, MoreHorizontal, Edit3, Filter,
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
   Brain, Target, Hourglass, GripVertical, Info, Keyboard, LogOut, Wifi, WifiOff, Loader2,
-  KeyRound, Bell, MessageSquare, Send, Mic, Square, Play, Pause
+  KeyRound, Bell, MessageSquare, Send, Mic, Square, Play, Pause, Users, Mail, UserPlus
 } from 'lucide-react';
-import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, workspaces as workspacesApi, workspaceMembers as workspaceMembersApi, auth } from './lib/api';
+import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, workspaces as workspacesApi, workspaceMembers as workspaceMembersApi, invitations as invitationsApi, auth } from './lib/api';
 import { supabase } from './lib/supabase';
 import { sanitizeTask, uid, nowISO } from './lib/sanitize';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
@@ -24,6 +24,7 @@ const VIEW_TO_PATH = {
   mine: '/my-tasks',
   private: '/private',
   chat: '/chat',
+  members: '/members',
 };
 const PATH_TO_VIEW = Object.fromEntries(Object.entries(VIEW_TO_PATH).map(([v, p]) => [p, v]));
 
@@ -203,6 +204,8 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   const [exitingIds, setExitingIds] = useState(() => new Set());
   // Project cards mid-exit-animation (same two-phase pattern as tasks).
   const [exitingProjectIds, setExitingProjectIds] = useState(() => new Set());
+  // The caller's pending invitations into OTHER workspaces (for the accept surfaces).
+  const [pendingInvites, setPendingInvites] = useState([]);
   // Refs: the just-created "+ Add task" draft (auto-deleted if abandoned empty) + a stable Esc-time closer.
   const draftIdRef = useRef(null);
   const closeEditingRef = useRef(null);
@@ -533,6 +536,40 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     return created;
   }, [userId, navigate]);
 
+  // Pending invitations the caller can accept (into OTHER workspaces). Loaded by email via RLS, then
+  // enriched with the workspace name via the authenticated preview (the invitee isn't a member yet,
+  // so workspaces RLS would otherwise hide the name). Expired invites are dropped.
+  const refreshInvites = useCallback(async () => {
+    if (!userId) { setPendingInvites([]); return; }
+    try {
+      const mine = await invitationsApi.listMine();
+      const enriched = await Promise.all(mine.map(async (inv) => {
+        try { const p = await invitationsApi.preview(inv.token); return { ...inv, workspaceName: p?.workspace_name || 'a workspace', isExpired: !!p?.is_expired }; }
+        catch { return { ...inv, workspaceName: 'a workspace', isExpired: false }; }
+      }));
+      setPendingInvites(enriched.filter(i => !i.isExpired));
+    } catch (err) { console.error('Failed to load pending invites:', err); }
+  }, [userId]);
+  useEffect(() => { refreshInvites(); }, [refreshInvites]);
+
+  // Accept an invite, then refetch workspaces + memberships and switch into the new one
+  // (the createWorkspace pattern, minus the create — so isOwner/isMember derive correctly).
+  const acceptInvitation = useCallback(async (token) => {
+    const ws = await invitationsApi.accept(token);
+    const [wss, mine] = await Promise.all([workspacesApi.listMine(), workspaceMembersApi.listMine()]);
+    setWorkspaces(wss);
+    setMemberships(mine);
+    setMembershipsLoaded(true);
+    setPendingInvites(prev => prev.filter(i => i.token !== token));
+    const targetId = ws?.id ?? null;
+    if (targetId) {
+      setCurrentWorkspaceId(targetId);
+      writeStoredWorkspace(userId, targetId);
+      navigate(`${VIEW_TO_PATH.dashboard}?ws=${targetId}`, { replace: true });
+    }
+    return ws;
+  }, [userId, navigate]);
+
   // Authoritative role for the CURRENTLY-selected workspace (from workspace_members) — NOT the
   // vestigial global members.role. Recomputed on workspace switch, so a user who is owner in one
   // workspace and member in another always sees the role matching the active workspace.
@@ -588,6 +625,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     setPaletteOpen, setQuickAddOpen, setEditingTask,
     addTask, updateTask, deleteTask, duplicateTask, toggleSubtask,
     createProject, renameProject, deleteProject, exitingProjectIds,
+    pendingInvites, acceptInvitation, refreshInvites,
     startDraftTask, closeEditing, exitingIds, creatorLabel,
     exportJSON, importJSON,
     chatUnread, markChatRead,
@@ -1583,7 +1621,7 @@ function CommandPalette() {
    SIDEBAR
 ================================================================================= */
 function Sidebar() {
-  const { view, setView, tasks, meId, chatUnread } = useApp();
+  const { view, setView, tasks, meId, chatUnread, isOwner } = useApp();
 
   const counts = useMemo(() => {
     const open = tasks.filter(t => t.status !== 'done');
@@ -1629,6 +1667,7 @@ function Sidebar() {
         {item('projects', FolderKanban, 'Projects')}
         {item('schedule', CalendarDays, 'Schedule')}
         {item('chat', MessageSquare, 'Chat', chatUnread)}
+        {isOwner && item('members', Users, 'Members')}
 
         <div className="px-3 pt-5 pb-2 text-[10px] font-medium uppercase tracking-widest text-white/30">Lanes</div>
         {item('mine', UserCog, 'My Tasks', counts.mine)}
@@ -2132,7 +2171,7 @@ function CreateWorkspaceModal({ open, onClose }) {
 /** Current-workspace label + switcher. Always offers "+ Create workspace"; becomes a real
  *  dropdown of workspaces once the user belongs to more than one. */
 function WorkspaceSwitcher() {
-  const { workspaces, currentWorkspaceId, switchWorkspace } = useApp();
+  const { workspaces, currentWorkspaceId, switchWorkspace, pendingInvites, acceptInvitation } = useApp();
   const [open, setOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const current = workspaces.find(w => w.id === currentWorkspaceId);
@@ -2160,6 +2199,19 @@ function WorkspaceSwitcher() {
                 {w.id === currentWorkspaceId && <Check className="w-3.5 h-3.5 text-violet-400 shrink-0" />}
               </button>
             ))}
+            {pendingInvites.length > 0 && (
+              <>
+                <div className="my-1 h-px bg-white/10" />
+                <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-white/35">Invitations</div>
+                {pendingInvites.map(inv => (
+                  <button key={inv.id} onClick={() => { setOpen(false); acceptInvitation(inv.token).catch(err => console.error('accept invite failed:', err)); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/80 hover:bg-white/5 hover:text-white transition-colors">
+                    <span className="w-4 h-4 rounded-md bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center shrink-0"><UserPlus className="w-2.5 h-2.5 text-emerald-300" /></span>
+                    <span className="flex-1 text-left truncate">Join {inv.workspaceName}</span>
+                  </button>
+                ))}
+              </>
+            )}
             <div className="my-1 h-px bg-white/10" />
             <button onClick={() => { setOpen(false); setCreateOpen(true); }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/80 hover:bg-white/5 hover:text-white transition-colors">
@@ -3420,6 +3472,7 @@ function ChatView() {
 /** Shown to an authenticated user who belongs to no workspace yet: create your first one.
  *  Creation is the path today; joining by invitation comes in a later phase. */
 function OnboardingScreen({ theme, onSignOut }) {
+  const { pendingInvites, acceptInvitation } = useApp();
   return (
     <div className="min-h-screen bg-[#070810] text-white flex items-center justify-center p-6 relative overflow-hidden" data-theme={theme}>
       <style>{`
@@ -3441,7 +3494,23 @@ function OnboardingScreen({ theme, onSignOut }) {
           <p className="text-sm text-white/45 mt-1.5 text-center">A workspace is where your team's tasks, projects, and chat live. Name it to get started — you'll be its owner.</p>
         </div>
 
+        {pendingInvites.length > 0 && (
+          <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/[0.06] p-5 shadow-2xl mb-4">
+            <div className="text-[11px] font-medium uppercase tracking-widest text-emerald-300/70 mb-2">You've been invited</div>
+            <div className="space-y-2">
+              {pendingInvites.map(inv => (
+                <div key={inv.id} className="flex items-center justify-between gap-2">
+                  <div className="text-sm text-white/90 truncate">Join <span className="font-semibold">{inv.workspaceName}</span></div>
+                  <button onClick={() => acceptInvitation(inv.token).catch(err => console.error('accept invite failed:', err))}
+                    className="shrink-0 h-8 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-semibold transition-colors">Accept</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="rounded-2xl border border-white/10 bg-[#0f1017]/80 backdrop-blur p-6 shadow-2xl">
+          {pendingInvites.length > 0 && <div className="text-[11px] text-white/40 mb-3 text-center">Or create your own workspace</div>}
           <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">Workspace name</label>
           <CreateWorkspaceForm submitLabel="Create workspace & continue" />
         </div>
@@ -3450,6 +3519,130 @@ function OnboardingScreen({ theme, onSignOut }) {
           Sign out
         </button>
       </div>
+    </div>
+  );
+}
+
+/* =================================================================================
+   MEMBERS VIEW (owner-only) — roster + invite-by-email (copy-link) + pending invites
+================================================================================= */
+function MembersView() {
+  const { currentWorkspaceId, isOwner, membershipsLoaded, members, meId } = useApp();
+  const [invites, setInvites] = useState([]);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [email, setEmail] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [lastLink, setLastLink] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  // Load the workspace's invitations (owner RLS). Only async setState -> no sync-in-effect.
+  useEffect(() => {
+    if (!currentWorkspaceId || !isOwner) return;
+    let alive = true;
+    invitationsApi.listForWorkspace(currentWorkspaceId)
+      .then(d => { if (alive) setInvites(d); })
+      .catch(e => console.error('load invites failed:', e));
+    return () => { alive = false; };
+  }, [currentWorkspaceId, isOwner, reloadKey]);
+
+  if (!membershipsLoaded) return null;
+  if (!isOwner) {
+    return (
+      <div className="space-y-6">
+        <ViewHeader title="Members" subtitle="People in this workspace." />
+        <div className="text-sm text-white/50">Only an owner can manage members and invitations.</div>
+      </div>
+    );
+  }
+
+  const reload = () => setReloadKey(k => k + 1);
+  const inviteUrl = (token) => `${window.location.origin}/invite/${token}`;
+  const copy = async (url) => { try { await navigator.clipboard.writeText(url); setCopied(true); } catch { /* ignore */ } };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const v = email.trim();
+    if (!v || busy) return;
+    setBusy(true); setErr(''); setCopied(false);
+    try {
+      const inv = await invitationsApi.create(currentWorkspaceId, v);
+      const url = inviteUrl(inv.token);
+      setLastLink({ email: inv.email, url });
+      setEmail('');
+      await copy(url);
+      reload();
+    } catch (e2) {
+      setErr(e2?.message || 'Could not create the invitation.');
+    } finally { setBusy(false); }
+  };
+
+  const revoke = async (id) => {
+    try { await invitationsApi.revoke(id); reload(); }
+    catch (e) { console.error('revoke failed:', e); }
+  };
+
+  const pending = invites.filter(i => i.status === 'pending');
+
+  return (
+    <div className="space-y-6">
+      <ViewHeader title="Members" subtitle="People in this workspace, and pending invitations." />
+
+      <Card title="Invite by email" subtitle="They'll join as a member. Copy the link and send it to them (public sign-up stays closed).">
+        <form onSubmit={submit} className="flex flex-col sm:flex-row gap-2">
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="teammate@example.com"
+            className="flex-1 h-9 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white/90 outline-none focus:border-white/25 transition-colors" />
+          <button type="submit" disabled={busy || !email.trim()}
+            className={cx('h-9 px-4 rounded-xl text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors', (busy || !email.trim()) ? 'bg-violet-500/40 cursor-not-allowed' : 'bg-violet-500 hover:bg-violet-400')}>
+            <Mail className="w-3.5 h-3.5" />Create invite
+          </button>
+        </form>
+        {err && <p className="text-[11px] text-rose-300 mt-2">{err}</p>}
+        {lastLink && (
+          <div className="mt-3 p-3 rounded-xl border border-white/10 bg-white/[0.03]">
+            <div className="text-[11px] text-white/50 mb-1.5">{copied ? 'Link copied — ' : ''}Send this to {lastLink.email}:</div>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 truncate text-[11px] text-white/70">{lastLink.url}</code>
+              <button onClick={() => copy(lastLink.url)} className="shrink-0 text-[11px] px-2 h-7 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">Copy</button>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <Card title="Current members" subtitle={`${members.length} in this workspace`}>
+        <div className="space-y-1.5">
+          {members.map(m => (
+            <div key={m.userId} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/[0.02]">
+              <div className="min-w-0">
+                <div className="text-sm text-white/90 truncate">{m.displayName || m.email}{m.userId === meId && <span className="text-white/40"> (you)</span>}</div>
+                <div className="text-[11px] text-white/40 truncate">{m.email}</div>
+              </div>
+              <span className="shrink-0 text-[10px] uppercase tracking-wide text-white/40 bg-white/5 border border-white/10 rounded-md px-1.5 h-5 flex items-center">{m.role}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card title="Pending invitations" subtitle={pending.length ? `${pending.length} awaiting acceptance` : 'None yet'}>
+        {pending.length === 0 ? (
+          <div className="text-[11px] text-white/40">No pending invitations.</div>
+        ) : (
+          <div className="space-y-1.5">
+            {pending.map(i => (
+              <div key={i.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/[0.02]">
+                <div className="min-w-0">
+                  <div className="text-sm text-white/85 truncate">{i.email}</div>
+                  <div className="text-[11px] text-white/40">invited {timeAgo(i.created_at)}</div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button onClick={() => copy(inviteUrl(i.token))} className="text-[11px] px-2 h-7 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 inline-flex items-center gap-1 transition-colors"><Link2 className="w-3 h-3" />Copy link</button>
+                  <button onClick={() => revoke(i.id)} aria-label="Revoke invitation" className="text-[11px] px-2 h-7 rounded-lg text-white/50 hover:text-rose-300 hover:bg-white/5 inline-flex items-center gap-1 transition-colors"><X className="w-3 h-3" />Revoke</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
@@ -3572,6 +3765,7 @@ function AppShell() {
               <Route path="/va-desk" element={<RedirectToMyTasks />} />
               <Route path="/private" element={<PrivateView />} />
               <Route path="/chat" element={<ChatView />} />
+              <Route path="/members" element={<MembersView />} />
               {/* Has a workspace, so onboarding isn't applicable — send it back to the app. */}
               <Route path="/onboarding" element={<Navigate to="/" replace />} />
               <Route path="*" element={<Navigate to="/" replace />} />
