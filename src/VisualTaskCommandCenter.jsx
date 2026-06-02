@@ -87,6 +87,10 @@ const DEFAULT_PROJECTS = [
   { id: 'other',    name: 'Other',        color: '#64748b', icon: '◇' },
 ];
 
+// Palette + glyphs offered when creating/editing a project.
+const PROJECT_PALETTE = ['#a78bfa','#f472b6','#38bdf8','#34d399','#fb923c','#f43f5e','#facc15','#94a3b8','#64748b','#22d3ee','#c084fc','#4ade80'];
+const PROJECT_ICONS = ['◇','◈','◎','☉','✎','↗','♡','◐','⚙','★','✦','⬢'];
+
 const migrateProjects = (projects) => {
   if (!Array.isArray(projects) || projects.length === 0) return DEFAULT_PROJECTS;
   return projects;
@@ -197,6 +201,8 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   const [members, setMembers] = useState([]);
   // Tasks mid-exit-animation (id present -> the card renders its fade/slide-out before actual removal).
   const [exitingIds, setExitingIds] = useState(() => new Set());
+  // Project cards mid-exit-animation (same two-phase pattern as tasks).
+  const [exitingProjectIds, setExitingProjectIds] = useState(() => new Set());
   // Refs: the just-created "+ Add task" draft (auto-deleted if abandoned empty) + a stable Esc-time closer.
   const draftIdRef = useRef(null);
   const closeEditingRef = useRef(null);
@@ -424,6 +430,38 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     setTimeout(finish, 180);
   }, [currentWorkspaceId]);
 
+  // ---- Projects: create (member), rename/recolor (member), delete (owner; all RLS-enforced) ----
+  const createProject = useCallback(async ({ name, color, icon }) => {
+    const created = await projectsApi.create({ name, color, icon }, currentWorkspaceId);
+    setProjects(p => [...p, created].sort((a, b) => a.name.localeCompare(b.name)));
+    return created;
+  }, [currentWorkspaceId]);
+
+  const renameProject = useCallback(async (id, patch) => {
+    setProjects(p => p.map(x => x.id === id ? { ...x, ...patch } : x).sort((a, b) => a.name.localeCompare(b.name)));
+    try {
+      await projectsApi.update(id, patch);
+    } catch (err) {
+      console.error('Update project failed:', err);
+      projectsApi.list(currentWorkspaceId).then(p => setProjects(p.length ? p : DEFAULT_PROJECTS)).catch(() => {});
+    }
+  }, [currentWorkspaceId]);
+
+  // Two-phase delete: fade the card out (~180ms), then remove + persist. Reduced-motion -> immediate.
+  const deleteProject = useCallback((id) => {
+    const finish = () => {
+      setProjects(p => p.filter(x => x.id !== id));
+      setExitingProjectIds(p => { const n = new Set(p); n.delete(id); return n; });
+      projectsApi.delete(id).catch(err => {
+        console.error('Delete project failed:', err);
+        projectsApi.list(currentWorkspaceId).then(p => setProjects(p.length ? p : DEFAULT_PROJECTS)).catch(() => {});
+      });
+    };
+    if (prefersReducedMotion()) { finish(); return; }
+    setExitingProjectIds(p => new Set(p).add(id));
+    setTimeout(finish, 180);
+  }, [currentWorkspaceId]);
+
   const duplicateTask = useCallback(async (id) => {
     const original = tasks.find(t => t.id === id);
     if (!original) return;
@@ -549,6 +587,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     setTheme, setView, setFilters, setCompact, setDraggedId,
     setPaletteOpen, setQuickAddOpen, setEditingTask,
     addTask, updateTask, deleteTask, duplicateTask, toggleSubtask,
+    createProject, renameProject, deleteProject, exitingProjectIds,
     startDraftTask, closeEditing, exitingIds, creatorLabel,
     exportJSON, importJSON,
     chatUnread, markChatRead,
@@ -1942,9 +1981,9 @@ function CreateWorkspaceForm({ onCreated, submitLabel = 'Create workspace', auto
 /** Reusable app-styled confirmation modal for destructive actions (same style family as
  *  CreateWorkspaceModal). Renders above other modals (z-[60]); Delete is auto-focused + destructive;
  *  Cancel / backdrop / Esc cancel. Esc is stopped from bubbling so it doesn't also close an underlying modal. */
-function ConfirmModal({ open, title, message, confirmLabel = 'Delete', onConfirm, onClose }) {
+function ConfirmModal({ open, title, message, confirmLabel = 'Delete', confirmDisabled = false, onConfirm, onClose }) {
   const btnRef = useRef(null);
-  useEffect(() => { if (open) setTimeout(() => btnRef.current?.focus(), 30); }, [open]);
+  useEffect(() => { if (open && !confirmDisabled) setTimeout(() => btnRef.current?.focus(), 30); }, [open, confirmDisabled]);
   if (!open) return null;
   return (
     <>
@@ -1959,12 +1998,111 @@ function ConfirmModal({ open, title, message, confirmLabel = 'Delete', onConfirm
           <div className="flex items-center justify-end gap-2">
             <button onClick={onClose}
               className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">Cancel</button>
-            <button ref={btnRef} onClick={onConfirm}
-              className="h-9 px-4 rounded-xl bg-rose-500 text-white text-xs font-semibold hover:bg-rose-400 transition-colors inline-flex items-center gap-1.5">
+            <button ref={btnRef} onClick={onConfirm} disabled={confirmDisabled}
+              className={cx('h-9 px-4 rounded-xl text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
+                confirmDisabled ? 'bg-rose-500/40 text-white/60 cursor-not-allowed' : 'bg-rose-500 hover:bg-rose-400')}>
               <Trash2 className="w-3.5 h-3.5" />{confirmLabel}
             </button>
           </div>
         </div>
+      </div>
+    </>
+  );
+}
+
+/** Create or edit (rename / recolor / re-icon) a project. Create + edit are member-allowed
+ *  (projects_insert_member / projects_update_member); persisted via the AppProvider handlers. */
+function ProjectModal({ open, onClose, project }) {
+  const { createProject, renameProject } = useApp();
+  const editing = !!project;
+  const [name, setName] = useState('');
+  const [color, setColor] = useState(PROJECT_PALETTE[0]);
+  const [icon, setIcon] = useState('◇');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setName(project?.name || '');
+    setColor(project?.color || PROJECT_PALETTE[0]);
+    setIcon(project?.icon || '◇');
+    setErr('');
+    setBusy(false);
+  }, [open, project]);
+
+  if (!open) return null;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed) { setErr('Name is required.'); return; }
+    if (trimmed.length > 80) { setErr('Name must be 80 characters or fewer.'); return; }
+    setBusy(true); setErr('');
+    try {
+      if (editing) await renameProject(project.id, { name: trimmed, color, icon: icon || '◇' });
+      else await createProject({ name: trimmed, color, icon: icon || '◇' });
+      onClose();
+    } catch (e2) {
+      setErr(e2?.message || 'Something went wrong. Please try again.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
+        <form onSubmit={submit}
+          className="pointer-events-auto w-full max-w-sm rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5"
+          style={{ animation: 'slideUp .2s ease' }}
+          onClick={e => e.stopPropagation()}
+          onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-semibold text-white">{editing ? 'Edit project' : 'New project'}</h2>
+            <button type="button" onClick={onClose} className="text-white/40 hover:text-white/80 transition-colors"><X className="w-4 h-4" /></button>
+          </div>
+
+          <label className="block text-[11px] font-medium text-white/50 mb-1">Name</label>
+          <input autoFocus value={name} onChange={e => setName(e.target.value)} maxLength={80} placeholder="e.g. Marketing"
+            className="w-full h-9 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white/90 outline-none focus:border-white/25 transition-colors mb-4" />
+
+          <div className="flex items-start gap-3 mb-3">
+            <div className="flex-1">
+              <label className="block text-[11px] font-medium text-white/50 mb-1.5">Color</label>
+              <div className="flex flex-wrap gap-1.5">
+                {PROJECT_PALETTE.map(c => (
+                  <button key={c} type="button" onClick={() => setColor(c)} aria-label={`Use color ${c}`}
+                    className={cx('w-6 h-6 rounded-lg transition-transform', color === c ? 'ring-2 ring-white/70 scale-110' : 'hover:scale-105')}
+                    style={{ background: c }} />
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-white/50 mb-1.5">Preview</label>
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold"
+                style={{ background: color + '22', color, border: `1px solid ${color}44` }}>{icon || '◇'}</div>
+            </div>
+          </div>
+
+          <label className="block text-[11px] font-medium text-white/50 mb-1.5">Icon</label>
+          <div className="flex flex-wrap gap-1.5 mb-4">
+            {PROJECT_ICONS.map(ic => (
+              <button key={ic} type="button" onClick={() => setIcon(ic)}
+                className={cx('w-7 h-7 rounded-lg text-sm flex items-center justify-center transition-colors',
+                  icon === ic ? 'bg-white/15 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10')}>{ic}</button>
+            ))}
+          </div>
+
+          {err && <p className="text-[11px] text-rose-300 mb-3">{err}</p>}
+          <div className="flex items-center justify-end gap-2">
+            <button type="button" onClick={onClose}
+              className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">Cancel</button>
+            <button type="submit" disabled={busy}
+              className={cx('h-9 px-4 rounded-xl text-xs font-semibold text-white transition-colors', busy ? 'bg-violet-500/40 cursor-not-allowed' : 'bg-violet-500 hover:bg-violet-400')}>
+              {editing ? 'Save changes' : 'Create project'}
+            </button>
+          </div>
+        </form>
       </div>
     </>
   );
@@ -2726,7 +2864,30 @@ function MatrixView() {
    PROJECTS VIEW
 ================================================================================= */
 function ProjectsView() {
-  const { tasks, projects, setEditingTask, filters, meId } = useApp();
+  const { tasks, projects, setEditingTask, filters, meId, isOwner, isMember, membershipsLoaded, currentWorkspaceId, deleteProject, exitingProjectIds } = useApp();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteCount, setDeleteCount] = useState(null); // null = checking, -1 = error, >=0 = count
+
+  // On a delete request, fetch the reliable (owner-only, RLS-blind-spot-free) task count.
+  // deleteCount is reset to null by the open/close handlers (not here), to avoid sync setState in an effect.
+  useEffect(() => {
+    if (!deleteTarget) return;
+    let alive = true;
+    projectsApi.taskCount(deleteTarget.id, currentWorkspaceId)
+      .then(n => { if (alive) setDeleteCount(typeof n === 'number' ? n : 0); })
+      .catch(err => { console.error('project taskCount failed:', err); if (alive) setDeleteCount(-1); });
+    return () => { alive = false; };
+  }, [deleteTarget, currentWorkspaceId]);
+
+  const canManage = membershipsLoaded && (isOwner || isMember);
+  const blocked = deleteCount === null || deleteCount !== 0;
+  const deleteMessage =
+    deleteCount === null ? 'Checking for tasks…'
+    : deleteCount === -1 ? "Couldn't check this project's tasks. Please try again."
+    : deleteCount > 0 ? `"${deleteTarget?.name}" still has ${deleteCount} task${deleteCount === 1 ? '' : 's'}. Move or delete them before deleting the project.`
+    : `Delete "${deleteTarget?.name}"? This can't be undone.`;
 
   const filtered = tasks.filter(t => {
     if (!matchesAssignee(t, filters.assignee, meId)) return false;
@@ -2737,6 +2898,15 @@ function ProjectsView() {
   return (
     <div className="space-y-6">
       <ViewHeader title="Projects & areas" subtitle="Work grouped by where it lives." />
+      <div className="flex items-center justify-between -mt-2">
+        <div className="text-[11px] text-white/40">{projects.length} project{projects.length === 1 ? '' : 's'}</div>
+        {canManage && (
+          <button onClick={() => setCreateOpen(true)}
+            className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-white/5 border border-white/10 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">
+            <Plus className="w-3.5 h-3.5" /> New project
+          </button>
+        )}
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {projects.map(p => {
           const pTasks = filtered.filter(t => t.project === p.id);
@@ -2744,7 +2914,8 @@ function ProjectsView() {
           const done = pTasks.filter(t => t.status === 'done');
           const pct = pTasks.length ? Math.round((done.length / pTasks.length) * 100) : 0;
           return (
-            <section key={p.id} className="relative rounded-2xl border border-white/[0.06] bg-gradient-to-br from-white/[0.03] to-transparent p-5 overflow-hidden">
+            <section key={p.id} className={cx('group relative rounded-2xl border border-white/[0.06] bg-gradient-to-br from-white/[0.03] to-transparent p-5 overflow-hidden',
+              exitingProjectIds.has(p.id) && 'animate-[fadeSlideOut_.18s_ease_forwards]')}>
               <div className="absolute top-0 right-0 w-40 h-40 rounded-full blur-3xl opacity-20" style={{ background: p.color }} />
               <div className="relative">
                 <div className="flex items-start justify-between mb-3">
@@ -2757,6 +2928,20 @@ function ProjectsView() {
                       <div className="text-[11px] text-white/40">{open.length} open · {done.length} done</div>
                     </div>
                   </div>
+                  {canManage && (
+                    <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      <button onClick={() => setEditTarget(p)} aria-label={`Edit ${p.name}`}
+                        className="p-1.5 rounded-lg text-white/30 hover:text-white/80 hover:bg-white/5 transition-colors">
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                      {isOwner && (
+                        <button onClick={() => { setDeleteCount(null); setDeleteTarget(p); }} aria-label={`Delete ${p.name}`}
+                          className="p-1.5 rounded-lg text-white/30 hover:text-rose-300 hover:bg-white/5 transition-colors">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="h-1.5 bg-white/5 rounded-full overflow-hidden mb-4">
                   <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: p.color, boxShadow: `0 0 12px ${p.color}99` }} />
@@ -2771,6 +2956,18 @@ function ProjectsView() {
           );
         })}
       </div>
+
+      <ProjectModal open={createOpen} onClose={() => setCreateOpen(false)} project={null} />
+      <ProjectModal open={!!editTarget} onClose={() => setEditTarget(null)} project={editTarget} />
+      <ConfirmModal
+        open={!!deleteTarget}
+        title={deleteCount > 0 ? 'Project still has tasks' : 'Delete project?'}
+        message={deleteMessage}
+        confirmLabel="Delete project"
+        confirmDisabled={blocked}
+        onConfirm={() => { if (!deleteTarget) return; const id = deleteTarget.id; setDeleteTarget(null); setDeleteCount(null); deleteProject(id); }}
+        onClose={() => { setDeleteTarget(null); setDeleteCount(null); }}
+      />
     </div>
   );
 }

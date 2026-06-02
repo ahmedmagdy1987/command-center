@@ -5,7 +5,6 @@
 const PRIORITY_IDS = new Set(['critical', 'high', 'medium', 'low']);
 const STATUS_IDS = new Set(['inbox', 'must', 'should', 'waiting', 'scheduled', 'done']);
 const EFFORT_IDS = new Set(['quick', 'medium', 'deep']);
-const DEFAULT_PROJECT_IDS = new Set(['social','blogs','seo','outreach','assets','personal','website','tools','other']);
 
 const LEGACY_PROJECT_MAP = { content: 'blogs', design: 'assets', operations: 'tools', admin: 'other' };
 export const migrateProjectId = (id) => LEGACY_PROJECT_MAP[id] || id;
@@ -84,8 +83,10 @@ export const sanitizeTask = (raw) => {
   const privacy = (t.privacy === 'private' || t.privacy === 'workspace') ? t.privacy : 'workspace';
   // Assignee: a single workspace member (auth user id) or null (unassigned).
   const assigneeId = (typeof t.assigneeId === 'string' && t.assigneeId) ? t.assigneeId : null;
+  // Accept any non-empty project id (projects are user-creatable now); keep the legacy id remap.
+  // Default to 'other' only when missing/blank — no longer clamp to a hardcoded whitelist.
   const migratedProject = migrateProjectId(t.project);
-  const project = DEFAULT_PROJECT_IDS.has(migratedProject) ? migratedProject : 'other';
+  const project = (typeof migratedProject === 'string' && migratedProject) ? migratedProject : 'other';
   return {
     id: typeof t.id === 'string' && t.id ? t.id : uid(),
     title: typeof t.title === 'string' ? t.title : 'Untitled task',

@@ -127,6 +127,46 @@ export const projects = {
     if (error) throw error;
     return data || [];
   },
+
+  /** Create a project in the given workspace. RLS projects_insert_member gates to membership. */
+  async create({ name, color, icon }, workspaceId) {
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+    const row = { id: uid(), name, workspace_id: workspaceId, created_by: session.user.id };
+    if (color) row.color = color;
+    if (icon) row.icon = icon;
+    const { data, error } = await supabase.from('projects').insert(row).select().single();
+    if (error) throw error;
+    return data;
+  },
+
+  /** Rename / recolor / re-icon a project. RLS projects_update_member gates to membership. */
+  async update(id, patch) {
+    const fields = {};
+    if (patch.name !== undefined) fields.name = patch.name;
+    if (patch.color !== undefined) fields.color = patch.color;
+    if (patch.icon !== undefined) fields.icon = patch.icon;
+    const { data, error } = await supabase.from('projects').update(fields).eq('id', id).select().single();
+    if (error) throw error;
+    return data;
+  },
+
+  /** Delete a project. RLS projects_delete_owner gates to the workspace owner. */
+  async delete(id) {
+    const { error } = await supabase.from('projects').delete().eq('id', id);
+    if (error) throw error;
+  },
+
+  /**
+   * Owner-only reliable count of a project's tasks via the project_task_count RPC (a SECURITY
+   * DEFINER count that bypasses the caller's RLS blind spots, so a project with another member's
+   * private tasks can't be deleted-and-stranded). Throws for non-owners.
+   */
+  async taskCount(projectId, workspaceId) {
+    const { data, error } = await supabase.rpc('project_task_count', { p_project_id: projectId, p_workspace_id: workspaceId });
+    if (error) throw error;
+    return data ?? 0;
+  },
 };
 
 /* =================================================================================
