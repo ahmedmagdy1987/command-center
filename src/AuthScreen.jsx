@@ -15,14 +15,14 @@ const SIGNUP_ENABLED = true;
  * /forgot-password), so those transitions are real navigations. Sign-up, when enabled, is an
  * in-screen toggle layered on the signin view (no dedicated route yet — it's still closed).
  */
-export default function AuthScreen({ mode = 'signin' }) {
+export default function AuthScreen({ mode = 'signin', initialSignup = false }) {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [info, setInfo] = useState(null);
-  const [signupOpen, setSignupOpen] = useState(false);
+  const [signupOpen, setSignupOpen] = useState(initialSignup);
 
   // Transient state (error/info/signupOpen) is reset on route change via a per-mode `key` in App.jsx,
   // which remounts this screen on /login <-> /forgot-password — no effect needed.

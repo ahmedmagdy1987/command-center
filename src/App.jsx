@@ -5,6 +5,7 @@ import { auth, members } from './lib/api';
 import AuthScreen from './AuthScreen';
 import ResetPasswordScreen from './ResetPasswordScreen';
 import InviteScreen from './InviteScreen';
+import LandingPage from './LandingPage';
 import VisualTaskCommandCenter from './VisualTaskCommandCenter';
 import { supabase } from './lib/supabase';
 
@@ -19,6 +20,16 @@ function FullScreenSpinner() {
         <Sparkles className="w-6 h-6 text-white" />
       </div>
     </div>
+  );
+}
+
+/** Logged-out routing: the public landing at /, everything else -> the sign-in screen. */
+function PublicRoutes() {
+  return (
+    <Routes>
+      <Route path="/" element={<LandingPage />} />
+      <Route path="*" element={<Navigate to="/login" replace />} />
+    </Routes>
   );
 }
 
@@ -78,13 +89,17 @@ export default function App() {
           session — a signed-out invitee signs in / creates an account here, then accepts. */}
       <Route path="/invite/:token" element={<InviteScreen session={session} />} />
 
-      {/* Everything else is the authenticated app; its own view routes live in AppShell. */}
+      {/* Public sign-up lands directly on the create-account form (the welcome screen otherwise). */}
+      <Route path="/signup" element={session ? <Navigate to="/" replace /> : <AuthScreen key="signup" mode="signin" initialSignup />} />
+
+      {/* Everything else: the authenticated app (its own view routes live in AppShell), or — when
+          signed out — the public landing at / with every other path sent to sign-in. */}
       <Route
         path="/*"
         element={
           session
             ? <VisualTaskCommandCenter session={session} currentMember={currentMember} onSignOut={handleSignOut} />
-            : <Navigate to="/login" replace />
+            : <PublicRoutes />
         }
       />
     </Routes>
