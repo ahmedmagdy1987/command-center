@@ -31,12 +31,14 @@ and point it at the **CA bundle that ships with Git for Windows**:
 
 ```powershell
 git config --global http.sslBackend openssl
-git config --global http.sslCAInfo "C:/Program Files/Git/mingw64/ssl/certs/ca-bundle.crt"
+git config --global http.sslCAInfo "C:/Program Files/Git/mingw64/etc/ssl/certs/ca-bundle.crt"
 ```
 
 - This does **NOT** disable SSL verification. GitHub's cert is still fully verified — just
   against Git's bundled CA bundle instead of the (post-wipe, incomplete) Windows store.
-- If the bundle path differs on this install, find it with
+- **Verified path on this Git install:** `C:/Program Files/Git/mingw64/etc/ssl/certs/ca-bundle.crt`
+  (the older `…/mingw64/ssl/certs/…` path no longer exists on this machine).
+  If for any reason the file is missing, find it with
   `Get-ChildItem "C:\Program Files\Git" -Recurse -Filter ca-bundle.crt` and use that path.
 - If the clone in step 1 already failed with a cert error, run this fix first, then retry.
 - Confirm: `git config --global --get http.sslBackend` → `openssl`.
@@ -47,10 +49,19 @@ cd C:\Users\bdstd\Documents\projects\command-center
 npm install
 ```
 
-## 4. Launch Claude Code from INSIDE the project folder  ⚠️ the step that's bitten us twice
+## 4. Launch Claude Code from INSIDE the project folder  ⚠️ has broken the MCP three times now
 The repo ships a committed **`.mcp.json`** (the Supabase MCP server config). Claude Code only
-loads it when you start `claude` with the command-center folder as the working directory.
-Start it from anywhere else and the Supabase MCP silently won't be available.
+loads it when you start `claude` with the command-center folder as the **working directory at
+launch**. Starting from anywhere else (e.g. the home folder) silently omits the Supabase MCP
+for the entire session — no error, just no `supabase` tools available.
+
+**Checklist before launching:**
+1. Open a **new** PowerShell / terminal window (don't reuse one left at `~` or elsewhere).
+2. `cd C:\Users\bdstd\Documents\projects\command-center` — verify `Get-Location` shows the project.
+3. Run `claude` from there.
+
+After launching, confirm the MCP loaded: type `/mcp` in Claude Code — `supabase` must appear.
+If it doesn't, `exit` and repeat from step 1; do NOT try to authenticate from the wrong folder.
 
 ```powershell
 cd C:\Users\bdstd\Documents\projects\command-center
