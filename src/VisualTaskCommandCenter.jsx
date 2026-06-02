@@ -1691,6 +1691,8 @@ function NotificationBell() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toasts, setToasts] = useState([]);
+  const [exitingNotifIds, setExitingNotifIds] = useState(() => new Set());
+  const [confirmClear, setConfirmClear] = useState(false);
   const removeToast = useCallback((id) => setToasts(prev => prev.filter(t => t.id !== id)), []);
 
   const unreadCount = items.reduce((n, x) => n + (x.read ? 0 : 1), 0);
@@ -1764,8 +1766,41 @@ function NotificationBell() {
       await notificationsApi.markAllRead(currentWorkspaceId);
     } catch (err) {
       console.error('markAllRead failed:', err);
-      notificationsApi.list().then(setItems).catch(() => {}); // reconcile with server on failure
+      notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(() => {}); // reconcile with server on failure
     }
+  };
+
+  // Two-phase delete: fade/slide the row out (~180ms), then remove + persist. Reduced-motion -> immediate.
+  const deleteNotif = (id) => {
+    const finish = () => {
+      setItems(p => p.filter(x => x.id !== id));
+      setExitingNotifIds(p => { const n = new Set(p); n.delete(id); return n; });
+      notificationsApi.delete(id).catch(err => {
+        console.error('Delete notification failed:', err);
+        notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(() => {}); // reconcile with server on failure
+      });
+    };
+    if (prefersReducedMotion()) { finish(); return; }
+    setExitingNotifIds(p => new Set(p).add(id));
+    setTimeout(finish, 180);
+  };
+
+  // Clear all: fade every row out together (~180ms), then wipe + persist a recipient+workspace-scoped delete.
+  const clearAll = () => {
+    setConfirmClear(false);
+    if (items.length === 0) return;
+    const ids = items.map(x => x.id);
+    const finish = () => {
+      setItems([]);
+      setExitingNotifIds(new Set());
+      notificationsApi.clearAll(currentWorkspaceId).catch(err => {
+        console.error('Clear all notifications failed:', err);
+        notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(() => {}); // reconcile with server on failure
+      });
+    };
+    if (prefersReducedMotion()) { finish(); return; }
+    setExitingNotifIds(new Set(ids));
+    setTimeout(finish, 180);
   };
 
   return (
@@ -1786,12 +1821,20 @@ function NotificationBell() {
                   Notifications
                   {unreadCount > 0 && <span className="ml-1.5 text-[10px] font-medium text-white/40">{unreadCount} new</span>}
                 </div>
-                {unreadCount > 0 && (
-                  <button onClick={markAll}
-                    className="inline-flex items-center gap-1 text-[10px] font-medium text-white/50 hover:text-white/90 transition-colors">
-                    <Check className="w-3 h-3" />Mark all read
-                  </button>
-                )}
+                <div className="flex items-center gap-3">
+                  {unreadCount > 0 && (
+                    <button onClick={markAll}
+                      className="inline-flex items-center gap-1 text-[10px] font-medium text-white/50 hover:text-white/90 transition-colors">
+                      <Check className="w-3 h-3" />Mark all read
+                    </button>
+                  )}
+                  {items.length > 0 && (
+                    <button onClick={() => setConfirmClear(true)}
+                      className="inline-flex items-center gap-1 text-[10px] font-medium text-white/40 hover:text-rose-300 transition-colors">
+                      <Trash2 className="w-3 h-3" />Clear all
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="max-h-[70vh] overflow-y-auto no-scrollbar">
                 {loading ? (
@@ -1803,18 +1846,26 @@ function NotificationBell() {
                   </div>
                 ) : (
                   items.map(n => (
-                    <button key={n.id} onClick={() => handleOpen(n)}
-                      className={cx('w-full text-left flex items-start gap-2.5 px-3 py-2.5 border-b border-white/5 last:border-b-0 transition-colors hover:bg-white/5',
-                        !n.read && 'bg-white/[0.03]')}>
-                      <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0" style={{
-                        background: n.read ? 'transparent' : (light ? '#7c3aed' : '#a78bfa'),
-                        boxShadow: n.read ? 'none' : `0 0 6px ${light ? 'rgba(124,58,237,0.45)' : 'rgba(167,139,250,0.7)'}`,
-                      }} />
-                      <span className="min-w-0 flex-1">
-                        <span className={cx('block text-xs leading-snug', n.read ? 'text-white/55' : 'text-white/90')}>{n.message}</span>
-                        <span className="block mt-0.5 text-[10px] text-white/35">{timeAgo(n.createdAt)}</span>
-                      </span>
-                    </button>
+                    <div key={n.id}
+                      className={cx('group relative flex items-stretch border-b border-white/5 last:border-b-0 transition-colors hover:bg-white/5',
+                        !n.read && 'bg-white/[0.03]',
+                        exitingNotifIds.has(n.id) && 'animate-[fadeSlideOut_.18s_ease_forwards]')}>
+                      <button onClick={() => handleOpen(n)}
+                        className="min-w-0 flex-1 text-left flex items-start gap-2.5 pl-3 pr-1 py-2.5">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0" style={{
+                          background: n.read ? 'transparent' : (light ? '#7c3aed' : '#a78bfa'),
+                          boxShadow: n.read ? 'none' : `0 0 6px ${light ? 'rgba(124,58,237,0.45)' : 'rgba(167,139,250,0.7)'}`,
+                        }} />
+                        <span className="min-w-0 flex-1">
+                          <span className={cx('block text-xs leading-snug', n.read ? 'text-white/55' : 'text-white/90')}>{n.message}</span>
+                          <span className="block mt-0.5 text-[10px] text-white/35">{timeAgo(n.createdAt)}</span>
+                        </span>
+                      </button>
+                      <button onClick={() => deleteNotif(n.id)} aria-label="Delete notification"
+                        className="shrink-0 px-2.5 flex items-center text-white/30 hover:text-rose-300 focus:text-rose-300 transition-all opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   ))
                 )}
               </div>
@@ -1834,6 +1885,15 @@ function NotificationBell() {
         </div>,
         document.body
       )}
+
+      <ConfirmModal
+        open={confirmClear}
+        title="Clear all notifications?"
+        message="This permanently removes all your notifications in this workspace. This can't be undone."
+        confirmLabel="Clear all"
+        onConfirm={clearAll}
+        onClose={() => setConfirmClear(false)}
+      />
     </>
   );
 }

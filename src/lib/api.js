@@ -266,6 +266,32 @@ export const notifications = {
     if (error) throw error;
   },
 
+  /** Delete a single notification. Id-scoped; RLS gates to the recipient (recipient_id = auth.uid()). */
+  async delete(id) {
+    const { error } = await supabase
+      .from('notifications')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  },
+
+  /**
+   * Clear (delete) all of the current user's notifications in the given workspace.
+   * REQUIRES a workspaceId — scoped to recipient = me AND workspace = current; never a bare/match-all delete.
+   * RLS independently gates to the recipient (recipient_id = auth.uid()).
+   */
+  async clearAll(workspaceId) {
+    if (!workspaceId) throw new Error('clearAll requires a workspaceId');
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+    const { error } = await supabase
+      .from('notifications')
+      .delete()
+      .eq('recipient_id', session.user.id)
+      .eq('workspace_id', workspaceId);
+    if (error) throw error;
+  },
+
   /**
    * Subscribe to new notifications for a recipient. Returns an unsubscribe function.
    * cb is called with the app-shaped notification for each INSERT.
