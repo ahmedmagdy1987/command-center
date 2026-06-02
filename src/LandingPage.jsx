@@ -61,15 +61,15 @@ export default function LandingPage() {
               Visual task management for teams
             </div>
             <h1 className="text-4xl lg:text-5xl font-semibold font-display tracking-tight leading-[1.05]">
-              Your team’s command center for getting work done.
+              Stop losing track of who’s doing what.
             </h1>
             <p className="mt-5 text-base lg:text-lg text-white/55 max-w-xl leading-relaxed">
-              Plan, assign, and track everything in one place — a shared workspace with a kanban board,
-              a priority matrix, and a schedule, synced across your team in real time.
+              Pull every task, owner, and due date into one visual workspace — track it on a kanban board,
+              a priority matrix, or a schedule, live for the whole team.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link to="/signup" className="h-12 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 transition-all">
-                Get started free <ArrowRight className="w-4 h-4" />
+                Get organized free <ArrowRight className="w-4 h-4" />
               </Link>
               <Link to="/login" className="h-12 px-6 rounded-xl border border-white/10 bg-white/[0.03] text-white/80 font-medium text-sm flex items-center hover:bg-white/[0.06] transition-colors">
                 Log in
@@ -153,7 +153,7 @@ export default function LandingPage() {
             <p className="mt-2 text-white/55">Create a workspace in seconds. It’s free to get started.</p>
             <div className="mt-6 flex justify-center gap-3">
               <Link to="/signup" className="h-12 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 transition-all">
-                Get started free <ArrowRight className="w-4 h-4" />
+                Get organized free <ArrowRight className="w-4 h-4" />
               </Link>
             </div>
           </div>
