@@ -127,6 +127,7 @@ export const fromDbNotification = (row) => {
     recipientId: row.recipient_id,
     actorId: row.actor_id,
     taskId: row.task_id,
+    refId: row.ref_id,        // polymorphic reference (e.g. a DM conversation id for type='dm_received')
     type: row.type,
     title: row.title,
     message: row.message,
@@ -160,6 +161,37 @@ export const fromDbMessage = (row) => {
   if (!row || typeof row !== 'object') return null;
   return {
     id: row.id,
+    workspaceId: row.workspace_id,
+    senderId: row.sender_id,
+    body: row.body,
+    audioPath: row.audio_path,
+    audioDuration: row.audio_duration_seconds,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+};
+
+/* =================================================================================
+   DIRECT MESSAGES (1:1)
+================================================================================= */
+/** Convert a DB-shaped dm_conversations row to app shape. */
+export const fromDbDmConversation = (row) => {
+  if (!row || typeof row !== 'object') return null;
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    userLo: row.user_lo,
+    userHi: row.user_hi,
+    createdAt: row.created_at,
+  };
+};
+
+/** Convert a DB-shaped dm_messages row to app shape (mirrors fromDbMessage + conversationId). */
+export const fromDbDirectMessage = (row) => {
+  if (!row || typeof row !== 'object') return null;
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
     workspaceId: row.workspace_id,
     senderId: row.sender_id,
     body: row.body,

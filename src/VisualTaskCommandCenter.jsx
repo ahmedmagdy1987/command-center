@@ -7,9 +7,9 @@ import {
   Circle, CheckCircle2, Calendar, Zap, Timer, MoreHorizontal, Edit3, Filter,
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
   Brain, Target, Hourglass, GripVertical, Info, Keyboard, LogOut, Wifi, WifiOff, Loader2,
-  KeyRound, Bell, MessageSquare, Send, Mic, Square, Play, Pause, Users, Mail, UserPlus
+  KeyRound, Bell, MessageSquare, MessagesSquare, Send, Mic, Square, Play, Pause, Users, Mail, UserPlus
 } from 'lucide-react';
-import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, workspaces as workspacesApi, workspaceMembers as workspaceMembersApi, invitations as invitationsApi, auth } from './lib/api';
+import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, directMessages as directMessagesApi, workspaces as workspacesApi, workspaceMembers as workspaceMembersApi, invitations as invitationsApi, auth } from './lib/api';
 import { supabase } from './lib/supabase';
 import { sanitizeTask, uid, nowISO } from './lib/sanitize';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
@@ -24,6 +24,7 @@ const VIEW_TO_PATH = {
   mine: '/my-tasks',
   private: '/private',
   chat: '/chat',
+  dms: '/dms',
   members: '/members',
 };
 const PATH_TO_VIEW = Object.fromEntries(Object.entries(VIEW_TO_PATH).map(([v, p]) => [p, v]));
@@ -248,6 +249,54 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     setChatUnread(0);
   }, []);
 
+  // ---- Direct messages (1:1) ---- conversation summaries + handlers live here (the state hub);
+  // the open thread loads its own messages. Read state is server-side (dm_reads), so unread + receipts
+  // work across devices. currentWorkspaceId stays the scope; everything clears on a workspace switch.
+  const [dmConversations, setDmConversations] = useState([]);   // [{ id, peerId, lastAt, preview, unread }]
+  const [dmActiveConv, setDmActiveConv] = useState(null);       // open conversation (also set by a notification deep-link)
+  const dmUnread = useMemo(() => dmConversations.reduce((n, c) => n + (c.unread || 0), 0), [dmConversations]);
+
+  const refreshDms = useCallback(async (wsId) => {
+    const ws = wsId || currentWorkspaceId;
+    const me = userId;
+    if (!ws || !me) return;
+    try {
+      const [convs, msgs, reads] = await Promise.all([
+        directMessagesApi.listConversations(ws),
+        directMessagesApi.listRecentMessages(ws, 500),
+        directMessagesApi.myReads(),
+      ]);
+      const cursor = new Map(reads.map(r => [r.conversationId, r.lastReadAt]));
+      const agg = new Map();   // conversationId -> { last, unread } (msgs are newest-first)
+      for (const m of msgs) {
+        let a = agg.get(m.conversationId);
+        if (!a) { a = { last: m, unread: 0 }; agg.set(m.conversationId, a); }
+        const c = cursor.get(m.conversationId);
+        if (m.senderId !== me && (!c || new Date(m.createdAt) > new Date(c))) a.unread++;
+      }
+      setDmConversations(convs.map(c => {
+        const peerId = c.userLo === me ? c.userHi : c.userLo;
+        const a = agg.get(c.id) || { last: null, unread: 0 };
+        return { id: c.id, peerId, lastAt: a.last?.createdAt || c.createdAt, preview: a.last, unread: a.unread };
+      }).sort((x, y) => new Date(y.lastAt) - new Date(x.lastAt)));
+    } catch (e) { console.error('Failed to load direct messages:', e); }
+  }, [currentWorkspaceId, userId]);
+
+  const markDmRead = useCallback(async (conversationId) => {
+    if (!conversationId) return;
+    setDmConversations(prev => prev.map(c => c.id === conversationId ? { ...c, unread: 0 } : c));
+    try { await directMessagesApi.markRead(conversationId); } catch (e) { console.error('markDmRead failed:', e); }
+  }, []);
+
+  const startDm = useCallback(async (peerId) => {
+    if (!peerId || !currentWorkspaceId) return null;
+    const convId = await directMessagesApi.getOrCreateConversation(peerId, currentWorkspaceId);
+    await refreshDms(currentWorkspaceId);
+    setDmActiveConv(convId);
+    setView('dms');
+    return convId;
+  }, [currentWorkspaceId, refreshDms, setView]);
+
   useEffect(() => { themeStore.set(THEME_KEY, theme); }, [theme]);
   useLayoutEffect(() => { document.documentElement.setAttribute('data-theme', theme); }, [theme]);
 
@@ -363,6 +412,19 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     }, 'messages-unread', currentWorkspaceId);
     return () => { on = false; unsub(); };
   }, [session?.user?.id, currentWorkspaceId]);
+
+  // Direct messages: load the workspace's conversation summaries + live-refresh on any DM change
+  // (cheap re-summarize; recomputes previews + unread from the server-side cursors). Clears on switch.
+  useEffect(() => {
+    if (!currentWorkspaceId || !userId) return;   // clearing is handled by the prior run's cleanup
+    let on = true;
+    Promise.resolve().then(() => { if (on) refreshDms(currentWorkspaceId); });   // defer off the sync effect path
+    const unsub = directMessagesApi.subscribe(({ message }) => {
+      if (!on || !message) return;
+      refreshDms(currentWorkspaceId);
+    }, currentWorkspaceId);
+    return () => { on = false; unsub(); setDmConversations([]); setDmActiveConv(null); };
+  }, [currentWorkspaceId, userId, refreshDms]);
 
   useEffect(() => {
     const onOnline = () => setSyncStatus('live');
@@ -649,6 +711,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     startDraftTask, closeEditing, exitingIds, creatorLabel,
     exportJSON, importJSON,
     chatUnread, markChatRead,
+    dmConversations, dmUnread, dmActiveConv, setDmActiveConv, markDmRead, startDm, refreshDms,
   };
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
 }
@@ -1552,6 +1615,7 @@ function CommandPalette() {
     { id: 'v-priv', label: 'Go to Private', icon: Lock, run: () => { setView('private'); setPaletteOpen(false); } },
     { id: 'v-mine', label: 'Go to My Tasks', icon: UserCog, run: () => { setView('mine'); setPaletteOpen(false); } },
     { id: 'v-chat', label: 'Go to Chat', icon: MessageSquare, run: () => { setView('chat'); setPaletteOpen(false); } },
+    { id: 'v-dms', label: 'Go to Direct messages', icon: MessagesSquare, run: () => { setView('dms'); setPaletteOpen(false); } },
     { id: 'theme', label: `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`, icon: theme === 'dark' ? Sun : Moon, run: () => { setTheme(theme === 'dark' ? 'light' : 'dark'); setPaletteOpen(false); } },
     { id: 'export', label: 'Export JSON backup', icon: Download, run: () => { exportJSON(); setPaletteOpen(false); } },
   ], [theme]);
@@ -1641,7 +1705,7 @@ function CommandPalette() {
    SIDEBAR
 ================================================================================= */
 function Sidebar() {
-  const { view, setView, tasks, meId, chatUnread, isOwner } = useApp();
+  const { view, setView, tasks, meId, chatUnread, dmUnread, isOwner } = useApp();
 
   const counts = useMemo(() => {
     const open = tasks.filter(t => t.status !== 'done');
@@ -1687,6 +1751,7 @@ function Sidebar() {
         {item('projects', FolderKanban, 'Projects')}
         {item('schedule', CalendarDays, 'Schedule')}
         {item('chat', MessageSquare, 'Chat', chatUnread)}
+        {item('dms', MessagesSquare, 'Direct messages', dmUnread)}
         {isOwner && item('members', Users, 'Members')}
 
         <div className="px-3 pt-5 pb-2 text-[10px] font-medium uppercase tracking-widest text-white/30">Lanes</div>
@@ -1716,7 +1781,7 @@ function Sidebar() {
    MOBILE TAB BAR
 ================================================================================= */
 function MobileTabs() {
-  const { view, setView, chatUnread } = useApp();
+  const { view, setView, chatUnread, dmUnread } = useApp();
   const items = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Home' },
     { id: 'kanban',    icon: KanbanSquare,    label: 'Board' },
@@ -1725,7 +1790,8 @@ function MobileTabs() {
     { id: 'schedule',  icon: CalendarDays,    label: 'Plan' },
     { id: 'mine',      icon: UserCog,         label: 'Mine' },
     { id: 'private',   icon: Lock,            label: 'Private' },
-    { id: 'chat',      icon: MessageSquare,   label: 'Chat' },
+    { id: 'chat',      icon: MessageSquare,   label: 'Chat', badge: chatUnread },
+    { id: 'dms',       icon: MessagesSquare,  label: 'DMs',  badge: dmUnread },
   ];
   return (
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 border-t border-white/5 bg-[#0a0b11]/95 backdrop-blur">
@@ -1735,8 +1801,8 @@ function MobileTabs() {
             className={cx('relative flex-1 min-w-[64px] py-2.5 flex flex-col items-center justify-center gap-0.5 transition-colors',
               view === it.id ? 'text-white' : 'text-white/40')}>
             <it.icon className="w-5 h-5" />
-            {it.id === 'chat' && chatUnread > 0 && (
-              <span className="absolute top-1.5 left-1/2 translate-x-2 min-w-[14px] h-3.5 px-1 rounded-full bg-rose-500 text-rose-50 text-[8px] font-bold leading-none flex items-center justify-center">{chatUnread > 9 ? '9+' : chatUnread}</span>
+            {it.badge > 0 && (
+              <span className="absolute top-1.5 left-1/2 translate-x-2 min-w-[14px] h-3.5 px-1 rounded-full bg-rose-500 text-rose-50 text-[8px] font-bold leading-none flex items-center justify-center">{it.badge > 9 ? '9+' : it.badge}</span>
             )}
             <span className="text-[9px] font-medium tracking-wide">{it.label}</span>
           </button>
@@ -1782,7 +1848,7 @@ function NotificationToast({ n, light, onOpen, onDismiss }) {
 }
 
 function NotificationBell() {
-  const { session, tasks, setEditingTask, theme, currentWorkspaceId } = useApp();
+  const { session, tasks, setEditingTask, theme, currentWorkspaceId, setView, setDmActiveConv } = useApp();
   const userId = session?.user?.id;
   const light = theme === 'light';
   const [open, setOpen] = useState(false);
@@ -1853,6 +1919,13 @@ function NotificationBell() {
         console.error('markRead failed:', err);
         notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(() => {}); // reconcile with server on failure
       });
+    }
+    // Deep-link by type: a DM notification opens its thread; everything else (task_assigned /
+    // comment_added / task_completed) keeps the existing behavior of opening the referenced task.
+    if (n.type === 'dm_received' && n.refId) {
+      setDmActiveConv(n.refId);
+      setView('dms');
+      return;
     }
     openTask(n.taskId);
   };
@@ -3489,6 +3562,344 @@ function ChatView() {
   );
 }
 
+/* =================================================================================
+   DIRECT MESSAGES — private 1:1 threads. Conversation list (left) + thread (right);
+   reuses the chat thread patterns (autoscroll, optimistic send, voice notes) and the
+   shared voice-notes bucket. Read state is server-side (dm_reads) -> unread + receipts.
+================================================================================= */
+function DirectMessagesView() {
+  const { meId, members, resolveAssignee, dmConversations, dmActiveConv, setDmActiveConv, startDm } = useApp();
+  const [picking, setPicking] = useState(false);
+  const [startErr, setStartErr] = useState('');
+  const peers = members.filter(m => m.userId !== meId);
+  const active = dmConversations.find(c => c.id === dmActiveConv) || null;
+
+  const preview = (m) => {
+    if (!m) return 'No messages yet';
+    if (m.body) return m.body;
+    if (m.audioPath) return '🎤 Voice note';
+    return '…';
+  };
+
+  const onPick = async (peerId) => {
+    setPicking(false); setStartErr('');
+    try { await startDm(peerId); } catch (e) { setStartErr(e?.message || 'Could not start the conversation.'); }
+  };
+
+  const ConversationList = (
+    <div className="flex flex-col h-full">
+      <div className="px-3 py-3 border-b border-white/5 flex items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-2">
+          <MessagesSquare className="w-4 h-4 text-white/50" />
+          <div className="text-sm font-semibold text-white/90">Direct messages</div>
+        </div>
+        <div className="relative">
+          <button onClick={() => setPicking(p => !p)} disabled={peers.length === 0}
+            className="inline-flex items-center gap-1 text-[11px] px-2 h-7 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+            <Plus className="w-3 h-3" />New
+          </button>
+          {picking && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setPicking(false)} />
+              <div className="absolute right-0 top-9 z-40 w-56 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1.5" style={{ animation: 'slideUp .15s ease' }}>
+                <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-white/35">Message someone</div>
+                {peers.map(m => {
+                  const a = resolveAssignee(m.userId);
+                  return (
+                    <button key={m.userId} onClick={() => onPick(m.userId)}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/80 hover:bg-white/5 hover:text-white transition-colors">
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: a.hex }} />
+                      <span className="truncate">{m.displayName || m.email}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+      {startErr && <div className="px-3 py-1.5 text-[11px] text-rose-300/80 border-b border-white/5 shrink-0">{startErr}</div>}
+      <div className="flex-1 min-h-0 overflow-y-auto py-1">
+        {dmConversations.length === 0 ? (
+          <div className="px-4 py-10 text-center text-[12px] text-white/40">
+            {peers.length === 0 ? 'No one else is in this workspace yet.' : 'No conversations yet — start one with “New”.'}
+          </div>
+        ) : dmConversations.map(c => {
+          const a = resolveAssignee(c.peerId);
+          const selected = c.id === dmActiveConv;
+          return (
+            <button key={c.id} onClick={() => setDmActiveConv(c.id)}
+              className={cx('w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors',
+                selected ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]')}>
+              <span className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-semibold shrink-0"
+                style={{ background: a.soft, color: a.hex, border: `1px solid ${a.hex}33` }}>{a.initials}</span>
+              <span className="flex-1 min-w-0">
+                <span className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-white/85 truncate">{a.label === 'Me' ? 'You' : a.label}</span>
+                  <span className="text-[10px] text-white/35 shrink-0">{c.preview ? timeAgo(c.lastAt) : ''}</span>
+                </span>
+                <span className="flex items-center justify-between gap-2">
+                  <span className={cx('text-[12px] truncate', c.unread > 0 ? 'text-white/70' : 'text-white/40')}>{preview(c.preview)}</span>
+                  {c.unread > 0 && (
+                    <span className="shrink-0 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-rose-50 text-[9px] font-bold leading-none flex items-center justify-center">{c.unread > 9 ? '9+' : c.unread}</span>
+                  )}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="cc-chat h-[calc(100dvh-9rem)] rounded-2xl border border-white/10 bg-[#0a0b11] overflow-hidden flex">
+      <style>{`
+        [data-theme="light"] .cc-chat .bg-violet-500\\/20 { background: #ede9fe !important; }
+        [data-theme="light"] .cc-chat .border-violet-500\\/25 { border-color: #c4b5fd !important; }
+        [data-theme="light"] .cc-chat .bg-violet-500\\/25 { background: rgba(124,58,237,0.16) !important; }
+        [data-theme="light"] .cc-chat .border-violet-400\\/30 { border-color: rgba(124,58,237,0.4) !important; }
+        [data-theme="light"] .cc-chat .bg-white\\/\\[0\\.05\\] { background: rgba(0,0,0,0.06) !important; }
+      `}</style>
+      {/* List: always shown on lg; on small screens shown only when no thread is open */}
+      <aside className={cx('w-full lg:w-80 lg:shrink-0 lg:border-r border-white/5 h-full', active ? 'hidden lg:flex lg:flex-col' : 'flex flex-col')}>
+        {ConversationList}
+      </aside>
+      <section className={cx('flex-1 min-w-0 h-full', active ? 'flex flex-col' : 'hidden lg:flex lg:flex-col')}>
+        {active ? (
+          <DmThread key={active.id} conversationId={active.id} peerId={active.peerId} onBack={() => setDmActiveConv(null)} />
+        ) : (
+          <div className="h-full flex flex-col items-center justify-center text-center gap-2 px-6">
+            <div className="w-12 h-12 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
+              <MessagesSquare className="w-5 h-5 text-violet-300/70" />
+            </div>
+            <div className="text-sm font-medium text-white/70">Your conversations</div>
+            <div className="text-[12px] text-white/40">Pick a conversation, or start a new one.</div>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+/** One open 1:1 thread. Keyed by conversationId so it remounts (fresh state) per conversation. */
+function DmThread({ conversationId, peerId, onBack }) {
+  const { session, resolveAssignee, markDmRead } = useApp();
+  const userId = session?.user?.id;
+  const peer = resolveAssignee(peerId);
+  const [items, setItems] = useState([]);
+  const [peerReadAt, setPeerReadAt] = useState(null);
+  const [text, setText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const [micError, setMicError] = useState('');
+  const scrollRef = useRef(null);
+  const mrRef = useRef(null);
+  const chunksRef = useRef([]);
+  const streamRef = useRef(null);
+  const timerRef = useRef(null);
+  const startRef = useRef(0);
+  const cancelRef = useRef(false);
+
+  const refreshReads = useCallback(() => {
+    directMessagesApi.reads(conversationId)
+      .then(rs => { const p = rs.find(r => r.userId === peerId); setPeerReadAt(p?.lastReadAt || null); })
+      .catch(() => {});
+  }, [conversationId, peerId]);
+
+  // Load + subscribe to this thread; mark read while open. Remounts per conversation (keyed).
+  useEffect(() => {
+    let on = true;
+    directMessagesApi.listMessages(conversationId, 200)
+      .then(list => { if (on) setItems(list); })
+      .catch(e => console.error('Failed to load DM thread:', e))
+      .finally(() => { if (on) setLoading(false); });
+    refreshReads();
+    markDmRead(conversationId);
+    const unsub = directMessagesApi.subscribeThread(({ type, message }) => {
+      if (!message || !on) return;
+      setItems(prev => {
+        if (type === 'DELETE') return prev.filter(m => m.id !== message.id);
+        if (type === 'UPDATE') return prev.map(m => m.id === message.id ? message : m);
+        return prev.some(m => m.id === message.id) ? prev : [...prev, message];
+      });
+      if (type === 'INSERT' && message.senderId !== userId) markDmRead(conversationId);
+      refreshReads();   // peer likely advanced their cursor around new activity
+    }, conversationId);
+    return () => { on = false; unsub(); };
+  }, [conversationId, userId, markDmRead, refreshReads]);
+
+  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }); }, [items.length]);
+
+  useEffect(() => () => {
+    clearInterval(timerRef.current);
+    streamRef.current?.getTracks().forEach(t => t.stop());
+  }, []);
+
+  // The last of MY messages the peer has read -> render a single "Seen" marker under it.
+  const lastSeenMineId = useMemo(() => {
+    if (!peerReadAt) return null;
+    const read = new Date(peerReadAt);
+    let id = null;
+    for (const m of items) if (m.senderId === userId && new Date(m.createdAt) <= read) id = m.id;
+    return id;
+  }, [items, peerReadAt, userId]);
+
+  const sendText = async () => {
+    const body = text.trim();
+    if (!body || sending) return;
+    setText('');
+    try {
+      const created = await directMessagesApi.sendText(conversationId, body);
+      setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
+    } catch (e) { console.error('DM send failed:', e); setText(body); }
+  };
+
+  const startRecording = async () => {
+    setMicError('');
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setMicError('Voice recording is not supported in this browser.');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mime = pickAudioMime();
+      const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      chunksRef.current = [];
+      cancelRef.current = false;
+      mr.ondataavailable = (e) => { if (e.data && e.data.size) chunksRef.current.push(e.data); };
+      mr.onstop = async () => {
+        clearInterval(timerRef.current);
+        streamRef.current?.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+        const dur = (Date.now() - startRef.current) / 1000;
+        const ct = (mr.mimeType || 'audio/webm').split(';')[0];
+        const blob = new Blob(chunksRef.current, { type: ct });
+        chunksRef.current = [];
+        if (cancelRef.current || blob.size === 0 || dur < 0.4) return;
+        try {
+          setSending(true);
+          const created = await directMessagesApi.sendVoice(conversationId, blob, dur, ct);
+          setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
+        } catch (e) { console.error('DM voice send failed:', e); setMicError('Failed to send voice note.'); }
+        finally { setSending(false); }
+      };
+      mrRef.current = mr;
+      startRef.current = Date.now();
+      mr.start();
+      setRecording(true);
+      setSeconds(0);
+      timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
+    } catch (e) {
+      console.error('Mic error:', e);
+      setMicError('Microphone access was denied or unavailable.');
+    }
+  };
+
+  const stopRecording = (cancelled) => {
+    cancelRef.current = cancelled;
+    setRecording(false);
+    clearInterval(timerRef.current);
+    const mr = mrRef.current;
+    if (mr && mr.state !== 'inactive') mr.stop();
+  };
+
+  const remove = async (m) => {
+    setItems(prev => prev.filter(x => x.id !== m.id));
+    try { await directMessagesApi.remove(m); }
+    catch (e) { console.error('DM delete failed:', e); directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(() => {}); }
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2.5 shrink-0">
+        <button onClick={onBack} className="lg:hidden text-white/50 hover:text-white/80 -ml-1"><ChevronRight className="w-4 h-4 rotate-180" /></button>
+        <span className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold"
+          style={{ background: peer.soft, color: peer.hex, border: `1px solid ${peer.hex}33` }}>{peer.initials}</span>
+        <div className="text-sm font-semibold text-white/90">{peer.label === 'Me' ? 'You' : peer.label}</div>
+        <div className="text-[10px] text-white/35">Private conversation</div>
+      </div>
+
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-4">
+        {loading ? (
+          <div className="py-6 text-center text-[11px] text-white/40">Loading…</div>
+        ) : items.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-10">
+            <div className="text-sm font-medium text-white/70">No messages yet</div>
+            <div className="text-[12px] text-white/40">Say hello 👋</div>
+          </div>
+        ) : items.map((m, i) => {
+          const prev = items[i - 1];
+          const mine = m.senderId === userId;
+          const firstOfGroup = !prev || prev.senderId !== m.senderId || (new Date(m.createdAt) - new Date(prev.createdAt) > 5 * 60 * 1000);
+          return (
+            <div key={m.id} className={cx('flex flex-col', mine ? 'items-end' : 'items-start', firstOfGroup ? 'mt-3 first:mt-0' : 'mt-0.5')}>
+              {firstOfGroup && (
+                <div className="flex items-center gap-2 mb-1 px-1">
+                  <span className="text-[11px] font-medium text-white/70">{mine ? 'You' : (peer.label === 'Me' ? 'You' : peer.label)}</span>
+                  <span className="text-[10px] text-white/35">{timeAgo(m.createdAt)}</span>
+                </div>
+              )}
+              <div className={cx('group relative max-w-[80%] rounded-2xl px-3 py-2',
+                mine ? 'bg-violet-500/20 border border-violet-500/25 rounded-tr-md' : 'bg-white/[0.05] border border-white/10 rounded-tl-md')}>
+                {m.body && <div className="text-sm text-white/85 leading-relaxed whitespace-pre-wrap break-words">{m.body}</div>}
+                {m.audioPath && <VoiceNote path={m.audioPath} duration={m.audioDuration} />}
+                {mine && (
+                  <button onClick={() => remove(m)} title="Delete"
+                    className="absolute -top-2 -left-2 opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 rounded-full bg-[#0a0b11] border border-white/10 flex items-center justify-center text-white/40 hover:text-rose-300">
+                    <Trash2 className="w-2.5 h-2.5" />
+                  </button>
+                )}
+              </div>
+              {mine && m.id === lastSeenMineId && (
+                <div className="mt-0.5 px-1 text-[10px] text-white/35 flex items-center gap-1"><Check className="w-3 h-3" />Seen</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {micError && <div className="px-4 py-1.5 text-[11px] text-rose-300/80 border-t border-white/5 shrink-0">{micError}</div>}
+
+      <div className="border-t border-white/10 p-3 shrink-0">
+        {recording ? (
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-2 text-xs text-rose-300">
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" /> Recording {fmtDur(seconds)}
+            </span>
+            <div className="flex-1" />
+            <button onClick={() => stopRecording(true)} className="text-xs text-white/50 hover:text-white/80">Cancel</button>
+            <button onClick={() => stopRecording(false)}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90">
+              <Square className="w-3 h-3" />Stop &amp; send
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-end gap-2">
+            <textarea value={text}
+              onChange={e => setText(e.target.value)}
+              rows={2}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); } }}
+              placeholder={`Message ${peer.label === 'Me' ? 'yourself' : peer.label}…  (Enter to send)`}
+              className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none" />
+            <button onClick={startRecording} disabled={sending} title="Record a voice note"
+              className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 disabled:opacity-40 shrink-0">
+              <Mic className="w-4 h-4" />
+            </button>
+            <button onClick={sendText} disabled={!text.trim() || sending}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed shrink-0">
+              <Send className="w-3.5 h-3.5" />Send
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Shown to an authenticated user who belongs to no workspace yet: create your first one.
  *  Creation is the path today; joining by invitation comes in a later phase. */
 function OnboardingScreen({ theme, onSignOut }) {
@@ -3547,7 +3958,7 @@ function OnboardingScreen({ theme, onSignOut }) {
    MEMBERS VIEW (owner-only) — roster + invite-by-email (copy-link) + pending invites
 ================================================================================= */
 function MembersView() {
-  const { currentWorkspaceId, isOwner, membershipsLoaded, members, meId } = useApp();
+  const { currentWorkspaceId, isOwner, membershipsLoaded, members, meId, startDm } = useApp();
   const [invites, setInvites] = useState([]);
   const [reloadKey, setReloadKey] = useState(0);
   const [email, setEmail] = useState('');
@@ -3637,7 +4048,15 @@ function MembersView() {
                 <div className="text-sm text-white/90 truncate">{m.displayName || m.email}{m.userId === meId && <span className="text-white/40"> (you)</span>}</div>
                 <div className="text-[11px] text-white/40 truncate">{m.email}</div>
               </div>
-              <span className="shrink-0 text-[10px] uppercase tracking-wide text-white/40 bg-white/5 border border-white/10 rounded-md px-1.5 h-5 flex items-center">{m.role}</span>
+              <div className="shrink-0 flex items-center gap-2">
+                {m.userId !== meId && (
+                  <button onClick={() => startDm(m.userId).catch(() => {})} title={`Message ${m.displayName || m.email}`}
+                    className="text-[11px] px-2 h-7 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 inline-flex items-center gap-1 transition-colors">
+                    <MessagesSquare className="w-3 h-3" />Message
+                  </button>
+                )}
+                <span className="text-[10px] uppercase tracking-wide text-white/40 bg-white/5 border border-white/10 rounded-md px-1.5 h-5 flex items-center">{m.role}</span>
+              </div>
             </div>
           ))}
         </div>
@@ -3785,6 +4204,7 @@ function AppShell() {
               <Route path="/va-desk" element={<RedirectToMyTasks />} />
               <Route path="/private" element={<PrivateView />} />
               <Route path="/chat" element={<ChatView />} />
+              <Route path="/dms" element={<DirectMessagesView />} />
               <Route path="/members" element={<MembersView />} />
               {/* Has a workspace, so onboarding isn't applicable — send it back to the app. */}
               <Route path="/onboarding" element={<Navigate to="/" replace />} />

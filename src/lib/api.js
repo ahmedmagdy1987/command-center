@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { fromDbTask, toDbTask, sanitizeTask, fromDbNotification, fromDbComment, fromDbMessage, uid } from './sanitize';
+import { fromDbTask, toDbTask, sanitizeTask, fromDbNotification, fromDbComment, fromDbMessage, fromDbDmConversation, fromDbDirectMessage, uid } from './sanitize';
 
 /* =================================================================================
    AUTH
@@ -612,5 +612,145 @@ export const messages = {
       },
       unsubscribe: () => { try { channel.untrack(); } catch { /* ignore */ } supabase.removeChannel(channel); },
     };
+  },
+};
+
+/* =================================================================================
+   DIRECT MESSAGES — private 1:1 chat between two members of the same workspace.
+   SEPARATE from the broadcast team chat (messages). RLS gates every read/write to the
+   two participants (private.is_dm_participant) AND workspace membership; a conversation
+   is created ONLY by the get_or_create_dm_conversation RPC (no client INSERT on
+   dm_conversations). dm_messages.workspace_id is stamped server-side from the conversation.
+   Voice notes reuse the 'voice-notes' bucket (storage SELECT is participant-gated for DMs).
+================================================================================= */
+export const directMessages = {
+  /** Canonical get-or-create the 1:1 conversation with a peer in a workspace. Returns the conversation id. */
+  async getOrCreateConversation(peerId, workspaceId) {
+    const { data, error } = await supabase.rpc('get_or_create_dm_conversation', { p_workspace_id: workspaceId, p_peer: peerId });
+    if (error) throw error;
+    return Array.isArray(data) ? data[0] : data;   // scalar uuid
+  },
+
+  /** My conversations in a workspace (RLS scopes to ones I'm a participant of), newest first. */
+  async listConversations(workspaceId) {
+    let q = supabase.from('dm_conversations').select('*').order('created_at', { ascending: false });
+    if (workspaceId) q = q.eq('workspace_id', workspaceId);
+    const { data, error } = await q;
+    if (error) throw error;
+    return (data || []).map(fromDbDmConversation);
+  },
+
+  /** Messages in one conversation, oldest first. */
+  async listMessages(conversationId, limit = 200) {
+    const { data, error } = await supabase
+      .from('dm_messages').select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true }).limit(limit);
+    if (error) throw error;
+    return (data || []).map(fromDbDirectMessage);
+  },
+
+  /** Recent messages across all my conversations in a workspace (newest first) — for list previews + unread. */
+  async listRecentMessages(workspaceId, limit = 500) {
+    let q = supabase.from('dm_messages').select('*').order('created_at', { ascending: false }).limit(limit);
+    if (workspaceId) q = q.eq('workspace_id', workspaceId);
+    const { data, error } = await q;
+    if (error) throw error;
+    return (data || []).map(fromDbDirectMessage);
+  },
+
+  /** My own per-conversation read cursors. */
+  async myReads() {
+    const session = await auth.getSession();
+    if (!session) return [];
+    const { data, error } = await supabase
+      .from('dm_reads').select('conversation_id, last_read_at')
+      .eq('user_id', session.user.id);
+    if (error) throw error;
+    return (data || []).map(r => ({ conversationId: r.conversation_id, lastReadAt: r.last_read_at }));
+  },
+
+  /** Both participants' read cursors for one conversation (RLS returns both rows) — for read receipts. */
+  async reads(conversationId) {
+    const { data, error } = await supabase
+      .from('dm_reads').select('conversation_id, user_id, last_read_at')
+      .eq('conversation_id', conversationId);
+    if (error) throw error;
+    return (data || []).map(r => ({ conversationId: r.conversation_id, userId: r.user_id, lastReadAt: r.last_read_at }));
+  },
+
+  /** Advance my read cursor for a conversation (upsert on the (conversation_id,user_id) PK). */
+  async markRead(conversationId) {
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+    const { error } = await supabase
+      .from('dm_reads')
+      .upsert({ conversation_id: conversationId, user_id: session.user.id, last_read_at: new Date().toISOString() },
+              { onConflict: 'conversation_id,user_id' });
+    if (error) throw error;
+  },
+
+  async sendText(conversationId, body) {
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+    const { data, error } = await supabase
+      .from('dm_messages')
+      .insert({ conversation_id: conversationId, sender_id: session.user.id, body })   // workspace_id stamped by trigger
+      .select().single();
+    if (error) throw error;
+    return fromDbDirectMessage(data);
+  },
+
+  /** Upload a recorded blob to the shared voice-notes bucket, then insert the DM message row. */
+  async sendVoice(conversationId, blob, durationSeconds, contentType) {
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+    const ct = (contentType || blob.type || 'audio/webm').split(';')[0];
+    const ext = ct === 'audio/mp4' ? 'm4a' : ct === 'audio/ogg' ? 'ogg' : ct === 'audio/mpeg' ? 'mp3' : ct === 'audio/wav' ? 'wav' : 'webm';
+    const path = `${session.user.id}/${uid()}.${ext}`;
+    const { error: upErr } = await supabase.storage.from('voice-notes').upload(path, blob, { contentType: ct, upsert: false });
+    if (upErr) throw upErr;
+    const { data, error } = await supabase
+      .from('dm_messages')
+      .insert({ conversation_id: conversationId, sender_id: session.user.id, audio_path: path, audio_duration_seconds: Math.max(1, Math.round(durationSeconds || 0)) })
+      .select().single();
+    if (error) {
+      supabase.storage.from('voice-notes').remove([path]).catch(() => {});   // best-effort orphan cleanup
+      throw error;
+    }
+    return fromDbDirectMessage(data);
+  },
+
+  /** Delete your own DM (and its audio object, if any). */
+  async remove(message) {
+    const { error } = await supabase.from('dm_messages').delete().eq('id', message.id);
+    if (error) throw error;
+    if (message.audioPath) supabase.storage.from('voice-notes').remove([message.audioPath]).catch(() => {});
+  },
+
+  /** Per-workspace subscription (drives the conversation list + unread badge). dm_messages is
+   *  REPLICA IDENTITY FULL so the server-side workspace_id filter is safe for INSERT/UPDATE/DELETE. */
+  subscribe(cb, workspaceId) {
+    const base = { schema: 'public', table: 'dm_messages' };
+    const opts = (event) => (workspaceId ? { event, ...base, filter: `workspace_id=eq.${workspaceId}` } : { event, ...base });
+    const channel = supabase.channel(`dm-changes${workspaceId ? `-${workspaceId}` : ''}`)
+      .on('postgres_changes', opts('INSERT'), (p) => cb({ type: 'INSERT', message: fromDbDirectMessage(p.new) }))
+      .on('postgres_changes', opts('UPDATE'), (p) => cb({ type: 'UPDATE', message: fromDbDirectMessage(p.new) }))
+      .on('postgres_changes', opts('DELETE'), (p) => cb({ type: 'DELETE', message: fromDbDirectMessage(p.old) }))
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  },
+
+  /** Per-conversation subscription (drives the open thread). RLS only ever delivers rows the
+   *  caller participates in, so the conversation_id filter just narrows to the open thread. */
+  subscribeThread(cb, conversationId) {
+    const base = { schema: 'public', table: 'dm_messages' };
+    const opts = (event) => ({ event, ...base, filter: `conversation_id=eq.${conversationId}` });
+    const channel = supabase.channel(`dm-thread-${conversationId}`)
+      .on('postgres_changes', opts('INSERT'), (p) => cb({ type: 'INSERT', message: fromDbDirectMessage(p.new) }))
+      .on('postgres_changes', opts('UPDATE'), (p) => cb({ type: 'UPDATE', message: fromDbDirectMessage(p.new) }))
+      .on('postgres_changes', opts('DELETE'), (p) => cb({ type: 'DELETE', message: fromDbDirectMessage(p.old) }))
+      .subscribe();
+    return () => supabase.removeChannel(channel);
   },
 };
