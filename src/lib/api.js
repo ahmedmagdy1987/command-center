@@ -69,7 +69,7 @@ export const workspaces = {
   /** The workspaces the current user belongs to, oldest first. */
   async listMine() {
     const { data, error } = await supabase
-      .from('workspaces').select('id,name,created_at')
+      .from('workspaces').select('id,name,slug,created_at')
       .order('created_at', { ascending: true });
     if (error) throw error;
     return data || [];
@@ -78,13 +78,14 @@ export const workspaces = {
    * Create a workspace via the sanctioned SECURITY DEFINER RPC — the ONLY write path into
    * workspaces / workspace_members (both are otherwise SELECT-only under RLS). The DB makes the
    * caller the new workspace's owner; name validation (non-empty, <=80) and the auth check run
-   * server-side, so those errors surface here. Returns { id, name, created_at } (listMine() shape).
+   * server-side, so those errors surface here. The DB generates a unique URL slug. Returns
+   * { id, name, slug, created_at } (listMine() shape).
    */
   async create(name) {
     const { data, error } = await supabase.rpc('create_workspace', { p_name: name });
     if (error) throw error;
     const row = Array.isArray(data) ? data[0] : data;   // single-composite RPC; tolerate either shape
-    return row ? { id: row.id, name: row.name, created_at: row.created_at } : null;
+    return row ? { id: row.id, name: row.name, slug: row.slug, created_at: row.created_at } : null;
   },
 };
 
@@ -150,12 +151,12 @@ export const invitations = {
     if (error) throw error;
     return Array.isArray(data) ? data[0] : data;
   },
-  /** Email-bound accept. Returns the joined workspace { id, name, created_at }. */
+  /** Email-bound accept. Returns the joined workspace { id, name, slug, created_at }. */
   async accept(token) {
     const { data, error } = await supabase.rpc('accept_invitation', { p_token: token });
     if (error) throw error;
     const row = Array.isArray(data) ? data[0] : data;
-    return row ? { id: row.id, name: row.name, created_at: row.created_at } : null;
+    return row ? { id: row.id, name: row.name, slug: row.slug, created_at: row.created_at } : null;
   },
   /** Authenticated minimal preview of a token: { workspace_name, email, status, is_expired } or null. */
   async preview(token) {

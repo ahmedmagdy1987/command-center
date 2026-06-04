@@ -181,6 +181,10 @@ const wsStorageKey = (userId) => `cc:currentWorkspace:${userId || 'anon'}`;
 const readStoredWorkspace = (userId) => { try { return localStorage.getItem(wsStorageKey(userId)); } catch { return null; } };
 const writeStoredWorkspace = (userId, id) => { try { localStorage.setItem(wsStorageKey(userId), id); } catch { /* ignore */ } };
 
+// A ?ws= value is either a human-readable workspace slug or a legacy/bookmarked workspace UUID.
+// We accept both: UUID -> match by id (and self-upgrade the URL to the slug); else -> match by slug.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function AppProvider({ children, session, currentMember, onSignOut }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -218,11 +222,18 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
 
   // View is driven by the URL (react-router) so each view has a shareable, bookmarkable route.
   const view = PATH_TO_VIEW[location.pathname] ?? 'dashboard';
+  // The URL carries the workspace SLUG (human-readable); everything internal (state, api.js,
+  // realtime channels, localStorage) stays on the UUID. Falls back to the id when a slug isn't
+  // loaded yet — which also keeps old ?ws=<uuid> links working.
+  const slugFor = useCallback(
+    (id) => workspaces.find(w => w.id === id)?.slug ?? id,
+    [workspaces],
+  );
   // Keep the current workspace (?ws=) on every view navigation so it survives reload + navigation.
   const setView = useCallback((v) => {
     const path = VIEW_TO_PATH[v] ?? '/';
-    navigate(currentWorkspaceId ? `${path}?ws=${currentWorkspaceId}` : path);
-  }, [navigate, currentWorkspaceId]);
+    navigate(currentWorkspaceId ? `${path}?ws=${slugFor(currentWorkspaceId)}` : path);
+  }, [navigate, currentWorkspaceId, slugFor]);
   const [filters, setFilters] = useState({ assignee: 'all', privacy: 'all', project: 'all', search: '' });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
@@ -257,14 +268,21 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
         setMembershipsLoaded(true);
         if (!ws.length) { setCurrentWorkspaceId(null); setLoading(false); return; }   // no workspace -> placeholder
         const ids = new Set(ws.map(w => w.id));
+        const bySlug = new Map(ws.map(w => [String(w.slug).toLowerCase(), w.id]));
         const urlWs = new URLSearchParams(window.location.search).get('ws');
-        const stored = readStoredWorkspace(userId);
-        const chosen = (urlWs && ids.has(urlWs)) ? urlWs
-                     : (stored && ids.has(stored)) ? stored
-                     : ws[0].id;
-        setCurrentWorkspaceId(chosen);
+        // Resolve ?ws= to a UUID: a UUID matches by id (legacy/bookmarked links); anything else by slug.
+        // An unknown/non-member slug or stale UUID resolves to null and falls through cleanly (no throw).
+        const fromUrl = urlWs
+          ? (UUID_RE.test(urlWs) ? (ids.has(urlWs) ? urlWs : null)
+                                 : (bySlug.get(urlWs.toLowerCase()) ?? null))
+          : null;
+        const stored = readStoredWorkspace(userId);                       // localStorage holds the UUID
+        const chosen = fromUrl ?? ((stored && ids.has(stored)) ? stored : ws[0].id);
+        setCurrentWorkspaceId(chosen);                                    // currentWorkspaceId stays a UUID
         writeStoredWorkspace(userId, chosen);
-        navigate(`${window.location.pathname}?ws=${chosen}`, { replace: true });  // normalize/correct ?ws=
+        // Normalize the URL to the SLUG (old ?ws=<uuid> links self-upgrade to the slug here).
+        const chosenSlug = ws.find(w => w.id === chosen)?.slug ?? chosen;
+        navigate(`${window.location.pathname}?ws=${chosenSlug}`, { replace: true });
       } catch (err) {
         console.error('Failed to resolve workspace:', err);
         setSyncStatus('offline');
@@ -513,8 +531,8 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     if (id === currentWorkspaceId || !workspaces.some(w => w.id === id)) return;
     setCurrentWorkspaceId(id);
     writeStoredWorkspace(userId, id);
-    navigate(`${window.location.pathname}?ws=${id}`, { replace: true });
-  }, [currentWorkspaceId, workspaces, userId, navigate]);
+    navigate(`${window.location.pathname}?ws=${slugFor(id)}`, { replace: true });
+  }, [currentWorkspaceId, workspaces, userId, navigate, slugFor]);
 
   // Create a workspace, then land in it as its OWNER. CRITICAL ordering: after the RPC succeeds we
   // RE-FETCH both the workspaces list AND the per-workspace memberships BEFORE switching, because
@@ -531,7 +549,8 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     if (targetId) {
       setCurrentWorkspaceId(targetId);          // triggers the data-load effect -> clean empty states
       writeStoredWorkspace(userId, targetId);
-      navigate(`${VIEW_TO_PATH.dashboard}?ws=${targetId}`, { replace: true });
+      const targetSlug = created?.slug ?? ws.find(w => w.id === targetId)?.slug ?? targetId;
+      navigate(`${VIEW_TO_PATH.dashboard}?ws=${targetSlug}`, { replace: true });
     }
     return created;
   }, [userId, navigate]);
@@ -565,7 +584,8 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     if (targetId) {
       setCurrentWorkspaceId(targetId);
       writeStoredWorkspace(userId, targetId);
-      navigate(`${VIEW_TO_PATH.dashboard}?ws=${targetId}`, { replace: true });
+      const targetSlug = ws?.slug ?? wss.find(w => w.id === targetId)?.slug ?? targetId;
+      navigate(`${VIEW_TO_PATH.dashboard}?ws=${targetSlug}`, { replace: true });
     }
     return ws;
   }, [userId, navigate]);

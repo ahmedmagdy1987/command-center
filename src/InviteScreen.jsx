@@ -66,7 +66,8 @@ export default function InviteScreen({ session }) {
     setAccepting(true); setAcceptErr(null);
     try {
       const ws = await invitationsApi.accept(token);
-      navigate(ws?.id ? `/?ws=${ws.id}` : '/', { replace: true });
+      // Prefer the readable slug; an id falls back and self-upgrades to the slug on landing.
+      navigate(ws?.slug ? `/?ws=${ws.slug}` : ws?.id ? `/?ws=${ws.id}` : '/', { replace: true });
     } catch (err) {
       setAcceptErr(err?.message || 'Could not accept this invitation.');
       setAccepting(false);
