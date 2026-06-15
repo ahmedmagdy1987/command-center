@@ -24,10 +24,13 @@ cd C:\Users\bdstd\Documents\projects
 git clone https://github.com/ahmedmagdy1987/command-center.git
 ```
 
-## 2. Per-machine git TLS fix — REQUIRED after a wipe (clone/fetch/push fail without it)
-After a wipe the Windows root certificate store can't verify GitHub's TLS cert, so git's
-default **schannel** backend fails with a cert error. Switch git to the **openssl** backend
-and point it at the **CA bundle that ships with Git for Windows**:
+## 2. Per-machine git TLS fix — only if you actually hit a cert error (often NOT needed)
+After a wipe the Windows root certificate store *can* fail to verify GitHub's TLS cert, making
+git's default **schannel** backend error out on clone/fetch/push. But this often does **not**
+happen — recent clones and pushes have worked on the default schannel backend with no fix
+(e.g. the 2026-06-15 restore needed nothing here). **Only if you actually hit a cert error**,
+switch git to the **openssl** backend and point it at the **CA bundle that ships with Git for
+Windows**:
 
 ```powershell
 git config --global http.sslBackend openssl
@@ -42,6 +45,20 @@ git config --global http.sslCAInfo "C:/Program Files/Git/mingw64/etc/ssl/certs/c
   `Get-ChildItem "C:\Program Files\Git" -Recurse -Filter ca-bundle.crt` and use that path.
 - If the clone in step 1 already failed with a cert error, run this fix first, then retry.
 - Confirm: `git config --global --get http.sslBackend` → `openssl`.
+
+## 2.5. Restore the git author identity — REQUIRED after a wipe (commits fail without it)
+Deep Freeze also wipes the per-machine git identity, so the first `git commit` after a wipe
+fails with **"Author identity unknown"** until you set it. Every commit in this repo's history
+uses the same identity — restore it globally (like the TLS config above):
+
+```powershell
+git config --global user.name "Ahmed Magdy"
+git config --global user.email "ahmedkassim17777@gmail.com"
+```
+
+- Confirm: `git config --global --get user.email` → `ahmedkassim17777@gmail.com`.
+- Easy to miss: `npm install` + build + lint all pass and the restore *looks* finished, but
+  you can't commit or push — which silently breaks the "always push after a wipe" rule below.
 
 ## 3. Install dependencies
 ```powershell
