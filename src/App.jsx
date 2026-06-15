@@ -6,6 +6,8 @@ import AuthScreen from './AuthScreen';
 import ResetPasswordScreen from './ResetPasswordScreen';
 import InviteScreen from './InviteScreen';
 import LandingPage from './LandingPage';
+import PricingPage from './PricingPage';
+import CheckoutScreen from './CheckoutScreen';
 import VisualTaskCommandCenter from './VisualTaskCommandCenter';
 import { supabase } from './lib/supabase';
 
@@ -91,6 +93,12 @@ export default function App() {
 
       {/* Public sign-up lands directly on the create-account form (the welcome screen otherwise). */}
       <Route path="/signup" element={session ? <Navigate to="/" replace /> : <AuthScreen key="signup" mode="signin" initialSignup />} />
+
+      {/* Monetization surfaces. Public (reachable signed-out for the demand test) and
+          also from in-app upgrade prompts. Checkout works either way (it asks a
+          signed-out visitor to sign in first). No live payment — see lib/billing.js. */}
+      <Route path="/pricing" element={<PricingPage session={session} />} />
+      <Route path="/checkout" element={<CheckoutScreen session={session} />} />
 
       {/* Everything else: the authenticated app (its own view routes live in AppShell), or — when
           signed out — the public landing at / with every other path sent to sign-in. */}

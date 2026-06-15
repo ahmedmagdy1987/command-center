@@ -49,6 +49,7 @@ export default function LandingPage() {
             <span className="text-[15px] font-semibold font-display tracking-tight">Command Center</span>
           </div>
           <nav className="flex items-center gap-2">
+            <Link to="/pricing" className="hidden sm:flex h-9 px-3.5 rounded-xl text-sm font-medium text-white/70 hover:text-white hover:bg-white/[0.06] items-center transition-colors">Pricing</Link>
             <Link to="/login" className="h-9 px-3.5 rounded-xl text-sm font-medium text-white/70 hover:text-white hover:bg-white/[0.06] flex items-center transition-colors">Log in</Link>
             <Link to="/signup" className="h-9 px-3.5 rounded-xl text-sm font-semibold bg-white text-[#0a0b11] hover:bg-white/90 flex items-center transition-colors">Sign up</Link>
           </nav>

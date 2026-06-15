@@ -7,11 +7,13 @@ import {
   Circle, CheckCircle2, Calendar, Zap, Timer, MoreHorizontal, Edit3, Filter,
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
   Brain, Target, Hourglass, GripVertical, Info, Keyboard, LogOut, Wifi, WifiOff, Loader2,
-  KeyRound, Bell, MessageSquare, MessagesSquare, Send, Mic, Square, Play, Pause, Users, Mail, UserPlus
+  KeyRound, Bell, MessageSquare, MessagesSquare, Send, Mic, Square, Play, Pause, Users, Mail, UserPlus, ArrowRight
 } from 'lucide-react';
 import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, directMessages as directMessagesApi, workspaces as workspacesApi, workspaceMembers as workspaceMembersApi, invitations as invitationsApi, auth } from './lib/api';
 import { supabase } from './lib/supabase';
 import { sanitizeTask, uid, nowISO } from './lib/sanitize';
+import { resolvePlanId, computeEntitlements, getPreviewPlanId, clearPreviewPlan } from './lib/entitlements';
+import { FEATURE_META, PLANS } from './lib/plans';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 
 /* Route <-> view mapping. Each main view gets its own shareable URL. */
@@ -176,6 +178,8 @@ const scoreRationale = (task) => {
 ================================================================================= */
 const AppCtx = createContext(null);
 const useApp = () => useContext(AppCtx);
+/** Plan + limits abstraction: can(feature), isOver(limit), usage, plan, etc. (see lib/entitlements.js). */
+const useEntitlements = () => useApp().entitlements;
 
 // Per-user persistence of the chosen workspace (survives reload).
 const wsStorageKey = (userId) => `cc:currentWorkspace:${userId || 'anon'}`;
@@ -704,6 +708,20 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   };
   useEffect(() => { closeEditingRef.current = closeEditing; });   // keep the Esc-time closer current (ref write off-render)
 
+  // ── Monetization: resolve this workspace's plan + entitlements, plus a small
+  // channel for "show the upgrade prompt for feature X". Plan resolution is the
+  // seam in lib/entitlements.js (everyone -> 'founding' all-access today, so no
+  // existing user is gated). No DB column and no payment SDK in this pass.
+  const [upgradeFeature, setUpgradeFeature] = useState(null);
+  const requestUpgrade = useCallback((featureKey) => setUpgradeFeature(featureKey), []);
+  const dismissUpgrade = useCallback(() => setUpgradeFeature(null), []);
+  const entitlements = useMemo(() => computeEntitlements({
+    planId: resolvePlanId(currentWorkspaceId),   // seam ignores the arg today; will key the DB plan lookup later
+    seatCount: members.length,
+    ownedWorkspaceCount: memberships.filter(m => m.role === 'owner').length,
+    isPreview: !!getPreviewPlanId(),
+  }), [members.length, memberships, currentWorkspaceId]);
+
   const value = {
     tasks, projects, theme, view, filters, compact, draggedId,
     paletteOpen, quickAddOpen, editingTask,
@@ -719,6 +737,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     exportJSON, importJSON,
     chatUnread, markChatRead,
     dmConversations, dmUnread, dmActiveConv, setDmActiveConv, markDmRead, startDm, refreshDms,
+    entitlements, upgradeFeature, requestUpgrade, dismissUpgrade,
   };
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
 }
@@ -1157,7 +1176,8 @@ function TaskComments({ taskId }) {
 }
 
 function TaskModal() {
-  const { editingTask, setEditingTask, updateTask, deleteTask, duplicateTask, projects, toggleSubtask, members, meId, resolveAssignee, closeEditing, creatorLabel } = useApp();
+  const { editingTask, setEditingTask, updateTask, deleteTask, duplicateTask, projects, toggleSubtask, members, meId, resolveAssignee, closeEditing, creatorLabel, requestUpgrade } = useApp();
+  const entitlements = useEntitlements();
   const t = editingTask;
   const [newSub, setNewSub] = useState('');
   const [recurrenceOpen, setRecurrenceOpen] = useState(false);
@@ -1218,7 +1238,7 @@ function TaskModal() {
             <ToggleChip active={t.urgent} onClick={() => set({ urgent: !t.urgent })} icon={Zap} label="Urgent" color="#fb923c" />
             <ToggleChip active={t.important} onClick={() => set({ important: !t.important })} icon={Flag} label="Important" color="#a78bfa" />
             <ToggleChip active={t.blocked} onClick={() => set({ blocked: !t.blocked })} icon={PauseCircle} label="Blocked" color="#f43f5e" />
-            <button onClick={() => setRecurrenceOpen(true)} type="button"
+            <button onClick={() => entitlements.can('recurringTasks') ? setRecurrenceOpen(true) : requestUpgrade('recurringTasks')} type="button"
               className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
                 isRecurring(t.recurring) ? 'text-white' : 'text-white/50 border-white/10 bg-white/5 hover:bg-white/10')}
               style={isRecurring(t.recurring) ? { background: '#34d39922', borderColor: '#34d39955', color: '#34d399' } : {}}>
@@ -2150,6 +2170,72 @@ function ConfirmModal({ open, title, message, confirmLabel = 'Delete', confirmDi
   );
 }
 
+/** In-app "upgrade to unlock X" modal. Opened by AppProvider.requestUpgrade(featureKey); reads the
+ *  feature/limit copy from lib/plans.js (FEATURE_META) and routes to /pricing or /checkout. Graceful
+ *  by design — every gated action opens this, never a dead end or a silent failure. */
+function UpgradeModal() {
+  const { upgradeFeature, dismissUpgrade } = useApp();
+  const navigate = useNavigate();
+  if (!upgradeFeature) return null;
+  const meta = FEATURE_META[upgradeFeature] || { label: 'this feature', blurb: '', tier: 'pro' };
+  const tier = PLANS[meta.tier] || PLANS.pro;
+  const go = (path) => { dismissUpgrade(); navigate(path); };
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={dismissUpgrade} />
+      <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
+        <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5"
+          style={{ animation: 'slideUp .2s ease' }}
+          onClick={e => e.stopPropagation()}
+          onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); dismissUpgrade(); } }}>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0 shadow-lg shadow-fuchsia-500/25">
+              <Sparkles className="w-4 h-4 text-white" />
+            </span>
+            <div className="text-[10px] font-semibold uppercase tracking-widest text-violet-300/80">{tier.name} feature</div>
+            <button onClick={dismissUpgrade} aria-label="Close" className="ml-auto text-white/40 hover:text-white/80 transition-colors"><X className="w-4 h-4" /></button>
+          </div>
+          <h2 className="text-base font-semibold text-white mb-1">{meta.isLimit ? meta.label : `Unlock ${meta.label}`}</h2>
+          {meta.blurb && <p className="text-xs text-white/55 mb-4 leading-relaxed">{meta.blurb}</p>}
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 mb-4 text-[12px] text-white/60">
+            Included on <span className="font-semibold text-white/85">{tier.name}</span> and up.
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={() => go('/pricing')}
+              className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">See all plans</button>
+            <button onClick={() => go(`/checkout?plan=${tier.id}`)}
+              className="h-9 px-4 rounded-xl text-white text-xs font-semibold bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:shadow-lg hover:shadow-fuchsia-500/30 transition-all inline-flex items-center gap-1.5">
+              Upgrade to {tier.name}<ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </>,
+    document.body
+  );
+}
+
+/** Visible, dismissible banner shown only while a ?plan= preview is active (see lib/entitlements.js).
+ *  Guarantees a real user can never get silently stuck on a downgraded preview — one click exits. */
+function PlanPreviewBanner() {
+  const { entitlements } = useApp();
+  if (!entitlements.isPreview) return null;
+  const exit = () => {
+    clearPreviewPlan();
+    try { const u = new URL(window.location.href); u.searchParams.delete('plan'); window.location.assign(u.pathname + u.search); }
+    catch { window.location.reload(); }
+  };
+  return (
+    <div className="fixed bottom-20 lg:bottom-3 inset-x-0 lg:inset-x-auto lg:right-3 z-[55] flex justify-center lg:justify-end px-3 pointer-events-none">
+      <div className="pointer-events-auto inline-flex items-center gap-2 px-3 h-9 rounded-full border border-amber-400/30 bg-amber-500/15 backdrop-blur text-[11px] text-amber-100 shadow-lg">
+        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+        Previewing the <span className="font-semibold">{entitlements.plan.name}</span> plan
+        <button onClick={exit} className="ml-1 font-semibold text-amber-200 hover:text-white underline underline-offset-2 transition-colors">Exit</button>
+      </div>
+    </div>
+  );
+}
+
 /** Create or edit (rename / recolor / re-icon) a project. Create + edit are member-allowed
  *  (projects_insert_member / projects_update_member); persisted via the AppProvider handlers. */
 function ProjectModal({ open, onClose, project }) {
@@ -2272,7 +2358,8 @@ function CreateWorkspaceModal({ open, onClose }) {
 /** Current-workspace label + switcher. Always offers "+ Create workspace"; becomes a real
  *  dropdown of workspaces once the user belongs to more than one. */
 function WorkspaceSwitcher() {
-  const { workspaces, currentWorkspaceId, switchWorkspace, pendingInvites, acceptInvitation } = useApp();
+  const { workspaces, currentWorkspaceId, switchWorkspace, pendingInvites, acceptInvitation, requestUpgrade } = useApp();
+  const entitlements = useEntitlements();
   const [open, setOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const current = workspaces.find(w => w.id === currentWorkspaceId);
@@ -2314,7 +2401,7 @@ function WorkspaceSwitcher() {
               </>
             )}
             <div className="my-1 h-px bg-white/10" />
-            <button onClick={() => { setOpen(false); setCreateOpen(true); }}
+            <button onClick={() => { setOpen(false); if (entitlements.atWorkspaceLimit) requestUpgrade('workspaces'); else setCreateOpen(true); }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/80 hover:bg-white/5 hover:text-white transition-colors">
               <span className="w-4 h-4 rounded-md border border-dashed border-white/30 flex items-center justify-center shrink-0"><Plus className="w-2.5 h-2.5" /></span>
               <span className="flex-1 text-left">Create workspace</span>
@@ -2328,7 +2415,9 @@ function WorkspaceSwitcher() {
 }
 
 function TopBar() {
-  const { theme, setTheme, setPaletteOpen, setQuickAddOpen, filters, setFilters, view, compact, setCompact, exportJSON, importJSON, projects, syncStatus, currentMember, myRole, onSignOut, members, meId } = useApp();
+  const { theme, setTheme, setPaletteOpen, setQuickAddOpen, filters, setFilters, view, compact, setCompact, exportJSON, importJSON, projects, syncStatus, currentMember, myRole, onSignOut, members, meId, requestUpgrade } = useApp();
+  const entitlements = useEntitlements();
+  const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const fileRef = useRef(null);
@@ -2401,13 +2490,14 @@ function TopBar() {
                   {currentMember && (
                     <div className="px-3 py-2.5 border-b border-white/5">
                       <div className="text-xs font-medium text-white/90 truncate">{currentMember.email}</div>
-                      <div className="text-[10px] text-white/40 mt-0.5 capitalize">{myRole || currentMember.role}</div>
+                      <div className="text-[10px] text-white/40 mt-0.5 capitalize">{myRole || currentMember.role} · <span className="text-violet-300/80 normal-case">{entitlements.plan.name}</span></div>
                     </div>
                   )}
                   <MenuItem icon={theme === 'dark' ? Sun : Moon} onClick={() => { setTheme(theme === 'dark' ? 'light' : 'dark'); setMenuOpen(false); }}>Switch to {theme === 'dark' ? 'light' : 'dark'}</MenuItem>
                   <MenuItem icon={Download} onClick={() => { exportJSON(); setMenuOpen(false); }}>Export JSON</MenuItem>
-                  <MenuItem icon={Upload} onClick={() => { fileRef.current?.click(); setMenuOpen(false); }}>Import JSON</MenuItem>
+                  <MenuItem icon={Upload} onClick={() => { setMenuOpen(false); if (entitlements.can('bulkImport')) fileRef.current?.click(); else requestUpgrade('bulkImport'); }}>Import JSON</MenuItem>
                   <div className="h-px bg-white/5 my-1" />
+                  <MenuItem icon={Sparkles} onClick={() => { setMenuOpen(false); navigate('/pricing'); }}>Plans &amp; pricing</MenuItem>
                   <MenuItem icon={KeyRound} onClick={() => { setPasswordModalOpen(true); setMenuOpen(false); }}>Change password</MenuItem>
                   <div className="h-px bg-white/5 my-1" />
                   <MenuItem icon={LogOut} onClick={() => { onSignOut?.(); setMenuOpen(false); }}>Sign out</MenuItem>
@@ -3314,7 +3404,8 @@ function VoiceNote({ path, duration }) {
 }
 
 function ChatView() {
-  const { session, markChatRead, currentMember, currentWorkspaceId } = useApp();
+  const { session, markChatRead, currentMember, currentWorkspaceId, requestUpgrade } = useApp();
+  const entitlements = useEntitlements();
   const userId = session?.user?.id;
   const myName = currentMember?.display_name || currentMember?.email || 'You';
   const [items, setItems] = useState([]);
@@ -3555,9 +3646,10 @@ function ChatView() {
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); } }}
               placeholder="Message the workspace…  (Enter to send, Shift+Enter for a new line)"
               className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none" />
-            <button onClick={startRecording} disabled={sending} title="Record a voice note"
+            <button onClick={() => entitlements.can('voiceNotes') ? startRecording() : requestUpgrade('voiceNotes')} disabled={sending}
+              title={entitlements.can('voiceNotes') ? 'Record a voice note' : 'Voice notes — upgrade to unlock'}
               className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 disabled:opacity-40 shrink-0">
-              <Mic className="w-4 h-4" />
+              {entitlements.can('voiceNotes') ? <Mic className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}
             </button>
             <button onClick={sendText} disabled={!text.trim() || sending}
               className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed shrink-0">
@@ -3692,7 +3784,8 @@ function DirectMessagesView() {
 
 /** One open 1:1 thread. Keyed by conversationId so it remounts (fresh state) per conversation. */
 function DmThread({ conversationId, peerId, onBack }) {
-  const { session, resolveAssignee, markDmRead } = useApp();
+  const { session, resolveAssignee, markDmRead, requestUpgrade } = useApp();
+  const entitlements = useEntitlements();
   const userId = session?.user?.id;
   const peer = resolveAssignee(peerId);
   const [items, setItems] = useState([]);
@@ -3892,9 +3985,10 @@ function DmThread({ conversationId, peerId, onBack }) {
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); } }}
               placeholder={`Message ${peer.label === 'Me' ? 'yourself' : peer.label}…  (Enter to send)`}
               className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none" />
-            <button onClick={startRecording} disabled={sending} title="Record a voice note"
+            <button onClick={() => entitlements.can('voiceNotes') ? startRecording() : requestUpgrade('voiceNotes')} disabled={sending}
+              title={entitlements.can('voiceNotes') ? 'Record a voice note' : 'Voice notes — upgrade to unlock'}
               className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 disabled:opacity-40 shrink-0">
-              <Mic className="w-4 h-4" />
+              {entitlements.can('voiceNotes') ? <Mic className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}
             </button>
             <button onClick={sendText} disabled={!text.trim() || sending}
               className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed shrink-0">
@@ -3965,7 +4059,8 @@ function OnboardingScreen({ theme, onSignOut }) {
    MEMBERS VIEW (owner-only) — roster + invite-by-email (copy-link) + pending invites
 ================================================================================= */
 function MembersView() {
-  const { currentWorkspaceId, isOwner, membershipsLoaded, members, meId, startDm } = useApp();
+  const { currentWorkspaceId, isOwner, membershipsLoaded, members, meId, startDm, requestUpgrade } = useApp();
+  const entitlements = useEntitlements();
   const [invites, setInvites] = useState([]);
   const [reloadKey, setReloadKey] = useState(0);
   const [email, setEmail] = useState('');
@@ -4002,6 +4097,7 @@ function MembersView() {
     e.preventDefault();
     const v = email.trim();
     if (!v || busy) return;
+    if (entitlements.atSeatLimit) { requestUpgrade('seats'); return; }
     setBusy(true); setErr(''); setCopied(false);
     try {
       const inv = await invitationsApi.create(currentWorkspaceId, v);
@@ -4027,6 +4123,14 @@ function MembersView() {
       <ViewHeader title="Members" subtitle="People in this workspace, and pending invitations." />
 
       <Card title="Invite by email" subtitle="They'll join as a member. Copy the link and send it to them (public sign-up stays closed).">
+        {entitlements.atSeatLimit && (
+          <button type="button" onClick={() => requestUpgrade('seats')}
+            className="w-full mb-3 flex items-center gap-2 px-3 py-2.5 rounded-xl border border-violet-400/30 bg-violet-500/10 text-left hover:bg-violet-500/15 transition-colors">
+            <Lock className="w-3.5 h-3.5 text-violet-300 shrink-0" />
+            <span className="text-[12px] text-violet-100/90 flex-1">You've reached your plan's member limit ({entitlements.limits.seats}). Upgrade to add more.</span>
+            <span className="text-[11px] font-semibold text-violet-200 shrink-0">See plans</span>
+          </button>
+        )}
         <form onSubmit={submit} className="flex flex-col sm:flex-row gap-2">
           <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="teammate@example.com"
             className="flex-1 h-9 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white/90 outline-none focus:border-white/25 transition-colors" />
@@ -4224,6 +4328,8 @@ function AppShell() {
       <QuickAdd />
       <CommandPalette />
       <TaskModal />
+      <UpgradeModal />
+      <PlanPreviewBanner />
     </div>
   );
 }
