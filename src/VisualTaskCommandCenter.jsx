@@ -2,7 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useR
 import { createPortal } from 'react-dom';
 import {
   LayoutDashboard, KanbanSquare, Grid3x3, FolderKanban, CalendarDays, Lock, UserCog,
-  Plus, Search, Command, Settings, Sun, Moon, Download, Upload, RefreshCw, X, Check,
+  Plus, Search, Command, Settings, Sun, Moon, Download, Upload, RefreshCw, X, Check, CheckCheck,
   Clock, AlertCircle, Flag, Tag, Link2, Trash2, Copy, Archive, ChevronRight, ChevronDown,
   Circle, CheckCircle2, Calendar, Zap, Timer, MoreHorizontal, Edit3, Filter,
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
@@ -254,6 +254,10 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   // work across devices. currentWorkspaceId stays the scope; everything clears on a workspace switch.
   const [dmConversations, setDmConversations] = useState([]);   // [{ id, peerId, lastAt, preview, unread }]
   const [dmActiveConv, setDmActiveConv] = useState(null);       // open conversation (also set by a notification deep-link)
+  // Ref mirror of dmActiveConv (alongside chatViewRef) so refreshDms can tell, without a stale
+  // closure, which thread is being actively viewed — and hold that thread's badge at 0 (see refreshDms).
+  const dmActiveConvRef = useRef(dmActiveConv);
+  useEffect(() => { dmActiveConvRef.current = dmActiveConv; }, [dmActiveConv]);
   const dmUnread = useMemo(() => dmConversations.reduce((n, c) => n + (c.unread || 0), 0), [dmConversations]);
 
   const refreshDms = useCallback(async (wsId) => {
@@ -277,7 +281,10 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       setDmConversations(convs.map(c => {
         const peerId = c.userLo === me ? c.userHi : c.userLo;
         const a = agg.get(c.id) || { last: null, unread: 0 };
-        return { id: c.id, peerId, lastAt: a.last?.createdAt || c.createdAt, preview: a.last, unread: a.unread };
+        // Badge-race fix: while this thread is the one being actively viewed, markDmRead has already
+        // zeroed it optimistically; don't let the lagging server cursor re-inflate the badge here.
+        const viewing = chatViewRef.current === 'dms' && c.id === dmActiveConvRef.current;
+        return { id: c.id, peerId, lastAt: a.last?.createdAt || c.createdAt, preview: a.last, unread: viewing ? 0 : a.unread };
       }).sort((x, y) => new Date(y.lastAt) - new Date(x.lastAt)));
     } catch (e) { console.error('Failed to load direct messages:', e); }
   }, [currentWorkspaceId, userId]);
@@ -2117,7 +2124,7 @@ function ConfirmModal({ open, title, message, confirmLabel = 'Delete', confirmDi
   const btnRef = useRef(null);
   useEffect(() => { if (open && !confirmDisabled) setTimeout(() => btnRef.current?.focus(), 30); }, [open, confirmDisabled]);
   if (!open) return null;
-  return (
+  return createPortal(
     <>
       <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
@@ -2138,7 +2145,8 @@ function ConfirmModal({ open, title, message, confirmLabel = 'Delete', confirmDi
           </div>
         </div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }
 
@@ -3738,15 +3746,6 @@ function DmThread({ conversationId, peerId, onBack }) {
     streamRef.current?.getTracks().forEach(t => t.stop());
   }, []);
 
-  // The last of MY messages the peer has read -> render a single "Seen" marker under it.
-  const lastSeenMineId = useMemo(() => {
-    if (!peerReadAt) return null;
-    const read = new Date(peerReadAt);
-    let id = null;
-    for (const m of items) if (m.senderId === userId && new Date(m.createdAt) <= read) id = m.id;
-    return id;
-  }, [items, peerReadAt, userId]);
-
   const sendText = async () => {
     const body = text.trim();
     if (!body || sending) return;
@@ -3854,9 +3853,17 @@ function DmThread({ conversationId, peerId, onBack }) {
                   </button>
                 )}
               </div>
-              {mine && m.id === lastSeenMineId && (
-                <div className="mt-0.5 px-1 text-[10px] text-white/35 flex items-center gap-1"><Check className="w-3 h-3" />Seen</div>
-              )}
+              {mine && (() => {
+                // ✓ once sent; ✓✓ once the peer's read cursor (peerReadAt) has reached this message.
+                const seen = peerReadAt && new Date(m.createdAt) <= new Date(peerReadAt);
+                return (
+                  <div className="mt-0.5 px-1 flex items-center" title={seen ? 'Seen' : 'Sent'}>
+                    {seen
+                      ? <CheckCheck className="w-3.5 h-3.5 text-violet-400" />
+                      : <Check className="w-3 h-3 text-white/35" />}
+                  </div>
+                );
+              })()}
             </div>
           );
         })}
