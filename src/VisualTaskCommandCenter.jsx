@@ -297,7 +297,12 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   const markDmRead = useCallback(async (conversationId) => {
     if (!conversationId) return;
     setDmConversations(prev => prev.map(c => c.id === conversationId ? { ...c, unread: 0 } : c));
-    try { await directMessagesApi.markRead(conversationId); } catch (e) { console.error('markDmRead failed:', e); }
+    try {
+      await directMessagesApi.markRead(conversationId);
+      console.log('[DM-READ] cursor written', { conversationId, at: new Date().toISOString() });   // TEMP diagnostic
+    } catch (e) {
+      console.error('[DM-READ] cursor WRITE FAILED (check RLS/permissions on dm_reads)', conversationId, e);   // TEMP diagnostic
+    }
   }, []);
 
   const startDm = useCallback(async (peerId) => {
@@ -3505,8 +3510,23 @@ function MsgAvatar({ name, userId, size = 28 }) {
 /** One message bubble: body / voice note + a hover-and-touch "…" actions menu (Copy, Delete own). */
 function MsgBubble({ m, mine, onDelete }) {
   const [menu, setMenu] = useState(false);
+  const [pos, setPos] = useState(null);
+  const btnRef = useRef(null);
   const canCopy = !!m.body;
   const hasMenu = canCopy || mine;
+  const MENU_W = 144;
+  // Anchor the menu to the trigger's viewport rect, then render it via a PORTAL to document.body so
+  // it escapes the scroll/overflow clipping of the message list (the old absolute menu was clipped
+  // and spilled off the edge). Clamp horizontally so it never runs off-screen on mobile.
+  const openMenu = () => {
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) {
+      let left = mine ? r.right - MENU_W : r.left;
+      left = Math.max(8, Math.min(left, window.innerWidth - MENU_W - 8));
+      setPos({ top: Math.min(r.bottom + 6, window.innerHeight - 96), left });
+    }
+    setMenu(true);
+  };
   const copy = () => { try { navigator.clipboard?.writeText(m.body || ''); } catch { /* ignore */ } setMenu(false); };
   return (
     <div className={cx('group/bubble relative max-w-full rounded-2xl px-3 py-2 border',
@@ -3514,30 +3534,30 @@ function MsgBubble({ m, mine, onDelete }) {
       {m.body && <div className="text-sm text-white/85 leading-relaxed whitespace-pre-wrap break-words" title={absoluteTime(m.createdAt)}>{m.body}</div>}
       {m.audioPath && <VoiceNote path={m.audioPath} duration={m.audioDuration} />}
       {hasMenu && (
+        <button ref={btnRef} onClick={() => (menu ? setMenu(false) : openMenu())} aria-label="Message actions"
+          className={cx('absolute -top-2 w-6 h-6 rounded-full bg-[#0f1017] border border-white/10 flex items-center justify-center text-white/45 hover:text-white/80 transition-opacity',
+            'opacity-100 sm:opacity-0 sm:group-hover/bubble:opacity-100', mine ? '-left-2' : '-right-2')}>
+          <MoreHorizontal className="w-3 h-3" />
+        </button>
+      )}
+      {menu && pos && createPortal(
         <>
-          <button onClick={() => setMenu(o => !o)} aria-label="Message actions"
-            className={cx('absolute -top-2 w-6 h-6 rounded-full bg-[#0f1017] border border-white/10 flex items-center justify-center text-white/45 hover:text-white/80 transition-opacity',
-              'opacity-100 sm:opacity-0 sm:group-hover/bubble:opacity-100', mine ? '-left-2' : '-right-2')}>
-            <MoreHorizontal className="w-3 h-3" />
-          </button>
-          {menu && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setMenu(false)} />
-              <div className={cx('absolute z-50 top-5 w-32 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1', mine ? 'left-0' : 'right-0')} style={{ animation: 'slideUp .12s ease' }}>
-                {canCopy && (
-                  <button onClick={copy} className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-white/80 hover:bg-white/5">
-                    <Copy className="w-3.5 h-3.5" />Copy
-                  </button>
-                )}
-                {mine && (
-                  <button onClick={() => { setMenu(false); onDelete?.(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-rose-300 hover:bg-rose-500/10">
-                    <Trash2 className="w-3.5 h-3.5" />Delete
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-        </>
+          <div className="fixed inset-0 z-[70]" onClick={() => setMenu(false)} />
+          <div className="fixed z-[71] w-36 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1"
+            style={{ top: pos.top, left: pos.left, animation: 'slideUp .12s ease' }}>
+            {canCopy && (
+              <button onClick={copy} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5">
+                <Copy className="w-3.5 h-3.5" />Copy
+              </button>
+            )}
+            {mine && (
+              <button onClick={() => { setMenu(false); onDelete?.(m); }} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-rose-300 hover:bg-rose-500/10">
+                <Trash2 className="w-3.5 h-3.5" />Delete
+              </button>
+            )}
+          </div>
+        </>,
+        document.body
       )}
     </div>
   );
@@ -4037,8 +4057,12 @@ function DmThread({ conversationId, peerId, onBack }) {
 
   const refreshReads = useCallback(() => {
     directMessagesApi.reads(conversationId)
-      .then(rs => { const p = rs.find(r => r.userId === peerId); setPeerReadAt(p?.lastReadAt || null); })
-      .catch(() => {});
+      .then(rs => {
+        const p = rs.find(r => r.userId === peerId);
+        console.log('[DM-READ] cursor re-read', { conversationId, peerId, peerReadAt: p?.lastReadAt || null, rows: rs.length });   // TEMP diagnostic
+        setPeerReadAt(p?.lastReadAt || null);
+      })
+      .catch(e => console.error('[DM-READ] re-read failed', e));   // TEMP diagnostic
   }, [conversationId, peerId]);
 
   // Load + subscribe to this thread; mark read while open. Remounts per conversation (keyed).
@@ -4065,6 +4089,19 @@ function DmThread({ conversationId, peerId, onBack }) {
     return () => { on = false; unsub(); };
   }, [conversationId, userId, markDmRead, refreshReads, signalRead]);
 
+  // RELIABLE read receipts: the persisted dm_reads cursor is the source of truth. Re-read the peer's
+  // cursor on a short interval AND on window focus while the thread is open, so the sender's tick
+  // flips to Seen even when the peer reads without replying. The presence broadcast above is only a
+  // best-effort instant update; correctness no longer depends on it.
+  useEffect(() => {
+    if (isSelf) return undefined;
+    const id = setInterval(refreshReads, 4000);
+    const onFocus = () => refreshReads();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => { clearInterval(id); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus); };
+  }, [isSelf, refreshReads]);
+
   useEffect(() => () => {
     clearInterval(timerRef.current);
     streamRef.current?.getTracks().forEach(t => t.stop());
@@ -4080,14 +4117,26 @@ function DmThread({ conversationId, peerId, onBack }) {
   // Peer's read cursor = persisted dm_reads (cold load) OR the live presence value (whichever is
   // newer). The live value is what flips the sender's tick to Seen with no refresh/reopen.
   const peerLiveReadAt = useMemo(() => (others.find(o => o.userId === peerId)?.readAt) || null, [others, peerId]);
+  // Most-recent of the persisted cursor and the live presence cursor, compared NUMERICALLY via
+  // getTime() to avoid any string-vs-Date / timezone parsing pitfalls. The persisted cursor (polled
+  // on focus + interval above) is the reliable source; the presence value is just a faster path.
   const effectiveReadAt = useMemo(() => {
-    if (!peerReadAt) return peerLiveReadAt;
-    if (!peerLiveReadAt) return peerReadAt;
-    return new Date(peerLiveReadAt) > new Date(peerReadAt) ? peerLiveReadAt : peerReadAt;
+    const a = peerReadAt ? new Date(peerReadAt).getTime() : 0;
+    const b = peerLiveReadAt ? new Date(peerLiveReadAt).getTime() : 0;
+    if (!a && !b) return null;
+    return b > a ? peerLiveReadAt : peerReadAt;
   }, [peerReadAt, peerLiveReadAt]);
+  // My last sent message's timestamp (the receipt stays on it even after the peer replies).
+  const lastOwnAt = useMemo(() => items.find(m => m.id === lastOwnId)?.createdAt || null, [items, lastOwnId]);
+  const isSeen = (createdAt) => {
+    if (!effectiveReadAt || !createdAt) return false;
+    const readMs = new Date(effectiveReadAt).getTime();
+    const msgMs = new Date(createdAt).getTime();
+    return Number.isFinite(readMs) && Number.isFinite(msgMs) && readMs >= msgMs;
+  };
   const receiptFor = isSelf ? undefined : (m) => {
     if (m.id !== lastOwnId) return null;
-    const seen = effectiveReadAt && new Date(m.createdAt) <= new Date(effectiveReadAt);
+    const seen = isSeen(m.createdAt);
     return (
       <div className="mt-0.5 px-1 flex items-center gap-1 text-[10px]" title={seen ? 'Seen' : 'Sent'}>
         {seen
@@ -4096,6 +4145,13 @@ function DmThread({ conversationId, peerId, onBack }) {
       </div>
     );
   };
+  // TEMP diagnostic: logs the receipt computation whenever its inputs change.
+  useEffect(() => {
+    if (isSelf || !lastOwnAt) return;
+    const readMs = effectiveReadAt ? new Date(effectiveReadAt).getTime() : 0;
+    const msgMs = new Date(lastOwnAt).getTime();
+    console.log('[DM-READ] receipt computed', { peerReadAt, peerLiveReadAt, effectiveReadAt, lastSentAt: lastOwnAt, seen: readMs > 0 && readMs >= msgMs });
+  }, [effectiveReadAt, lastOwnAt, peerReadAt, peerLiveReadAt, isSelf]);
 
   const sendText = async (body) => {
     const created = await directMessagesApi.sendText(conversationId, body);
