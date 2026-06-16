@@ -3404,6 +3404,280 @@ function VoiceNote({ path, duration }) {
   return <AudioPlayer url={url} duration={duration} />;
 }
 
+/* ── Messaging time helpers ─────────────────────────────────────────────────── */
+const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+const sameDay = (a, b) => startOfDay(a).getTime() === startOfDay(b).getTime();
+/** Local wall-clock time, e.g. "3:04 PM". */
+const clockTime = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
+/** Full absolute datetime for hover titles, e.g. "Mon, Jun 1, 2026, 3:04 PM". */
+const absoluteTime = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? '' : d.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }); };
+/** Day-divider label: Today / Yesterday / weekday (<7d) / "Jun 1, 2026". */
+const dayLabel = (iso) => {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const diff = Math.round((startOfDay(new Date()).getTime() - startOfDay(d).getTime()) / 86400000);
+  if (diff <= 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  if (diff < 7) return d.toLocaleDateString([], { weekday: 'long' });
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+};
+
+/** Shimmer placeholder block. */
+function Skeleton({ className }) {
+  return <div className={cx('animate-pulse rounded-md bg-white/[0.06]', className)} />;
+}
+/** Loading state for a message thread — a few ghost bubbles. */
+function ChatSkeleton() {
+  const rows = [{ mine: false, w: 'w-48' }, { mine: false, w: 'w-32' }, { mine: true, w: 'w-40' }, { mine: false, w: 'w-56' }, { mine: true, w: 'w-24' }];
+  return (
+    <div className="space-y-4 py-1">
+      {rows.map((r, i) => (
+        <div key={i} className={cx('flex items-end gap-2.5', r.mine && 'flex-row-reverse')}>
+          {!r.mine && <Skeleton className="w-7 h-7 rounded-full shrink-0" />}
+          <div className={cx('flex flex-col gap-1.5', r.mine ? 'items-end' : 'items-start')}>
+            {!r.mine && <Skeleton className="h-2.5 w-20" />}
+            <Skeleton className={cx('h-8 rounded-2xl', r.w)} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Sticky centered day divider; theme-aware so it reads on both dark and light threads. */
+function DayDivider({ label }) {
+  const { theme } = useApp();
+  const light = theme === 'light';
+  return (
+    <div className="sticky top-0 z-10 flex justify-center py-2 pointer-events-none">
+      <span className="px-2.5 h-6 inline-flex items-center rounded-full text-[10px] font-medium uppercase tracking-wider backdrop-blur-sm border"
+        style={{ background: light ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.08)', color: light ? '#5a5d69' : 'rgba(255,255,255,0.5)', borderColor: light ? 'rgba(0,0,0,0.10)' : 'rgba(255,255,255,0.10)' }}>
+        {label}
+      </span>
+    </div>
+  );
+}
+
+/** Round sender avatar (deterministic color + initial). */
+function MsgAvatar({ name, userId, size = 28 }) {
+  const c = assigneeColor(userId);
+  return (
+    <span className="rounded-full flex items-center justify-center font-semibold shrink-0 select-none"
+      style={{ width: size, height: size, background: c.soft, color: c.hex, border: `1px solid ${c.hex}33`, fontSize: Math.round(size * 0.4) }}>
+      {initialsOf(name)}
+    </span>
+  );
+}
+
+/** One message bubble: body / voice note + a hover-and-touch "…" actions menu (Copy, Delete own). */
+function MsgBubble({ m, mine, onDelete }) {
+  const [menu, setMenu] = useState(false);
+  const canCopy = !!m.body;
+  const hasMenu = canCopy || mine;
+  const copy = () => { try { navigator.clipboard?.writeText(m.body || ''); } catch { /* ignore */ } setMenu(false); };
+  return (
+    <div className={cx('group/bubble relative max-w-full rounded-2xl px-3 py-2 border',
+      mine ? 'bg-violet-500/20 border-violet-500/25 rounded-tr-sm' : 'bg-white/[0.05] border-white/10 rounded-tl-sm')}>
+      {m.body && <div className="text-sm text-white/85 leading-relaxed whitespace-pre-wrap break-words" title={absoluteTime(m.createdAt)}>{m.body}</div>}
+      {m.audioPath && <VoiceNote path={m.audioPath} duration={m.audioDuration} />}
+      {hasMenu && (
+        <>
+          <button onClick={() => setMenu(o => !o)} aria-label="Message actions"
+            className={cx('absolute -top-2 w-6 h-6 rounded-full bg-[#0f1017] border border-white/10 flex items-center justify-center text-white/45 hover:text-white/80 transition-opacity',
+              'opacity-100 sm:opacity-0 sm:group-hover/bubble:opacity-100', mine ? '-left-2' : '-right-2')}>
+            <MoreHorizontal className="w-3 h-3" />
+          </button>
+          {menu && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setMenu(false)} />
+              <div className={cx('absolute z-50 top-5 w-32 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1', mine ? 'left-0' : 'right-0')} style={{ animation: 'slideUp .12s ease' }}>
+                {canCopy && (
+                  <button onClick={copy} className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-white/80 hover:bg-white/5">
+                    <Copy className="w-3.5 h-3.5" />Copy
+                  </button>
+                )}
+                {mine && (
+                  <button onClick={() => { setMenu(false); onDelete?.(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-rose-300 hover:bg-rose-500/10">
+                    <Trash2 className="w-3.5 h-3.5" />Delete
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** The scrollable message timeline — sticky day dividers, sender grouping, avatars (both
+ *  surfaces), per-message receipts (DM), skeleton loading, empty state, sticky-bottom
+ *  autoscroll, and a jump-to-latest button. Shared by the team channel and DM threads. */
+function MessageList({ items, userId, nameOf, loading, empty, onDelete, receiptFor }) {
+  const scrollRef = useRef(null);
+  const atBottomRef = useRef(true);
+  const [showJump, setShowJump] = useState(false);
+  const jump = () => { const el = scrollRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); };
+  const onScroll = () => {
+    const el = scrollRef.current; if (!el) return;
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    atBottomRef.current = near; setShowJump(!near);
+  };
+  // Stick to the bottom on new messages only when already near it (or it's my own send),
+  // so reading older history isn't yanked away.
+  useLayoutEffect(() => {
+    const el = scrollRef.current; if (!el) return;
+    const last = items[items.length - 1];
+    if (atBottomRef.current || last?.senderId === userId) { el.scrollTop = el.scrollHeight; setShowJump(false); }
+  }, [items, userId]);
+
+  return (
+    <div className="relative flex-1 min-h-0">
+      <div ref={scrollRef} onScroll={onScroll} className="absolute inset-0 overflow-y-auto px-4 py-4">
+        {loading ? <ChatSkeleton /> : items.length === 0 ? empty : items.map((m, i) => {
+          const prev = items[i - 1];
+          const mine = m.senderId === userId;
+          const newDay = !prev || !sameDay(prev.createdAt, m.createdAt);
+          const firstOfGroup = newDay || !prev || prev.senderId !== m.senderId || (new Date(m.createdAt) - new Date(prev.createdAt) > 5 * 60 * 1000);
+          return (
+            <React.Fragment key={m.id}>
+              {newDay && <DayDivider label={dayLabel(m.createdAt)} />}
+              <div className={cx('flex gap-2.5', mine && 'flex-row-reverse', firstOfGroup ? 'mt-3 first:mt-0' : 'mt-0.5')}>
+                {!mine && (firstOfGroup ? <MsgAvatar name={nameOf(m.senderId)} userId={m.senderId} /> : <span className="w-7 shrink-0" aria-hidden="true" />)}
+                <div className={cx('flex flex-col min-w-0 max-w-[78%]', mine ? 'items-end' : 'items-start')}>
+                  {firstOfGroup && (
+                    <div className={cx('flex items-baseline gap-2 mb-1 px-0.5', mine && 'flex-row-reverse')}>
+                      {!mine && <span className="text-[12px] font-semibold text-white/80">{nameOf(m.senderId)}</span>}
+                      <span className="text-[10px] text-white/35 tabular-nums">{clockTime(m.createdAt)}</span>
+                    </div>
+                  )}
+                  <MsgBubble m={m} mine={mine} onDelete={onDelete} />
+                  {mine && receiptFor && receiptFor(m)}
+                </div>
+              </div>
+            </React.Fragment>
+          );
+        })}
+      </div>
+      {showJump && (
+        <button onClick={jump} aria-label="Jump to latest"
+          className="absolute bottom-3 right-3 z-10 w-9 h-9 rounded-full bg-[#0f1017] border border-white/15 shadow-xl flex items-center justify-center text-white/70 hover:text-white hover:border-white/25">
+          <ChevronDown className="w-4 h-4" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Typing / recording presence over an ephemeral Realtime channel (no DB). Returns the
+ *  "others" list + helpers to broadcast my own state. channelKey === null → disabled. */
+function usePresence(channelKey, userId, name) {
+  const [others, setOthers] = useState([]);
+  const ref = useRef(null);
+  const typingTimer = useRef(null);
+  useEffect(() => {
+    if (!channelKey || !userId) return undefined;
+    const handle = messagesApi.presence({ userId, name }, setOthers, channelKey);
+    ref.current = handle;
+    return () => { clearTimeout(typingTimer.current); handle.unsubscribe(); ref.current = null; setOthers([]); };
+  }, [channelKey, userId, name]);
+  const signalTyping = useCallback(() => {
+    ref.current?.update({ typing: true });
+    clearTimeout(typingTimer.current);
+    typingTimer.current = setTimeout(() => ref.current?.update({ typing: false }), 2500);
+  }, []);
+  const stopTyping = useCallback(() => { clearTimeout(typingTimer.current); ref.current?.update({ typing: false }); }, []);
+  const signalRecording = useCallback((on) => ref.current?.update(on ? { recording: true, typing: false } : { recording: false }), []);
+  return { others, signalTyping, stopTyping, signalRecording };
+}
+
+/** Subtle "X is typing… / recording…" strip with animated dots. */
+function TypingStrip({ others }) {
+  const label = presenceLabel(others);
+  if (!label) return null;
+  return (
+    <div className="px-4 py-1.5 text-[11px] text-white/45 border-t border-white/5 shrink-0 flex items-center gap-1.5">
+      <span className="flex gap-0.5">
+        <span className="w-1 h-1 rounded-full bg-violet-400/70 animate-bounce" style={{ animationDelay: '0ms' }} />
+        <span className="w-1 h-1 rounded-full bg-violet-400/70 animate-bounce" style={{ animationDelay: '150ms' }} />
+        <span className="w-1 h-1 rounded-full bg-violet-400/70 animate-bounce" style={{ animationDelay: '300ms' }} />
+      </span>
+      {label}
+    </div>
+  );
+}
+
+/** Shared composer: autosizing textarea (1 → ~6 rows), voice button, primary Send, a
+ *  recording bar, and a visible send-failure + Retry affordance. Presentational — the view
+ *  owns recording + send state and passes handlers down. */
+function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, onStartRecording, onStopRecording, micError, canVoice, onUpgradeVoice, placeholder }) {
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const [failedBody, setFailedBody] = useState('');
+  const taRef = useRef(null);
+  const autosize = useCallback(() => { const el = taRef.current; if (!el) return; el.style.height = '0px'; el.style.height = Math.min(el.scrollHeight, 140) + 'px'; }, []);
+  useEffect(() => { autosize(); }, [text, autosize]);
+
+  const doSend = async (body) => {
+    if (!body || sending) return;
+    setSending(true);
+    try { await onSubmitText(body); setFailedBody(''); }
+    catch (e) { console.error('Message send failed:', e); setFailedBody(body); }
+    finally { setSending(false); }
+  };
+  const submit = () => { const body = text.trim(); if (!body) return; setText(''); onStopTyping?.(); doSend(body); };
+  const retry = () => { const body = failedBody; setFailedBody(''); doSend(body); };
+
+  return (
+    <div className="border-t border-white/10 shrink-0">
+      {failedBody && (
+        <div className="px-4 py-1.5 flex items-center gap-2 text-[11px] text-rose-300/90 border-b border-white/5">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          <span className="flex-1 truncate">Couldn’t send “{failedBody}”.</span>
+          <button onClick={retry} className="font-semibold underline underline-offset-2 hover:text-rose-200">Retry</button>
+          <button onClick={() => setFailedBody('')} aria-label="Dismiss" className="text-white/40 hover:text-white/70"><X className="w-3.5 h-3.5" /></button>
+        </div>
+      )}
+      <div className="p-3">
+        {recording ? (
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-2 text-xs text-rose-300">
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" /> Recording {fmtDur(seconds)}
+            </span>
+            <span className="flex items-end gap-0.5 h-4" aria-hidden="true">
+              {[0, 1, 2, 3, 4].map(i => <span key={i} className="w-0.5 rounded-full bg-rose-400/70 animate-pulse" style={{ height: `${6 + ((i * 7 + seconds * 5) % 10)}px`, animationDelay: `${i * 120}ms` }} />)}
+            </span>
+            <div className="flex-1" />
+            <button onClick={() => onStopRecording(true)} className="text-xs text-white/50 hover:text-white/80">Cancel</button>
+            <button onClick={() => onStopRecording(false)} className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90">
+              <Square className="w-3 h-3" />Stop &amp; send
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-end gap-2">
+            <textarea ref={taRef} value={text} rows={1}
+              onChange={e => { setText(e.target.value); onTyping?.(); }}
+              onBlur={() => onStopTyping?.()}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } }}
+              placeholder={placeholder}
+              className="flex-1 max-h-[140px] bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none leading-relaxed" />
+            <button onClick={() => canVoice ? onStartRecording() : onUpgradeVoice?.()} disabled={sending}
+              title={canVoice ? 'Record a voice note' : 'Voice notes — upgrade to unlock'}
+              className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 disabled:opacity-40 shrink-0">
+              {canVoice ? <Mic className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}
+            </button>
+            <button onClick={submit} disabled={!text.trim() || sending}
+              className="inline-flex items-center gap-1.5 rounded-xl px-4 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed shrink-0">
+              <Send className="w-3.5 h-3.5" />Send
+            </button>
+          </div>
+        )}
+        {micError && <div className="mt-1.5 text-[11px] text-rose-300/80">{micError}</div>}
+      </div>
+    </div>
+  );
+}
+
 function ChatView() {
   const { session, markChatRead, currentMember, currentWorkspaceId, requestUpgrade } = useApp();
   const entitlements = useEntitlements();
@@ -3411,22 +3685,21 @@ function ChatView() {
   const myName = currentMember?.display_name || currentMember?.email || 'You';
   const [items, setItems] = useState([]);
   const [people, setPeople] = useState({});
-  const [text, setText] = useState('');
   const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [micError, setMicError] = useState('');
-  const [others, setOthers] = useState([]);
-  const scrollRef = useRef(null);
   const mrRef = useRef(null);
   const chunksRef = useRef([]);
   const streamRef = useRef(null);
   const timerRef = useRef(null);
   const startRef = useRef(0);
   const cancelRef = useRef(false);
-  const presenceRef = useRef(null);
-  const typingTimerRef = useRef(null);
+
+  // (#7) Typing/recording presence on a WORKSPACE-SCOPED channel (was a single global
+  // 'chat-presence' shared across every tenant — a cross-workspace leak). Keyed per workspace.
+  const presenceKey = currentWorkspaceId ? `chat-presence-${currentWorkspaceId}` : null;
+  const { others, signalTyping, stopTyping, signalRecording } = usePresence(presenceKey, userId, myName);
 
   // Sender names from members.
   useEffect(() => {
@@ -3439,8 +3712,6 @@ function ChatView() {
   useEffect(() => {
     if (!currentWorkspaceId) return;
     let on = true;
-    // ChatView remounts on workspace switch (shell shows the loading gate), so items/loading
-    // start fresh — no synchronous clear needed here.
     messagesApi.list(200, currentWorkspaceId).then(list => { if (on) setItems(list); }).catch(e => console.error('Failed to load messages:', e)).finally(() => { if (on) setLoading(false); });
     markChatRead();
     const unsub = messagesApi.subscribe(({ type, message }) => {
@@ -3455,44 +3726,17 @@ function ChatView() {
     return () => { on = false; unsub(); };
   }, [markChatRead, currentWorkspaceId]);
 
-  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }); }, [items.length]);
-
   // Stop any in-flight recording on unmount.
   useEffect(() => () => {
     clearInterval(timerRef.current);
-    clearTimeout(typingTimerRef.current);
     streamRef.current?.getTracks().forEach(t => t.stop());
   }, []);
 
-  // Realtime presence: who is typing / recording on the channel.
-  useEffect(() => {
-    if (!userId) return;
-    const handle = messagesApi.presence({ userId, name: myName }, setOthers);
-    presenceRef.current = handle;
-    return () => { handle.unsubscribe(); presenceRef.current = null; };
-  }, [userId, myName]);
-
-  const signalTyping = () => {
-    presenceRef.current?.update({ typing: true });
-    clearTimeout(typingTimerRef.current);
-    typingTimerRef.current = setTimeout(() => presenceRef.current?.update({ typing: false }), 2500);
-  };
-  const stopTyping = () => {
-    clearTimeout(typingTimerRef.current);
-    presenceRef.current?.update({ typing: false });
-  };
-
   const nameOf = (id) => (id === userId ? 'You' : (people[id]?.display_name || people[id]?.email || 'Someone'));
 
-  const sendText = async () => {
-    const body = text.trim();
-    if (!body || sending) return;
-    setText('');
-    stopTyping();
-    try {
-      const created = await messagesApi.sendText(body, currentWorkspaceId);
-      setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
-    } catch (e) { console.error('Send failed:', e); setText(body); }
+  const sendText = async (body) => {
+    const created = await messagesApi.sendText(body, currentWorkspaceId);
+    setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
   };
 
   const startRecording = async () => {
@@ -3517,20 +3761,19 @@ function ChatView() {
         const ct = (mr.mimeType || 'audio/webm').split(';')[0];
         const blob = new Blob(chunksRef.current, { type: ct });
         chunksRef.current = [];
-        if (cancelRef.current || blob.size === 0 || dur < 0.4) return;
+        if (cancelRef.current || blob.size === 0) return;
+        if (dur < 0.4) { setMicError('Too short — hold to record a little longer.'); return; }
         try {
-          setSending(true);
           const created = await messagesApi.sendVoice(blob, dur, ct, currentWorkspaceId);
           setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
         } catch (e) { console.error('Voice send failed:', e); setMicError('Failed to send voice note.'); }
-        finally { setSending(false); }
       };
       mrRef.current = mr;
       startRef.current = Date.now();
       mr.start();
       setRecording(true);
       setSeconds(0);
-      presenceRef.current?.update({ recording: true, typing: false });
+      signalRecording(true);
       timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
     } catch (e) {
       console.error('Mic error:', e);
@@ -3542,7 +3785,7 @@ function ChatView() {
     cancelRef.current = cancelled;
     setRecording(false);
     clearInterval(timerRef.current);
-    presenceRef.current?.update({ recording: false });
+    signalRecording(false);
     const mr = mrRef.current;
     if (mr && mr.state !== 'inactive') mr.stop();
   };
@@ -3567,16 +3810,21 @@ function ChatView() {
         [data-theme="light"] .cc-chat .bg-violet-400\\/70 { background: #7c3aed !important; }
         [data-theme="light"] .cc-chat .bg-white\\/\\[0\\.05\\] { background: rgba(0,0,0,0.06) !important; }
       `}</style>
-      <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2 shrink-0">
-        <MessageSquare className="w-4 h-4 text-white/50" />
-        <div className="text-sm font-semibold text-white/90">Team chat</div>
-        <div className="text-[10px] text-white/35">Shared workspace channel</div>
+      <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2.5 shrink-0">
+        <span className="w-7 h-7 rounded-lg bg-violet-500/15 border border-violet-500/25 flex items-center justify-center text-violet-300 text-sm font-semibold shrink-0">#</span>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-white/90 leading-tight">Team chat</div>
+          <div className="text-[10px] text-white/35 leading-tight">Everyone in this workspace</div>
+        </div>
       </div>
 
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-4">
-        {loading ? (
-          <div className="py-6 text-center text-[11px] text-white/40">Loading…</div>
-        ) : items.length === 0 ? (
+      <MessageList
+        items={items}
+        userId={userId}
+        nameOf={nameOf}
+        loading={loading}
+        onDelete={remove}
+        empty={(
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-10">
             <div className="w-12 h-12 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
               <MessageSquare className="w-5 h-5 text-violet-300/70" />
@@ -3584,81 +3832,24 @@ function ChatView() {
             <div className="text-sm font-medium text-white/70">No messages yet</div>
             <div className="text-[12px] text-white/40">Start the conversation with your team 👋</div>
           </div>
-        ) : items.map((m, i) => {
-          const prev = items[i - 1];
-          const mine = m.senderId === userId;
-          const firstOfGroup = !prev || prev.senderId !== m.senderId || (new Date(m.createdAt) - new Date(prev.createdAt) > 5 * 60 * 1000);
-          return (
-            <div key={m.id} className={cx('flex flex-col', mine ? 'items-end' : 'items-start', firstOfGroup ? 'mt-3 first:mt-0' : 'mt-0.5')}>
-              {firstOfGroup && (
-                <div className="flex items-center gap-2 mb-1 px-1">
-                  <span className="text-[11px] font-medium text-white/70">{nameOf(m.senderId)}</span>
-                  <span className="text-[10px] text-white/35">{timeAgo(m.createdAt)}</span>
-                </div>
-              )}
-              <div className={cx('group relative max-w-[80%] rounded-2xl px-3 py-2',
-                mine ? 'bg-violet-500/20 border border-violet-500/25 rounded-tr-md' : 'bg-white/[0.05] border border-white/10 rounded-tl-md')}>
-                {m.body && <div className="text-sm text-white/85 leading-relaxed whitespace-pre-wrap break-words">{m.body}</div>}
-                {m.audioPath && <VoiceNote path={m.audioPath} duration={m.audioDuration} />}
-                {mine && (
-                  <button onClick={() => remove(m)} title="Delete"
-                    className="absolute -top-2 -left-2 opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 rounded-full bg-[#0a0b11] border border-white/10 flex items-center justify-center text-white/40 hover:text-rose-300">
-                    <Trash2 className="w-2.5 h-2.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {presenceLabel(others) && (
-        <div className="px-4 py-1.5 text-[11px] text-white/45 border-t border-white/5 shrink-0 flex items-center gap-1.5">
-          <span className="flex gap-0.5">
-            <span className="w-1 h-1 rounded-full bg-violet-400/70 animate-bounce" style={{ animationDelay: '0ms' }} />
-            <span className="w-1 h-1 rounded-full bg-violet-400/70 animate-bounce" style={{ animationDelay: '150ms' }} />
-            <span className="w-1 h-1 rounded-full bg-violet-400/70 animate-bounce" style={{ animationDelay: '300ms' }} />
-          </span>
-          {presenceLabel(others)}
-        </div>
-      )}
-
-      {micError && <div className="px-4 py-1.5 text-[11px] text-rose-300/80 border-t border-white/5 shrink-0">{micError}</div>}
-
-      <div className="border-t border-white/10 p-3 shrink-0">
-        {recording ? (
-          <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-2 text-xs text-rose-300">
-              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" /> Recording {fmtDur(seconds)}
-            </span>
-            <div className="flex-1" />
-            <button onClick={() => stopRecording(true)} className="text-xs text-white/50 hover:text-white/80">Cancel</button>
-            <button onClick={() => stopRecording(false)}
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90">
-              <Square className="w-3 h-3" />Stop &amp; send
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-end gap-2">
-            <textarea value={text}
-              onChange={e => { setText(e.target.value); signalTyping(); }}
-              onBlur={stopTyping}
-              rows={2}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); } }}
-              placeholder="Message the workspace…  (Enter to send, Shift+Enter for a new line)"
-              className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none" />
-            <button onClick={() => entitlements.can('voiceNotes') ? startRecording() : requestUpgrade('voiceNotes')} disabled={sending}
-              title={entitlements.can('voiceNotes') ? 'Record a voice note' : 'Voice notes — upgrade to unlock'}
-              className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 disabled:opacity-40 shrink-0">
-              {entitlements.can('voiceNotes') ? <Mic className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}
-            </button>
-            <button onClick={sendText} disabled={!text.trim() || sending}
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed shrink-0">
-              <Send className="w-3.5 h-3.5" />Send
-            </button>
-          </div>
         )}
-      </div>
+      />
+
+      <TypingStrip others={others} />
+
+      <Composer
+        placeholder="Message the workspace…  (Enter to send, Shift+Enter for a new line)"
+        onSubmitText={sendText}
+        onTyping={signalTyping}
+        onStopTyping={stopTyping}
+        recording={recording}
+        seconds={seconds}
+        onStartRecording={startRecording}
+        onStopRecording={stopRecording}
+        micError={micError}
+        canVoice={entitlements.can('voiceNotes')}
+        onUpgradeVoice={() => requestUpgrade('voiceNotes')}
+      />
     </div>
   );
 }
@@ -3785,25 +3976,30 @@ function DirectMessagesView() {
 
 /** One open 1:1 thread. Keyed by conversationId so it remounts (fresh state) per conversation. */
 function DmThread({ conversationId, peerId, onBack }) {
-  const { session, resolveAssignee, markDmRead, requestUpgrade } = useApp();
+  const { session, currentMember, resolveAssignee, markDmRead, requestUpgrade } = useApp();
   const entitlements = useEntitlements();
   const userId = session?.user?.id;
   const peer = resolveAssignee(peerId);
+  const isSelf = peerId === userId;
+  const peerName = peer.label === 'Me' ? 'You' : peer.label;
+  const myName = currentMember?.display_name || currentMember?.email || 'You';
   const [items, setItems] = useState([]);
   const [peerReadAt, setPeerReadAt] = useState(null);
-  const [text, setText] = useState('');
   const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [micError, setMicError] = useState('');
-  const scrollRef = useRef(null);
   const mrRef = useRef(null);
   const chunksRef = useRef([]);
   const streamRef = useRef(null);
   const timerRef = useRef(null);
   const startRef = useRef(0);
   const cancelRef = useRef(false);
+
+  // DM typing/recording presence (NEW — makes presence symmetric with team chat). Per-conversation
+  // ephemeral channel (no DB); disabled for the notes-to-self thread.
+  const presenceKey = (!isSelf && conversationId) ? `dm-presence-${conversationId}` : null;
+  const { others, signalTyping, stopTyping, signalRecording } = usePresence(presenceKey, userId, myName);
 
   const refreshReads = useCallback(() => {
     directMessagesApi.reads(conversationId)
@@ -3833,21 +4029,33 @@ function DmThread({ conversationId, peerId, onBack }) {
     return () => { on = false; unsub(); };
   }, [conversationId, userId, markDmRead, refreshReads]);
 
-  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }); }, [items.length]);
-
   useEffect(() => () => {
     clearInterval(timerRef.current);
     streamRef.current?.getTracks().forEach(t => t.stop());
   }, []);
 
-  const sendText = async () => {
-    const body = text.trim();
-    if (!body || sending) return;
-    setText('');
-    try {
-      const created = await directMessagesApi.sendText(conversationId, body);
-      setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
-    } catch (e) { console.error('DM send failed:', e); setText(body); }
+  const nameOf = (id) => (id === userId ? 'You' : peerName);
+
+  // Receipt on the LAST own message only: ✓ Sent / ✓✓ Seen (peer's read cursor). None on self-notes.
+  const lastOwnId = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) { if (items[i].senderId === userId) return items[i].id; }
+    return null;
+  }, [items, userId]);
+  const receiptFor = isSelf ? undefined : (m) => {
+    if (m.id !== lastOwnId) return null;
+    const seen = peerReadAt && new Date(m.createdAt) <= new Date(peerReadAt);
+    return (
+      <div className="mt-0.5 px-1 flex items-center gap-1 text-[10px]" title={seen ? 'Seen' : 'Sent'}>
+        {seen
+          ? <><CheckCheck className="w-3.5 h-3.5 text-violet-400" /><span className="text-violet-400/80">Seen</span></>
+          : <><Check className="w-3 h-3 text-white/35" /><span className="text-white/35">Sent</span></>}
+      </div>
+    );
+  };
+
+  const sendText = async (body) => {
+    const created = await directMessagesApi.sendText(conversationId, body);
+    setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
   };
 
   const startRecording = async () => {
@@ -3872,19 +4080,19 @@ function DmThread({ conversationId, peerId, onBack }) {
         const ct = (mr.mimeType || 'audio/webm').split(';')[0];
         const blob = new Blob(chunksRef.current, { type: ct });
         chunksRef.current = [];
-        if (cancelRef.current || blob.size === 0 || dur < 0.4) return;
+        if (cancelRef.current || blob.size === 0) return;
+        if (dur < 0.4) { setMicError('Too short — hold to record a little longer.'); return; }
         try {
-          setSending(true);
           const created = await directMessagesApi.sendVoice(conversationId, blob, dur, ct);
           setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
         } catch (e) { console.error('DM voice send failed:', e); setMicError('Failed to send voice note.'); }
-        finally { setSending(false); }
       };
       mrRef.current = mr;
       startRef.current = Date.now();
       mr.start();
       setRecording(true);
       setSeconds(0);
+      signalRecording(true);
       timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
     } catch (e) {
       console.error('Mic error:', e);
@@ -3896,6 +4104,7 @@ function DmThread({ conversationId, peerId, onBack }) {
     cancelRef.current = cancelled;
     setRecording(false);
     clearInterval(timerRef.current);
+    signalRecording(false);
     const mr = mrRef.current;
     if (mr && mr.state !== 'inactive') mr.stop();
   };
@@ -3910,94 +4119,44 @@ function DmThread({ conversationId, peerId, onBack }) {
     <div className="flex flex-col h-full">
       <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2.5 shrink-0">
         <button onClick={onBack} className="lg:hidden text-white/50 hover:text-white/80 -ml-1"><ChevronRight className="w-4 h-4 rotate-180" /></button>
-        <span className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold"
-          style={{ background: peer.soft, color: peer.hex, border: `1px solid ${peer.hex}33` }}>{peer.initials}</span>
-        <div className="text-sm font-semibold text-white/90">{peer.label === 'Me' ? 'You' : peer.label}</div>
-        <div className="text-[10px] text-white/35">Direct message</div>
+        <MsgAvatar name={peerName} userId={peerId} size={32} />
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-white/90 leading-tight truncate">{isSelf ? 'You' : peerName}</div>
+          <div className="text-[10px] text-white/35 leading-tight">{isSelf ? 'Notes to self' : 'Direct message'}</div>
+        </div>
       </div>
 
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-4">
-        {loading ? (
-          <div className="py-6 text-center text-[11px] text-white/40">Loading…</div>
-        ) : items.length === 0 ? (
+      <MessageList
+        items={items}
+        userId={userId}
+        nameOf={nameOf}
+        loading={loading}
+        onDelete={remove}
+        receiptFor={receiptFor}
+        empty={(
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-10">
-            <div className="text-sm font-medium text-white/70">No messages yet</div>
-            <div className="text-[12px] text-white/40">Say hello 👋</div>
-          </div>
-        ) : items.map((m, i) => {
-          const prev = items[i - 1];
-          const mine = m.senderId === userId;
-          const firstOfGroup = !prev || prev.senderId !== m.senderId || (new Date(m.createdAt) - new Date(prev.createdAt) > 5 * 60 * 1000);
-          return (
-            <div key={m.id} className={cx('flex flex-col', mine ? 'items-end' : 'items-start', firstOfGroup ? 'mt-3 first:mt-0' : 'mt-0.5')}>
-              {firstOfGroup && (
-                <div className="flex items-center gap-2 mb-1 px-1">
-                  <span className="text-[11px] font-medium text-white/70">{mine ? 'You' : (peer.label === 'Me' ? 'You' : peer.label)}</span>
-                  <span className="text-[10px] text-white/35">{timeAgo(m.createdAt)}</span>
-                </div>
-              )}
-              <div className={cx('group relative max-w-[80%] rounded-2xl px-3 py-2',
-                mine ? 'bg-violet-500/20 border border-violet-500/25 rounded-tr-md' : 'bg-white/[0.05] border border-white/10 rounded-tl-md')}>
-                {m.body && <div className="text-sm text-white/85 leading-relaxed whitespace-pre-wrap break-words">{m.body}</div>}
-                {m.audioPath && <VoiceNote path={m.audioPath} duration={m.audioDuration} />}
-                {mine && (
-                  <button onClick={() => remove(m)} title="Delete"
-                    className="absolute -top-2 -left-2 opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 rounded-full bg-[#0a0b11] border border-white/10 flex items-center justify-center text-white/40 hover:text-rose-300">
-                    <Trash2 className="w-2.5 h-2.5" />
-                  </button>
-                )}
-              </div>
-              {mine && (() => {
-                // ✓ once sent; ✓✓ once the peer's read cursor (peerReadAt) has reached this message.
-                const seen = peerReadAt && new Date(m.createdAt) <= new Date(peerReadAt);
-                return (
-                  <div className="mt-0.5 px-1 flex items-center" title={seen ? 'Seen' : 'Sent'}>
-                    {seen
-                      ? <CheckCheck className="w-3.5 h-3.5 text-violet-400" />
-                      : <Check className="w-3 h-3 text-white/35" />}
-                  </div>
-                );
-              })()}
-            </div>
-          );
-        })}
-      </div>
-
-      {micError && <div className="px-4 py-1.5 text-[11px] text-rose-300/80 border-t border-white/5 shrink-0">{micError}</div>}
-
-      <div className="border-t border-white/10 p-3 shrink-0">
-        {recording ? (
-          <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-2 text-xs text-rose-300">
-              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" /> Recording {fmtDur(seconds)}
-            </span>
-            <div className="flex-1" />
-            <button onClick={() => stopRecording(true)} className="text-xs text-white/50 hover:text-white/80">Cancel</button>
-            <button onClick={() => stopRecording(false)}
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90">
-              <Square className="w-3 h-3" />Stop &amp; send
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-end gap-2">
-            <textarea value={text}
-              onChange={e => setText(e.target.value)}
-              rows={2}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); } }}
-              placeholder={`Message ${peer.label === 'Me' ? 'yourself' : peer.label}…  (Enter to send)`}
-              className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none" />
-            <button onClick={() => entitlements.can('voiceNotes') ? startRecording() : requestUpgrade('voiceNotes')} disabled={sending}
-              title={entitlements.can('voiceNotes') ? 'Record a voice note' : 'Voice notes — upgrade to unlock'}
-              className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 disabled:opacity-40 shrink-0">
-              {entitlements.can('voiceNotes') ? <Mic className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}
-            </button>
-            <button onClick={sendText} disabled={!text.trim() || sending}
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed shrink-0">
-              <Send className="w-3.5 h-3.5" />Send
-            </button>
+            <MsgAvatar name={peerName} userId={peerId} size={48} />
+            <div className="text-sm font-medium text-white/70">{isSelf ? 'Notes to self' : peerName}</div>
+            <div className="text-[12px] text-white/40">{isSelf ? 'Jot down anything you want to remember.' : 'Say hello 👋'}</div>
           </div>
         )}
-      </div>
+      />
+
+      {!isSelf && <TypingStrip others={others} />}
+
+      <Composer
+        placeholder={isSelf ? 'Write a note to yourself…' : `Message ${peerName}…  (Enter to send)`}
+        onSubmitText={sendText}
+        onTyping={isSelf ? undefined : signalTyping}
+        onStopTyping={isSelf ? undefined : stopTyping}
+        recording={recording}
+        seconds={seconds}
+        onStartRecording={startRecording}
+        onStopRecording={stopRecording}
+        micError={micError}
+        canVoice={entitlements.can('voiceNotes')}
+        onUpgradeVoice={() => requestUpgrade('voiceNotes')}
+      />
     </div>
   );
 }

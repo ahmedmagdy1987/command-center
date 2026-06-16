@@ -589,9 +589,9 @@ export const messages = {
    * onOthers receives an array of { name, typing, recording } for OTHER people who are
    * currently typing or recording. Returns { update(partial), unsubscribe() }.
    */
-  presence({ userId, name }, onOthers) {
+  presence({ userId, name }, onOthers, channelKey = 'chat-presence') {
     let mine = { userId, name: name || 'Someone', typing: false, recording: false };
-    const channel = supabase.channel('chat-presence', { config: { presence: { key: userId } } });
+    const channel = supabase.channel(channelKey, { config: { presence: { key: userId } } });
     const emit = () => {
       const state = channel.presenceState();
       const others = [];
