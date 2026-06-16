@@ -281,7 +281,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
         let a = agg.get(m.conversationId);
         if (!a) { a = { last: m, unread: 0 }; agg.set(m.conversationId, a); }
         const c = cursor.get(m.conversationId);
-        if (m.senderId !== me && (!c || new Date(m.createdAt) > new Date(c))) a.unread++;
+        if (m.senderId !== me && (!c || new Date(m.createdAt).getTime() > new Date(c).getTime())) a.unread++;
       }
       setDmConversations(convs.map(c => {
         const peerId = c.userLo === me ? c.userHi : c.userLo;
@@ -3646,8 +3646,7 @@ function usePresence(channelKey, userId, name) {
 }
 
 /** Subtle "X is typing… / recording…" strip with animated dots. */
-function TypingStrip({ others }) {
-  const label = presenceLabel(others);
+function TypingStrip({ label }) {
   if (!label) return null;
   return (
     <div className="px-4 py-1.5 text-[11px] text-white/45 border-t border-white/5 shrink-0 flex items-center gap-1.5">
@@ -3889,7 +3888,7 @@ function ChatView() {
         )}
       />
 
-      <TypingStrip others={others} />
+      <TypingStrip label={presenceLabel(others)} />
 
       <Composer
         placeholder="Message the workspace…  (Enter to send, Shift+Enter for a new line)"
@@ -4039,6 +4038,8 @@ function DmThread({ conversationId, peerId, onBack }) {
   const myName = currentMember?.display_name || currentMember?.email || 'You';
   const [items, setItems] = useState([]);
   const [peerReadAt, setPeerReadAt] = useState(null);
+  const [shownTyping, setShownTyping] = useState('');   // peer typing label (safety expiry + clear-on-message)
+  const typingExpiryRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
@@ -4055,12 +4056,30 @@ function DmThread({ conversationId, peerId, onBack }) {
   const presenceKey = (!isSelf && conversationId) ? `dm-presence-${conversationId}` : null;
   const { others, signalTyping, stopTyping, signalRecording, signalRead } = usePresence(presenceKey, userId, myName);
 
+  // Peer typing indicator with a safety net so it can't get stuck: it auto-expires 5s after the last
+  // presence update (a missed "stopped typing" broadcast can't make it linger), and it's cleared the
+  // moment a message from the peer arrives (see the thread subscription). Deferred set so it isn't a
+  // synchronous setState in the effect body.
+  useEffect(() => {
+    const label = presenceLabel(others);
+    const t = setTimeout(() => {
+      setShownTyping(label);
+      clearTimeout(typingExpiryRef.current);
+      if (label) typingExpiryRef.current = setTimeout(() => setShownTyping(''), 5000);
+    }, 0);
+    return () => clearTimeout(t);
+  }, [others]);
+  useEffect(() => () => clearTimeout(typingExpiryRef.current), []);
+
   const refreshReads = useCallback(() => {
     directMessagesApi.reads(conversationId)
       .then(rs => {
         const p = rs.find(r => r.userId === peerId);
-        console.log('[DM-READ] cursor re-read', { conversationId, peerId, peerReadAt: p?.lastReadAt || null, rows: rs.length });   // TEMP diagnostic
-        setPeerReadAt(p?.lastReadAt || null);
+        const next = p?.lastReadAt || null;
+        setPeerReadAt(prev => {
+          if (prev !== next) console.log('[DM-READ] peer cursor CHANGED', { conversationId, from: prev, to: next });   // TEMP diagnostic
+          return next;   // reactive state → re-render → receipt recomputes
+        });
       })
       .catch(e => console.error('[DM-READ] re-read failed', e));   // TEMP diagnostic
   }, [conversationId, peerId]);
@@ -4082,25 +4101,27 @@ function DmThread({ conversationId, peerId, onBack }) {
         if (type === 'UPDATE') return prev.map(m => m.id === message.id ? message : m);
         return prev.some(m => m.id === message.id) ? prev : [...prev, message];
       });
-      // A new message from the peer while I'm viewing means I've read it: advance + rebroadcast.
-      if (type === 'INSERT' && message.senderId !== userId) { markDmRead(conversationId); signalRead(nowISO()); }
+      // A new message from the peer while I'm viewing means I've read it: advance + rebroadcast, and
+      // clear the typing indicator immediately (don't wait for the peer's "stopped typing" event).
+      if (type === 'INSERT' && message.senderId !== userId) { markDmRead(conversationId); signalRead(nowISO()); setShownTyping(''); }
       refreshReads();   // peer likely advanced their cursor around new activity
     }, conversationId);
     return () => { on = false; unsub(); };
   }, [conversationId, userId, markDmRead, refreshReads, signalRead]);
 
-  // RELIABLE read receipts: the persisted dm_reads cursor is the source of truth. Re-read the peer's
-  // cursor on a short interval AND on window focus while the thread is open, so the sender's tick
-  // flips to Seen even when the peer reads without replying. The presence broadcast above is only a
-  // best-effort instant update; correctness no longer depends on it.
+  // RELIABLE read receipts (persisted dm_reads is the source of truth). While the thread is open, on a
+  // 4s interval AND on window focus: (a) re-WRITE my cursor so the peer reliably sees "Seen" even if a
+  // realtime mark-read was missed, and (b) re-READ the peer's cursor so my own ticks flip. This is the
+  // foundation — it no longer depends on a new message arriving or on the presence broadcast.
   useEffect(() => {
     if (isSelf) return undefined;
-    const id = setInterval(refreshReads, 4000);
-    const onFocus = () => refreshReads();
+    const tick = () => { markDmRead(conversationId); signalRead(nowISO()); refreshReads(); };
+    const id = setInterval(tick, 4000);
+    const onFocus = () => tick();
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onFocus);
     return () => { clearInterval(id); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus); };
-  }, [isSelf, refreshReads]);
+  }, [isSelf, refreshReads, markDmRead, conversationId, signalRead]);
 
   useEffect(() => () => {
     clearInterval(timerRef.current);
@@ -4242,7 +4263,7 @@ function DmThread({ conversationId, peerId, onBack }) {
         )}
       />
 
-      {!isSelf && <TypingStrip others={others} />}
+      {!isSelf && <TypingStrip label={shownTyping} />}
 
       <Composer
         placeholder={isSelf ? 'Write a note to yourself…' : `Message ${peerName}…  (Enter to send)`}
