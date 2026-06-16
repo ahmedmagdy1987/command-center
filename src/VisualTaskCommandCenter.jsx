@@ -297,12 +297,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   const markDmRead = useCallback(async (conversationId, coverAt) => {
     if (!conversationId) return;
     setDmConversations(prev => prev.map(c => c.id === conversationId ? { ...c, unread: 0 } : c));
-    try {
-      await directMessagesApi.markRead(conversationId, coverAt);
-      console.log('[DM-READ] cursor written', { conversationId, coverAt: coverAt || null, at: new Date().toISOString() });   // TEMP diagnostic
-    } catch (e) {
-      console.error('[DM-READ] cursor WRITE FAILED (check RLS/permissions on dm_reads)', conversationId, e);   // TEMP diagnostic
-    }
+    try { await directMessagesApi.markRead(conversationId, coverAt); } catch (e) { console.error('markDmRead failed:', e); }
   }, []);
 
   const startDm = useCallback(async (peerId) => {
@@ -3584,33 +3579,48 @@ function MessageList({ items, userId, nameOf, loading, empty, onDelete, receiptF
     if (atBottomRef.current || last?.senderId === userId) { el.scrollTop = el.scrollHeight; setShowJump(false); }
   }, [items, userId]);
 
+  // Group messages by calendar day so each day's divider is a sticky SECTION header. With the divider
+  // sticky INSIDE its own <section>, only the current day's header is pinned at a time: as a section
+  // scrolls past the top its header leaves with it and the next day's header takes over (standard
+  // WhatsApp/iMessage behavior, never two stacked). Also stamps each message's firstOfGroup.
+  const days = useMemo(() => {
+    const groups = [];
+    items.forEach((m, i) => {
+      const prev = items[i - 1];
+      const newDay = !prev || !sameDay(prev.createdAt, m.createdAt);
+      const firstOfGroup = newDay || prev.senderId !== m.senderId || (new Date(m.createdAt) - new Date(prev.createdAt) > 5 * 60 * 1000);
+      if (newDay) groups.push({ key: m.id, label: dayLabel(m.createdAt), rows: [] });
+      groups[groups.length - 1].rows.push({ m, firstOfGroup });
+    });
+    return groups;
+  }, [items]);
+
   return (
     <div className="relative flex-1 min-h-0">
       <div ref={scrollRef} onScroll={onScroll} className="absolute inset-0 overflow-y-auto px-4 py-4">
-        {loading ? <ChatSkeleton /> : items.length === 0 ? empty : items.map((m, i) => {
-          const prev = items[i - 1];
-          const mine = m.senderId === userId;
-          const newDay = !prev || !sameDay(prev.createdAt, m.createdAt);
-          const firstOfGroup = newDay || !prev || prev.senderId !== m.senderId || (new Date(m.createdAt) - new Date(prev.createdAt) > 5 * 60 * 1000);
-          return (
-            <React.Fragment key={m.id}>
-              {newDay && <DayDivider label={dayLabel(m.createdAt)} />}
-              <div className={cx('flex gap-2.5', mine && 'flex-row-reverse', firstOfGroup ? 'mt-3 first:mt-0' : 'mt-0.5')}>
-                {!mine && (firstOfGroup ? <MsgAvatar name={nameOf(m.senderId)} userId={m.senderId} /> : <span className="w-7 shrink-0" aria-hidden="true" />)}
-                <div className={cx('flex flex-col min-w-0 max-w-[78%]', mine ? 'items-end' : 'items-start')}>
-                  {firstOfGroup && (
-                    <div className={cx('flex items-baseline gap-2 mb-1 px-0.5', mine && 'flex-row-reverse')}>
-                      {!mine && <span className="text-[12px] font-semibold text-white/80">{nameOf(m.senderId)}</span>}
-                      <span className="text-[10px] text-white/35 tabular-nums">{clockTime(m.createdAt)}</span>
-                    </div>
-                  )}
-                  <MsgBubble m={m} mine={mine} onDelete={onDelete} />
-                  {mine && receiptFor && receiptFor(m)}
+        {loading ? <ChatSkeleton /> : items.length === 0 ? empty : days.map(day => (
+          <section key={day.key}>
+            <DayDivider label={day.label} />
+            {day.rows.map(({ m, firstOfGroup }) => {
+              const mine = m.senderId === userId;
+              return (
+                <div key={m.id} className={cx('flex gap-2.5', mine && 'flex-row-reverse', firstOfGroup ? 'mt-3' : 'mt-0.5')}>
+                  {!mine && (firstOfGroup ? <MsgAvatar name={nameOf(m.senderId)} userId={m.senderId} /> : <span className="w-7 shrink-0" aria-hidden="true" />)}
+                  <div className={cx('flex flex-col min-w-0 max-w-[78%]', mine ? 'items-end' : 'items-start')}>
+                    {firstOfGroup && (
+                      <div className={cx('flex items-baseline gap-2 mb-1 px-0.5', mine && 'flex-row-reverse')}>
+                        {!mine && <span className="text-[12px] font-semibold text-white/80">{nameOf(m.senderId)}</span>}
+                        <span className="text-[10px] text-white/35 tabular-nums">{clockTime(m.createdAt)}</span>
+                      </div>
+                    )}
+                    <MsgBubble m={m} mine={mine} onDelete={onDelete} />
+                    {mine && receiptFor && receiptFor(m)}
+                  </div>
                 </div>
-              </div>
-            </React.Fragment>
-          );
-        })}
+              );
+            })}
+          </section>
+        ))}
       </div>
       {showJump && (
         <button onClick={jump} aria-label="Jump to latest"
@@ -4073,15 +4083,8 @@ function DmThread({ conversationId, peerId, onBack }) {
 
   const refreshReads = useCallback(() => {
     directMessagesApi.reads(conversationId)
-      .then(rs => {
-        const p = rs.find(r => r.userId === peerId);
-        const next = p?.lastReadAt || null;
-        setPeerReadAt(prev => {
-          if (prev !== next) console.log('[DM-READ] peer cursor CHANGED', { conversationId, from: prev, to: next });   // TEMP diagnostic
-          return next;   // reactive state → re-render → receipt recomputes
-        });
-      })
-      .catch(e => console.error('[DM-READ] re-read failed', e));   // TEMP diagnostic
+      .then(rs => { const p = rs.find(r => r.userId === peerId); setPeerReadAt(p?.lastReadAt || null); })
+      .catch(() => {});
   }, [conversationId, peerId]);
 
   // Load + subscribe to this thread. (My read cursor is advanced by the latest-message effect below,
@@ -4119,7 +4122,6 @@ function DmThread({ conversationId, peerId, onBack }) {
     if (isSelf || !conversationId || !latestMsgId) return;
     markDmRead(conversationId, latestMsgAt);
     signalRead(latestMsgAt || nowISO());
-    console.log('[DM-READ] cursor advanced on incoming message while active', { conversationId, to: latestMsgAt, latestMsgId });   // TEMP diagnostic
   }, [conversationId, latestMsgId, latestMsgAt, isSelf, markDmRead, signalRead]);
 
   // Re-READ the peer's cursor on a 4s interval AND on focus, so MY tick flips to Seen even when the
@@ -4158,8 +4160,6 @@ function DmThread({ conversationId, peerId, onBack }) {
     if (!a && !b) return null;
     return b > a ? peerLiveReadAt : peerReadAt;
   }, [peerReadAt, peerLiveReadAt]);
-  // My last sent message's timestamp (the receipt stays on it even after the peer replies).
-  const lastOwnAt = useMemo(() => items.find(m => m.id === lastOwnId)?.createdAt || null, [items, lastOwnId]);
   const isSeen = (createdAt) => {
     if (!effectiveReadAt || !createdAt) return false;
     const readMs = new Date(effectiveReadAt).getTime();
@@ -4177,14 +4177,6 @@ function DmThread({ conversationId, peerId, onBack }) {
       </div>
     );
   };
-  // TEMP diagnostic: logs the receipt computation whenever its inputs change.
-  useEffect(() => {
-    if (isSelf || !lastOwnAt) return;
-    const readMs = effectiveReadAt ? new Date(effectiveReadAt).getTime() : 0;
-    const msgMs = new Date(lastOwnAt).getTime();
-    console.log('[DM-READ] receipt computed', { peerReadAt, peerLiveReadAt, effectiveReadAt, lastSentAt: lastOwnAt, seen: readMs > 0 && readMs >= msgMs });
-  }, [effectiveReadAt, lastOwnAt, peerReadAt, peerLiveReadAt, isSelf]);
-
   const sendText = async (body) => {
     const created = await directMessagesApi.sendText(conversationId, body);
     setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
