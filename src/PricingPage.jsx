@@ -1,18 +1,18 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Sparkles, Check, ArrowRight, Minus, Users, MessagesSquare, Globe } from 'lucide-react';
+import { Check, ArrowRight, Minus, Users, MessagesSquare, Globe } from 'lucide-react';
 import {
   PLANS, PUBLIC_PLAN_IDS, FEATURE_TABLE, PRICING_COPY, BILLING_CYCLE,
   monthlyEquivalent, priceFor, annualSavings, formatMoney, formatLimit, formatHistory,
 } from './lib/plans';
+import { SiteHeader, SiteFooter } from './SiteChrome';
 
 /**
- * Public pricing page (/pricing). Reachable from the landing nav and from in-app
- * upgrade prompts. Built to the PRODUCT_AUDIT design direction (dark "ops console",
- * Outfit + Fraunces, violet→fuchsia brand) and the audit glossary (Workspace =
- * tenant, Members = seats, Messages). Everything reads from lib/plans.js.
- * Positioned BROADLY — external/distributed teams via benefits, never branded
- * narrowly. No invented stats, logos, or testimonials.
+ * Public pricing page (/pricing). Reachable from the landing nav and from in-app upgrade prompts.
+ * Built to the PRODUCT_AUDIT design direction (dark "ops console", Outfit + Fraunces, violet to
+ * fuchsia brand) and the audit glossary (Workspace = tenant, Members = seats, Messages).
+ * Everything reads from lib/plans.js. Positioned BROADLY via benefits, never branded narrowly.
+ * No invented stats, logos, or testimonials.
  */
 const BENEFIT_ICONS = [Users, MessagesSquare, Globe];
 
@@ -28,7 +28,7 @@ export default function PricingPage({ session }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#070810] text-white relative overflow-hidden">
+    <div className="min-h-screen bg-[#070810] text-white relative">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
         body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; background: #070810; }
@@ -37,43 +37,27 @@ export default function PricingPage({ session }) {
         @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
 
-      {/* Background glows */}
-      <div className="absolute top-[-6rem] left-1/4 w-[28rem] h-[28rem] rounded-full bg-violet-500/10 blur-3xl pointer-events-none" style={{ animation: 'float 9s ease-in-out infinite' }} />
-      <div className="absolute top-1/3 -right-32 w-[26rem] h-[26rem] rounded-full bg-fuchsia-500/10 blur-3xl pointer-events-none" style={{ animation: 'float 9s ease-in-out infinite reverse' }} />
+      {/* Background glows, clipped in their own layer so the page never scrolls sideways */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[-6rem] left-1/4 w-[28rem] h-[28rem] rounded-full bg-violet-500/10 blur-3xl" style={{ animation: 'float 9s ease-in-out infinite' }} />
+        <div className="absolute top-1/3 -right-32 w-[26rem] h-[26rem] rounded-full bg-fuchsia-500/10 blur-3xl" style={{ animation: 'float 9s ease-in-out infinite reverse' }} />
+      </div>
+
+      <SiteHeader session={session} />
 
       <div className="relative max-w-6xl mx-auto px-5 lg:px-8">
-        {/* Nav */}
-        <header className="flex items-center justify-between h-16">
-          <Link to="/" className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/20">
-              <Sparkles className="w-4 h-4 text-white" />
-            </div>
-            <span className="text-[15px] font-semibold font-display tracking-tight">Command Center</span>
-          </Link>
-          <nav className="flex items-center gap-2">
-            {session ? (
-              <Link to="/" className="h-9 px-3.5 rounded-xl text-sm font-semibold bg-white text-[#0a0b11] hover:bg-white/90 flex items-center transition-colors">Back to Command Center</Link>
-            ) : (
-              <>
-                <Link to="/login" className="h-9 px-3.5 rounded-xl text-sm font-medium text-white/70 hover:text-white hover:bg-white/[0.06] flex items-center transition-colors">Log in</Link>
-                <Link to="/signup" className="h-9 px-3.5 rounded-xl text-sm font-semibold bg-white text-[#0a0b11] hover:bg-white/90 flex items-center transition-colors">Sign up</Link>
-              </>
-            )}
-          </nav>
-        </header>
-
-        {/* Hero */}
-        <section className="pt-14 lg:pt-20 pb-10 text-center" style={{ animation: 'fadeUp .5s ease' }}>
-          <div className="inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-widest text-violet-300/80 bg-violet-500/10 border border-violet-400/20 rounded-full px-3 h-7 mb-5">
+        {/* Hero (compact: the three plan cards fit above the fold on a typical laptop) */}
+        <section className="pt-6 lg:pt-8 pb-5 text-center" style={{ animation: 'fadeUp .5s ease' }}>
+          <div className="inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-widest text-violet-300/80 bg-violet-500/10 border border-violet-400/20 rounded-full px-3 h-7 mb-3">
             {PRICING_COPY.eyebrow}
           </div>
-          <h1 className="text-3xl lg:text-5xl font-semibold font-display tracking-tight leading-[1.06] max-w-3xl mx-auto">
+          <h1 className="text-2xl lg:text-3xl font-semibold font-display tracking-tight leading-[1.12] max-w-2xl mx-auto">
             {PRICING_COPY.headline}
           </h1>
-          <p className="mt-5 text-base lg:text-lg text-white/55 max-w-2xl mx-auto leading-relaxed">
+          <p className="mt-2.5 text-sm lg:text-base text-white/55 max-w-xl mx-auto leading-relaxed">
             {PRICING_COPY.sub}
           </p>
-          <div className="mt-7 flex flex-wrap justify-center gap-x-6 gap-y-2 text-[13px] text-white/60">
+          <div className="mt-3.5 flex flex-wrap justify-center gap-x-6 gap-y-1.5 text-[12px] text-white/60">
             {PRICING_COPY.benefits.map((b, i) => {
               const Icon = BENEFIT_ICONS[i] || Check;
               return (
@@ -86,7 +70,7 @@ export default function PricingPage({ session }) {
         </section>
 
         {/* Billing-cycle toggle */}
-        <div className="flex items-center justify-center gap-3 mb-10">
+        <div className="flex items-center justify-center gap-3 mb-5">
           <div className="inline-flex items-center p-1 rounded-full border border-white/10 bg-white/[0.03]">
             <button onClick={() => setCycle(BILLING_CYCLE.monthly)}
               className={cycleBtn(!annual)}>Monthly</button>
@@ -106,7 +90,7 @@ export default function PricingPage({ session }) {
         </section>
 
         {/* Early-access honesty note */}
-        <p className="mt-7 text-center text-[12px] text-white/40 max-w-2xl mx-auto">
+        <p className="mt-6 text-center text-[12px] text-white/40 max-w-2xl mx-auto">
           {PRICING_COPY.earlyAccessNote}
         </p>
 
@@ -146,7 +130,7 @@ export default function PricingPage({ session }) {
         <section className="pb-16">
           <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-transparent p-8 lg:p-12 text-center">
             <h2 className="text-2xl lg:text-3xl font-semibold font-display tracking-tight">Get your team in one place</h2>
-            <p className="mt-2 text-white/55">Start free in seconds — bring in your people, inside or outside your company.</p>
+            <p className="mt-2 text-white/55">Start free in seconds. Bring in your people, inside or outside your company.</p>
             <div className="mt-6 flex justify-center gap-3">
               {session ? (
                 <Link to="/" className="h-12 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 transition-all">
@@ -165,24 +149,9 @@ export default function PricingPage({ session }) {
             </div>
           </div>
         </section>
-
-        {/* Footer */}
-        <footer className="py-10 border-t border-white/[0.06] flex flex-col sm:flex-row items-center justify-between gap-4 text-[12px] text-white/40">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center">
-              <Sparkles className="w-3 h-3 text-white" />
-            </div>
-            <span className="text-white/60 font-medium">Command Center</span>
-            <span className="hidden sm:inline text-white/25">·</span>
-            <span className="hidden sm:inline">A visual team task command center.</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <Link to="/" className="hover:text-white/70 transition-colors">Home</Link>
-            <Link to="/login" className="hover:text-white/70 transition-colors">Log in</Link>
-            <Link to="/signup" className="hover:text-white/70 transition-colors">Sign up</Link>
-          </div>
-        </footer>
       </div>
+
+      <SiteFooter />
     </div>
   );
 }
@@ -209,7 +178,7 @@ function PlanCard({ plan, annual, onChoose }) {
   const savings = annualSavings(plan);
   return (
     <div className={cx(
-      'relative rounded-2xl border p-6 flex flex-col',
+      'relative rounded-2xl border p-5 flex flex-col',
       plan.popular && 'mt-3 md:mt-0',
       plan.popular
         ? 'border-violet-400/40 bg-gradient-to-b from-violet-500/[0.10] to-white/[0.01] shadow-2xl shadow-violet-500/10'
@@ -222,10 +191,10 @@ function PlanCard({ plan, annual, onChoose }) {
       )}
 
       <div className="mb-1 text-lg font-semibold font-display tracking-tight">{plan.name}</div>
-      <p className="text-[12px] text-white/45 leading-relaxed min-h-[2.5rem]">{plan.tagline}</p>
+      <p className="text-[12px] text-white/45 leading-relaxed min-h-[2rem]">{plan.tagline}</p>
 
-      <div className="mt-4 mb-1 flex items-end gap-1.5">
-        <span className="text-4xl font-semibold font-display tabular-nums">{formatMoney(plan.paid ? perMonth : 0)}</span>
+      <div className="mt-3 mb-1 flex items-end gap-1.5">
+        <span className="text-3xl lg:text-4xl font-semibold font-display tabular-nums">{formatMoney(plan.paid ? perMonth : 0)}</span>
         <span className="text-sm text-white/45 mb-1.5">{plan.paid ? '/mo' : 'forever'}</span>
       </div>
       <div className="text-[11px] text-white/40 h-4">
@@ -235,7 +204,7 @@ function PlanCard({ plan, annual, onChoose }) {
       </div>
 
       <button onClick={onChoose}
-        className={cx('mt-5 h-11 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all',
+        className={cx('mt-4 h-10 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all',
           plan.popular
             ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white hover:shadow-lg hover:shadow-fuchsia-500/30'
             : plan.paid
@@ -244,7 +213,7 @@ function PlanCard({ plan, annual, onChoose }) {
         {plan.cta} <ArrowRight className="w-4 h-4" />
       </button>
 
-      <ul className="mt-6 space-y-2.5">
+      <ul className="mt-4 space-y-2">
         {plan.inherits && <li className="text-[12px] font-medium text-white/55">Everything in {plan.inherits}, plus:</li>}
         {plan.highlights.map(h => (
           <li key={h} className="flex items-start gap-2 text-[13px] text-white/70">

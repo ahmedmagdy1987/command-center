@@ -8,6 +8,8 @@ import InviteScreen from './InviteScreen';
 import LandingPage from './LandingPage';
 import PricingPage from './PricingPage';
 import CheckoutScreen from './CheckoutScreen';
+import TermsPage from './TermsPage';
+import PrivacyPage from './PrivacyPage';
 import VisualTaskCommandCenter from './VisualTaskCommandCenter';
 import { supabase } from './lib/supabase';
 
@@ -99,6 +101,10 @@ export default function App() {
           signed-out visitor to sign in first). No live payment — see lib/billing.js. */}
       <Route path="/pricing" element={<PricingPage session={session} />} />
       <Route path="/checkout" element={<CheckoutScreen session={session} />} />
+
+      {/* Public legal pages (template content; reachable signed-in or out). */}
+      <Route path="/terms" element={<TermsPage session={session} />} />
+      <Route path="/privacy" element={<PrivacyPage session={session} />} />
 
       {/* Everything else: the authenticated app (its own view routes live in AppShell), or — when
           signed out — the public landing at / with every other path sent to sign-in. */}

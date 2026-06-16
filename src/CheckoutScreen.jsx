@@ -114,7 +114,7 @@ export default function CheckoutScreen({ session }) {
           {/* Payment seam (stub) */}
           <Card>
             {done ? (
-              <Centered tone="ok" title="You’re on the list" body={`Thanks — we’ll email ${email} the moment ${plan.name} billing goes live. No charge was made.`}>
+              <Centered tone="ok" title="You’re on the list" body={`Thanks! We’ll email ${email} the moment ${plan.name} billing goes live. No charge was made.`}>
                 <button onClick={() => navigate('/')} className="primary-cta">Back to Command Center <ArrowRight className="w-4 h-4" /></button>
               </Centered>
             ) : (
@@ -125,7 +125,7 @@ export default function CheckoutScreen({ session }) {
                   <span className="ml-auto text-[10px] font-semibold uppercase tracking-widest text-amber-300/90 bg-amber-500/10 border border-amber-400/20 rounded-full px-2 h-5 flex items-center">Coming soon</span>
                 </div>
                 <p className="text-[12px] text-white/50 leading-relaxed mb-4">
-                  Card payments aren’t switched on yet. Leave your email and we’ll let you know the moment {plan.name} is ready to buy — you won’t be charged now.
+                  Card payments aren’t switched on yet. Leave your email and we’ll let you know the moment {plan.name} is ready to buy. You won’t be charged now.
                 </p>
                 <form onSubmit={submit} className="space-y-3">
                   <div>

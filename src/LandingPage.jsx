@@ -1,32 +1,33 @@
 import { Link } from 'react-router-dom';
 import {
-  Sparkles, KanbanSquare, Grid3x3, CalendarDays, UserCog, Zap, UserPlus, ArrowRight, Check,
+  KanbanSquare, Grid3x3, CalendarDays, UserCog, Zap, UserPlus, ArrowRight, Check,
 } from 'lucide-react';
+import { SiteHeader, SiteFooter } from './SiteChrome';
 
 /**
- * Public marketing landing page (logged-out `/`). Honest to what the product actually does — a
- * visual team task command center — with no invented stats, logos, or testimonials. Copy is
+ * Public marketing landing page (logged-out `/`). Honest to what the product actually does: a
+ * visual team task command center, with no invented stats, logos, or testimonials. Copy is
  * placeholder positioning meant to be refined. Matches the app's visual language (dark, the
- * violet→fuchsia→rose gradient, Outfit + Fraunces). CTAs route to /signup and /login.
+ * violet/fuchsia/rose gradient, Outfit + Fraunces). CTAs route to /signup and /login.
  */
 const FEATURES = [
   { icon: KanbanSquare, title: 'Kanban board', body: 'Drag tasks across stages and see your whole pipeline at a glance.' },
   { icon: Grid3x3, title: 'Priority matrix', body: 'Sort by urgent vs. important so the right work rises to the top.' },
   { icon: CalendarDays, title: 'Schedule', body: 'Plan tasks on a timeline and keep due dates in view.' },
-  { icon: UserCog, title: 'Assign to your team', body: 'Give every task an assignee — everyone sees who owns what.' },
+  { icon: UserCog, title: 'Assign to your team', body: 'Give every task an assignee so everyone sees who owns what.' },
   { icon: Zap, title: 'Real-time sync', body: 'Edits, comments, and new tasks appear instantly for the whole workspace.' },
   { icon: UserPlus, title: 'Workspaces & invites', body: 'Spin up a workspace and invite teammates by email to join.' },
 ];
 
 const STEPS = [
-  { n: '1', title: 'Create your workspace', body: 'Sign up and name your workspace — you’re its owner.' },
+  { n: '1', title: 'Create your workspace', body: 'Sign up and name your workspace. You’re its owner.' },
   { n: '2', title: 'Add work and assign it', body: 'Capture tasks, set priority and due dates, assign teammates.' },
-  { n: '3', title: 'Track it your way', body: 'Kanban, priority matrix, or schedule — all live, all in sync.' },
+  { n: '3', title: 'Track it your way', body: 'Kanban, priority matrix, or schedule, all live and in sync.' },
 ];
 
 export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-[#070810] text-white relative overflow-hidden">
+    <div className="min-h-screen bg-[#070810] text-white relative">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
         body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; background: #070810; }
@@ -35,44 +36,33 @@ export default function LandingPage() {
         @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
 
-      {/* Background glows */}
-      <div className="absolute top-[-6rem] left-1/4 w-[28rem] h-[28rem] rounded-full bg-violet-500/10 blur-3xl pointer-events-none" style={{ animation: 'float 9s ease-in-out infinite' }} />
-      <div className="absolute top-1/3 -right-32 w-[26rem] h-[26rem] rounded-full bg-fuchsia-500/10 blur-3xl pointer-events-none" style={{ animation: 'float 9s ease-in-out infinite reverse' }} />
+      {/* Background glows, clipped in their own layer so the page never scrolls sideways */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[-6rem] left-1/4 w-[28rem] h-[28rem] rounded-full bg-violet-500/10 blur-3xl" style={{ animation: 'float 9s ease-in-out infinite' }} />
+        <div className="absolute top-1/3 -right-32 w-[26rem] h-[26rem] rounded-full bg-fuchsia-500/10 blur-3xl" style={{ animation: 'float 9s ease-in-out infinite reverse' }} />
+      </div>
+
+      <SiteHeader />
 
       <div className="relative max-w-6xl mx-auto px-5 lg:px-8">
-        {/* Nav */}
-        <header className="flex items-center justify-between h-16">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/20">
-              <Sparkles className="w-4 h-4 text-white" />
-            </div>
-            <span className="text-[15px] font-semibold font-display tracking-tight">Command Center</span>
-          </div>
-          <nav className="flex items-center gap-2">
-            <Link to="/pricing" className="hidden sm:flex h-9 px-3.5 rounded-xl text-sm font-medium text-white/70 hover:text-white hover:bg-white/[0.06] items-center transition-colors">Pricing</Link>
-            <Link to="/login" className="h-9 px-3.5 rounded-xl text-sm font-medium text-white/70 hover:text-white hover:bg-white/[0.06] flex items-center transition-colors">Log in</Link>
-            <Link to="/signup" className="h-9 px-3.5 rounded-xl text-sm font-semibold bg-white text-[#0a0b11] hover:bg-white/90 flex items-center transition-colors">Sign up</Link>
-          </nav>
-        </header>
-
-        {/* Hero */}
-        <section className="pt-16 lg:pt-24 pb-14 grid lg:grid-cols-2 gap-12 items-center" style={{ animation: 'fadeUp .5s ease' }}>
+        {/* Hero (compact: fits above the fold on a typical laptop) */}
+        <section className="pt-8 lg:pt-12 pb-10 grid lg:grid-cols-2 gap-8 lg:gap-10 items-center" style={{ animation: 'fadeUp .5s ease' }}>
           <div>
-            <div className="inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-widest text-violet-300/80 bg-violet-500/10 border border-violet-400/20 rounded-full px-3 h-7 mb-5">
+            <div className="inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-widest text-violet-300/80 bg-violet-500/10 border border-violet-400/20 rounded-full px-3 h-7 mb-4">
               Visual task management for teams
             </div>
-            <h1 className="text-4xl lg:text-5xl font-semibold font-display tracking-tight leading-[1.05]">
+            <h1 className="text-3xl lg:text-4xl xl:text-5xl font-semibold font-display tracking-tight leading-[1.05]">
               Stop losing track of who’s doing what.
             </h1>
-            <p className="mt-5 text-base lg:text-lg text-white/55 max-w-xl leading-relaxed">
-              Pull every task, owner, and due date into one visual workspace — track it on a kanban board,
+            <p className="mt-4 text-sm lg:text-base text-white/55 max-w-xl leading-relaxed">
+              Pull every task, owner, and due date into one visual workspace. Track it on a kanban board,
               a priority matrix, or a schedule, live for the whole team.
             </p>
-            <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Link to="/signup" className="h-12 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 transition-all">
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              <Link to="/signup" className="h-11 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 transition-all">
                 Get organized free <ArrowRight className="w-4 h-4" />
               </Link>
-              <Link to="/login" className="h-12 px-6 rounded-xl border border-white/10 bg-white/[0.03] text-white/80 font-medium text-sm flex items-center hover:bg-white/[0.06] transition-colors">
+              <Link to="/login" className="h-11 px-6 rounded-xl border border-white/10 bg-white/[0.03] text-white/80 font-medium text-sm flex items-center hover:bg-white/[0.06] transition-colors">
                 Log in
               </Link>
             </div>
@@ -83,7 +73,7 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* Decorative stylized board (not real data — a visual hint of the UI) */}
+          {/* Decorative stylized board (not real data; a visual hint of the UI) */}
           <div className="relative hidden lg:block" aria-hidden="true">
             <div className="rounded-2xl border border-white/10 bg-[#0f1017]/80 backdrop-blur p-4 shadow-2xl">
               <div className="flex items-center gap-1.5 mb-4">
@@ -159,23 +149,9 @@ export default function LandingPage() {
             </div>
           </div>
         </section>
-
-        {/* Footer */}
-        <footer className="py-10 border-t border-white/[0.06] flex flex-col sm:flex-row items-center justify-between gap-4 text-[12px] text-white/40">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center">
-              <Sparkles className="w-3 h-3 text-white" />
-            </div>
-            <span className="text-white/60 font-medium">Command Center</span>
-            <span className="hidden sm:inline text-white/25">·</span>
-            <span className="hidden sm:inline">A visual team task command center.</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <Link to="/login" className="hover:text-white/70 transition-colors">Log in</Link>
-            <Link to="/signup" className="hover:text-white/70 transition-colors">Sign up</Link>
-          </div>
-        </footer>
       </div>
+
+      <SiteFooter />
     </div>
   );
 }

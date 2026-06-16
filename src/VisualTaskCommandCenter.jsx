@@ -7,7 +7,8 @@ import {
   Circle, CheckCircle2, Calendar, Zap, Timer, MoreHorizontal, Edit3, Filter,
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
   Brain, Target, Hourglass, GripVertical, Info, Keyboard, LogOut, Wifi, WifiOff, Loader2,
-  KeyRound, Bell, MessageSquare, MessagesSquare, Send, Mic, Square, Play, Pause, Users, Mail, UserPlus, ArrowRight
+  KeyRound, Bell, MessageSquare, MessagesSquare, Send, Mic, Square, Play, Pause, Users, Mail, UserPlus, ArrowRight,
+  FileText, Shield
 } from 'lucide-react';
 import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, directMessages as directMessagesApi, workspaces as workspacesApi, workspaceMembers as workspaceMembersApi, invitations as invitationsApi, auth } from './lib/api';
 import { supabase } from './lib/supabase';
@@ -993,7 +994,7 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showOwner 
             {done && <Check className="w-2.5 h-2.5 text-black" strokeWidth={3} />}
           </button>
           <PriorityDot priority={task.priority} />
-          {isPrivate && <span title="Private — visible only to the creator and assignee"><Lock className="w-3 h-3 text-white/40 shrink-0" /></span>}
+          {isPrivate && <span title="Private: visible only to the creator and assignee"><Lock className="w-3 h-3 text-white/40 shrink-0" /></span>}
           {isRecurring(task.recurring) && <RefreshCw className="w-3 h-3 text-white/30 shrink-0" />}
           {task.blocked && <PauseCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
         </div>
@@ -1127,7 +1128,7 @@ function TaskComments({ taskId }) {
         {loading ? (
           <div className="py-4 text-center text-[11px] text-white/40">Loading…</div>
         ) : items.length === 0 ? (
-          <div className="py-6 text-center text-[11px] text-white/40">No comments yet — start the discussion.</div>
+          <div className="py-6 text-center text-[11px] text-white/40">No comments yet. Start the discussion.</div>
         ) : items.map(c => {
           const mine = c.authorId === userId;
           const edited = c.updatedAt && c.createdAt && c.updatedAt !== c.createdAt;
@@ -1876,9 +1877,14 @@ function NotificationToast({ n, light, onOpen, onDismiss }) {
 }
 
 function NotificationBell() {
-  const { session, tasks, setEditingTask, theme, currentWorkspaceId, setView, setDmActiveConv } = useApp();
+  const { session, tasks, setEditingTask, theme, currentWorkspaceId, setView, setDmActiveConv, view, dmActiveConv } = useApp();
   const userId = session?.user?.id;
   const light = theme === 'light';
+  // Refs so the realtime subscribe callback (set up once) sees which DM is currently open.
+  const viewRef = useRef(view);
+  const activeConvRef = useRef(dmActiveConv);
+  useEffect(() => { viewRef.current = view; }, [view]);
+  useEffect(() => { activeConvRef.current = dmActiveConv; }, [dmActiveConv]);
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1917,12 +1923,37 @@ function NotificationBell() {
     let mounted = true;
     const unsub = notificationsApi.subscribe(userId, (n) => {
       if (!n || !mounted) return;
+      // Suppress notifications for the DM conversation the user is actively viewing: record it as
+      // already-read and skip the toast, so the bell only piles up for chats they're NOT looking at.
+      const viewingThisDm = n.type === 'dm_received' && n.refId && n.refId === activeConvRef.current && viewRef.current === 'dms';
+      if (viewingThisDm) {
+        setItems(prev => prev.some(x => x.id === n.id) ? prev : [{ ...n, read: true }, ...prev]);
+        notificationsApi.markRead(n.id).catch(() => {});
+        return;
+      }
       setItems(prev => prev.some(x => x.id === n.id) ? prev : [n, ...prev]);
       // Newest toast on top; cap the stack so it never runs off-screen. Each toast self-dismisses.
       setToasts(prev => prev.some(t => t.id === n.id) ? prev : [n, ...prev].slice(0, 3));
     }, currentWorkspaceId);
     return () => { mounted = false; unsub(); };
   }, [userId, currentWorkspaceId]);
+
+  // While a DM conversation is the active view, clear any of ITS already-unread notifications so the
+  // bell never shows a stale count for the chat the user is reading. Deferred via a timeout so it is
+  // not a synchronous setState in the effect body (keeps the update non-cascading).
+  useEffect(() => {
+    if (view !== 'dms' || !dmActiveConv) return undefined;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      if (cancelled) return;
+      const stale = items.filter(n => n.type === 'dm_received' && n.refId === dmActiveConv && !n.read);
+      if (stale.length === 0) return;
+      setItems(prev => prev.map(n => (n.type === 'dm_received' && n.refId === dmActiveConv && !n.read) ? { ...n, read: true } : n));
+      setToasts(prev => prev.filter(x => !(x.type === 'dm_received' && x.refId === dmActiveConv)));
+      stale.forEach(n => notificationsApi.markRead(n.id).catch(() => {}));
+    }, 0);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [view, dmActiveConv, items]);
 
   // Open the task referenced by a notification — from local state if present,
   // otherwise fetch the single row and map it via fromDbTask (in tasksApi.getById).
@@ -2499,6 +2530,8 @@ function TopBar() {
                   <MenuItem icon={Upload} onClick={() => { setMenuOpen(false); if (entitlements.can('bulkImport')) fileRef.current?.click(); else requestUpgrade('bulkImport'); }}>Import JSON</MenuItem>
                   <div className="h-px bg-white/5 my-1" />
                   <MenuItem icon={Sparkles} onClick={() => { setMenuOpen(false); navigate('/pricing'); }}>Plans &amp; pricing</MenuItem>
+                  <MenuItem icon={FileText} onClick={() => { setMenuOpen(false); navigate('/terms'); }}>Terms of Service</MenuItem>
+                  <MenuItem icon={Shield} onClick={() => { setMenuOpen(false); navigate('/privacy'); }}>Privacy Policy</MenuItem>
                   <MenuItem icon={KeyRound} onClick={() => { setPasswordModalOpen(true); setMenuOpen(false); }}>Change password</MenuItem>
                   <div className="h-px bg-white/5 my-1" />
                   <MenuItem icon={LogOut} onClick={() => { onSignOut?.(); setMenuOpen(false); }}>Sign out</MenuItem>
@@ -2605,7 +2638,7 @@ function DashboardView() {
     <div className="space-y-6">
       <ViewHeader title="Dashboard" subtitle="Today's ranked priorities, flagged blockers, and where your energy should go." accent={new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric'})} />
 
-      <Card title="Top 3 priorities — right now" subtitle="Auto-ranked by priority, due date, urgency, and blockers." accent="#a78bfa">
+      <Card title="Top 3 priorities right now" subtitle="Auto-ranked by priority, due date, urgency, and blockers." accent="#a78bfa">
         {top3.length === 0 ? (
           <EmptyState icon={Sparkles} text="Nothing on fire. Beautiful." />
         ) : (
@@ -2655,18 +2688,18 @@ function DashboardView() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card title="My upcoming" subtitle="Tasks assigned to you, by due date" accent="#a78bfa" action={<button onClick={() => setView('mine')} className="text-[11px] text-white/40 hover:text-white/80 inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
-          {myUpcoming.length === 0 ? <EmptyState icon={Calendar} text="No upcoming — nothing on your plate." /> :
+          {myUpcoming.length === 0 ? <EmptyState icon={Calendar} text="No upcoming tasks. Nothing on your plate." /> :
             <div className="space-y-2">{myUpcoming.map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}</div>}
         </Card>
-        <Card title="Assigned to others — upcoming" subtitle="What your teammates are working on" accent="#34d399" action={<button onClick={() => setView('kanban')} className="text-[11px] text-white/40 hover:text-white/80 inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
+        <Card title="Assigned to others" subtitle="What your teammates are working on" accent="#34d399" action={<button onClick={() => setView('kanban')} className="text-[11px] text-white/40 hover:text-white/80 inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
           {othersUpcoming.length === 0 ? <EmptyState icon={UserCog} text="Nothing assigned to others." /> :
             <div className="space-y-2">{othersUpcoming.map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}</div>}
         </Card>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card title="Unassigned — needs an assignee" subtitle="Pick these up or assign them out" accent={UNASSIGNED_STYLE.hex}>
-          {unassignedPriority.length === 0 ? <EmptyState icon={Sparkles} text="Nothing unassigned — everything's assigned." /> :
+        <Card title="Unassigned tasks" subtitle="Pick these up or assign them out" accent={UNASSIGNED_STYLE.hex}>
+          {unassignedPriority.length === 0 ? <EmptyState icon={Sparkles} text="Nothing unassigned. Everything's assigned." /> :
             <div className="space-y-2">{unassignedPriority.map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}</div>}
         </Card>
         <Card title="Overdue" subtitle={overdue.length ? "Needs attention" : "All clear"} accent="#f43f5e">
@@ -2676,7 +2709,7 @@ function DashboardView() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card title="Stuck tasks" subtitle="Blocked or waiting — needs unblocking" accent="#fb923c">
+        <Card title="Stuck tasks" subtitle="Blocked or waiting" accent="#fb923c">
           {stuck.length === 0 ? <EmptyState icon={PlayCircle} text="Nothing stuck. Flow state." /> :
             <div className="space-y-2">{stuck.map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} showBlocked />)}</div>}
         </Card>
@@ -2889,7 +2922,7 @@ function PrivateView() {
               <Lock className="w-3 h-3" />Private · you + assignee
             </div>
             <h1 className="text-3xl lg:text-4xl font-semibold text-white font-display tracking-tight" style={{letterSpacing:'-0.02em'}}>Private tasks</h1>
-            <p className="text-sm text-white/50 mt-2 max-w-md">Private tasks are visible only to you and anyone they're assigned to — never the whole workspace.</p>
+            <p className="text-sm text-white/50 mt-2 max-w-md">Private tasks are visible only to you and anyone they're assigned to, never the whole workspace.</p>
           </div>
           <button onClick={() => setQuickAddOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-white text-black text-xs font-semibold hover:bg-white/90">
             <Plus className="w-3.5 h-3.5" />Add private task
@@ -2957,7 +2990,7 @@ function MyTasksView() {
               <UserCog className="w-3 h-3" />Assigned to me
             </div>
             <h1 className="text-3xl lg:text-4xl font-semibold text-white font-display tracking-tight">My Tasks</h1>
-            <p className="text-sm text-white/50 mt-2">Everything assigned to you — prioritize and get it done.</p>
+            <p className="text-sm text-white/50 mt-2">Everything assigned to you. Prioritize and get it done.</p>
           </div>
           <button onClick={() => setQuickAddOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-emerald-500 text-black text-xs font-semibold hover:bg-emerald-400">
             <Plus className="w-3.5 h-3.5" />Add task
@@ -2972,7 +3005,7 @@ function MyTasksView() {
       </div>
 
       {overdue.length > 0 && (
-        <Card title="Overdue — unblock or reschedule" accent="#f43f5e">
+        <Card title="Overdue" accent="#f43f5e">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {overdue.map(t => <TaskCard key={t.id} task={t} onClick={() => setEditingTask(t)} />)}
           </div>
@@ -3092,7 +3125,7 @@ function MatrixView() {
           <MatrixQuad id="q1" title="Do first"  subtitle="Urgent + Important"          tasks={quadrants.q1} accent="#f43f5e" />
           <MatrixQuad id="q2" title="Schedule"  subtitle="Important, not urgent"       tasks={quadrants.q2} accent="#a78bfa" />
           <MatrixQuad id="q3" title="Delegate"  subtitle="Urgent, not important"       tasks={quadrants.q3} accent="#fb923c" />
-          <MatrixQuad id="q4" title="Eliminate" subtitle="Neither — consider dropping" tasks={quadrants.q4} accent="#64748b" />
+          <MatrixQuad id="q4" title="Eliminate" subtitle="Consider dropping" tasks={quadrants.q4} accent="#64748b" />
         </div>
       </div>
 
@@ -3269,7 +3302,7 @@ function ScheduleView() {
               </div>
               <div className="min-w-0">
                 {d.tasks.length === 0 ? (
-                  <div className="h-full flex items-center text-[11px] text-white/25 italic">— Nothing scheduled —</div>
+                  <div className="h-full flex items-center text-[11px] text-white/25 italic">Nothing scheduled</div>
                 ) : (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
                     {d.tasks.map(t => <TaskCard key={t.id} task={t} compact onClick={() => setEditingTask(t)} />)}
@@ -3282,7 +3315,7 @@ function ScheduleView() {
       </div>
 
       {undated.length > 0 && (
-        <Card title="Undated" subtitle="No due or scheduled date — consider planning these in">
+        <Card title="Undated" subtitle="No due or scheduled date. Consider planning these in">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {undated.map(t => <TaskCard key={t.id} task={t} compact onClick={() => setEditingTask(t)} />)}
           </div>
@@ -3588,7 +3621,8 @@ function usePresence(channelKey, userId, name) {
   }, []);
   const stopTyping = useCallback(() => { clearTimeout(typingTimer.current); ref.current?.update({ typing: false }); }, []);
   const signalRecording = useCallback((on) => ref.current?.update(on ? { recording: true, typing: false } : { recording: false }), []);
-  return { others, signalTyping, stopTyping, signalRecording };
+  const signalRead = useCallback((iso) => ref.current?.update({ readAt: iso }), []);
+  return { others, signalTyping, stopTyping, signalRecording, signalRead };
 }
 
 /** Subtle "X is typing… / recording…" strip with animated dots. */
@@ -3615,7 +3649,7 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
   const [sending, setSending] = useState(false);
   const [failedBody, setFailedBody] = useState('');
   const taRef = useRef(null);
-  const autosize = useCallback(() => { const el = taRef.current; if (!el) return; el.style.height = '0px'; el.style.height = Math.min(el.scrollHeight, 140) + 'px'; }, []);
+  const autosize = useCallback(() => { const el = taRef.current; if (!el) return; el.style.height = '0px'; const h = Math.min(el.scrollHeight, 140); el.style.height = h + 'px'; el.style.overflowY = el.scrollHeight > 140 ? 'auto' : 'hidden'; }, []);
   useEffect(() => { autosize(); }, [text, autosize]);
 
   const doSend = async (body) => {
@@ -3660,9 +3694,9 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
               onBlur={() => onStopTyping?.()}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } }}
               placeholder={placeholder}
-              className="flex-1 max-h-[140px] bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none leading-relaxed" />
+              className="flex-1 max-h-[140px] bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none overflow-y-hidden leading-relaxed" />
             <button onClick={() => canVoice ? onStartRecording() : onUpgradeVoice?.()} disabled={sending}
-              title={canVoice ? 'Record a voice note' : 'Voice notes — upgrade to unlock'}
+              title={canVoice ? 'Record a voice note' : 'Upgrade to unlock voice notes'}
               className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 disabled:opacity-40 shrink-0">
               {canVoice ? <Mic className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}
             </button>
@@ -3762,7 +3796,7 @@ function ChatView() {
         const blob = new Blob(chunksRef.current, { type: ct });
         chunksRef.current = [];
         if (cancelRef.current || blob.size === 0) return;
-        if (dur < 0.4) { setMicError('Too short — hold to record a little longer.'); return; }
+        if (dur < 0.4) { setMicError('Too short. Hold to record a little longer.'); return; }
         try {
           const created = await messagesApi.sendVoice(blob, dur, ct, currentWorkspaceId);
           setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
@@ -3914,7 +3948,7 @@ function DirectMessagesView() {
       <div className="flex-1 min-h-0 overflow-y-auto py-1">
         {dmConversations.length === 0 ? (
           <div className="px-4 py-10 text-center text-[12px] text-white/40">
-            {peers.length === 0 ? 'No one else is in this workspace yet.' : 'No conversations yet — start one with “New”.'}
+            {peers.length === 0 ? 'No one else is in this workspace yet.' : 'No conversations yet. Start one with “New”.'}
           </div>
         ) : dmConversations.map(c => {
           const a = resolveAssignee(c.peerId);
@@ -3999,7 +4033,7 @@ function DmThread({ conversationId, peerId, onBack }) {
   // DM typing/recording presence (NEW — makes presence symmetric with team chat). Per-conversation
   // ephemeral channel (no DB); disabled for the notes-to-self thread.
   const presenceKey = (!isSelf && conversationId) ? `dm-presence-${conversationId}` : null;
-  const { others, signalTyping, stopTyping, signalRecording } = usePresence(presenceKey, userId, myName);
+  const { others, signalTyping, stopTyping, signalRecording, signalRead } = usePresence(presenceKey, userId, myName);
 
   const refreshReads = useCallback(() => {
     directMessagesApi.reads(conversationId)
@@ -4016,6 +4050,7 @@ function DmThread({ conversationId, peerId, onBack }) {
       .finally(() => { if (on) setLoading(false); });
     refreshReads();
     markDmRead(conversationId);
+    signalRead(nowISO());   // broadcast my read cursor so the peer's receipt flips to Seen live
     const unsub = directMessagesApi.subscribeThread(({ type, message }) => {
       if (!message || !on) return;
       setItems(prev => {
@@ -4023,11 +4058,12 @@ function DmThread({ conversationId, peerId, onBack }) {
         if (type === 'UPDATE') return prev.map(m => m.id === message.id ? message : m);
         return prev.some(m => m.id === message.id) ? prev : [...prev, message];
       });
-      if (type === 'INSERT' && message.senderId !== userId) markDmRead(conversationId);
+      // A new message from the peer while I'm viewing means I've read it: advance + rebroadcast.
+      if (type === 'INSERT' && message.senderId !== userId) { markDmRead(conversationId); signalRead(nowISO()); }
       refreshReads();   // peer likely advanced their cursor around new activity
     }, conversationId);
     return () => { on = false; unsub(); };
-  }, [conversationId, userId, markDmRead, refreshReads]);
+  }, [conversationId, userId, markDmRead, refreshReads, signalRead]);
 
   useEffect(() => () => {
     clearInterval(timerRef.current);
@@ -4041,9 +4077,17 @@ function DmThread({ conversationId, peerId, onBack }) {
     for (let i = items.length - 1; i >= 0; i--) { if (items[i].senderId === userId) return items[i].id; }
     return null;
   }, [items, userId]);
+  // Peer's read cursor = persisted dm_reads (cold load) OR the live presence value (whichever is
+  // newer). The live value is what flips the sender's tick to Seen with no refresh/reopen.
+  const peerLiveReadAt = useMemo(() => (others.find(o => o.userId === peerId)?.readAt) || null, [others, peerId]);
+  const effectiveReadAt = useMemo(() => {
+    if (!peerReadAt) return peerLiveReadAt;
+    if (!peerLiveReadAt) return peerReadAt;
+    return new Date(peerLiveReadAt) > new Date(peerReadAt) ? peerLiveReadAt : peerReadAt;
+  }, [peerReadAt, peerLiveReadAt]);
   const receiptFor = isSelf ? undefined : (m) => {
     if (m.id !== lastOwnId) return null;
-    const seen = peerReadAt && new Date(m.createdAt) <= new Date(peerReadAt);
+    const seen = effectiveReadAt && new Date(m.createdAt) <= new Date(effectiveReadAt);
     return (
       <div className="mt-0.5 px-1 flex items-center gap-1 text-[10px]" title={seen ? 'Seen' : 'Sent'}>
         {seen
@@ -4081,7 +4125,7 @@ function DmThread({ conversationId, peerId, onBack }) {
         const blob = new Blob(chunksRef.current, { type: ct });
         chunksRef.current = [];
         if (cancelRef.current || blob.size === 0) return;
-        if (dur < 0.4) { setMicError('Too short — hold to record a little longer.'); return; }
+        if (dur < 0.4) { setMicError('Too short. Hold to record a little longer.'); return; }
         try {
           const created = await directMessagesApi.sendVoice(conversationId, blob, dur, ct);
           setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
@@ -4183,7 +4227,7 @@ function OnboardingScreen({ theme, onSignOut }) {
             <FolderKanban className="w-7 h-7 text-white" />
           </div>
           <h1 className="text-2xl font-semibold text-white font-display tracking-tight">Create your workspace</h1>
-          <p className="text-sm text-white/45 mt-1.5 text-center">A workspace is where your team's tasks, projects, and chat live. Name it to get started — you'll be its owner.</p>
+          <p className="text-sm text-white/45 mt-1.5 text-center">A workspace is where your team's tasks, projects, and chat live. Name it to get started. You'll be its owner.</p>
         </div>
 
         {pendingInvites.length > 0 && (
@@ -4302,7 +4346,7 @@ function MembersView() {
         {err && <p className="text-[11px] text-rose-300 mt-2">{err}</p>}
         {lastLink && (
           <div className="mt-3 p-3 rounded-xl border border-white/10 bg-white/[0.03]">
-            <div className="text-[11px] text-white/50 mb-1.5">{copied ? 'Link copied — ' : ''}Send this to {lastLink.email}:</div>
+            <div className="text-[11px] text-white/50 mb-1.5">{copied ? 'Link copied. ' : ''}Send this to {lastLink.email}:</div>
             <div className="flex items-center gap-2">
               <code className="flex-1 truncate text-[11px] text-white/70">{lastLink.url}</code>
               <button onClick={() => copy(lastLink.url)} className="shrink-0 text-[11px] px-2 h-7 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">Copy</button>

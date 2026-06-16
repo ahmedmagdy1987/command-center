@@ -590,7 +590,7 @@ export const messages = {
    * currently typing or recording. Returns { update(partial), unsubscribe() }.
    */
   presence({ userId, name }, onOthers, channelKey = 'chat-presence') {
-    let mine = { userId, name: name || 'Someone', typing: false, recording: false };
+    let mine = { userId, name: name || 'Someone', typing: false, recording: false, readAt: null };
     const channel = supabase.channel(channelKey, { config: { presence: { key: userId } } });
     const emit = () => {
       const state = channel.presenceState();
@@ -599,7 +599,9 @@ export const messages = {
         if (key === userId) continue;
         const metas = Array.isArray(state[key]) ? state[key] : [];
         const meta = metas[metas.length - 1] || {};
-        if (meta.typing || meta.recording) others.push({ name: meta.name || 'Someone', typing: !!meta.typing, recording: !!meta.recording });
+        // Emit every present peer (not just typers) so a peer's read cursor (readAt) is available for
+        // live read receipts; presenceLabel still filters to typing/recording for the typing strip.
+        others.push({ userId: key, name: meta.name || 'Someone', typing: !!meta.typing, recording: !!meta.recording, readAt: meta.readAt || null });
       }
       try { onOthers(others); } catch (e) { console.error('[presence] callback error:', e); }
     };

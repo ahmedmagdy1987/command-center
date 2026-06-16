@@ -132,7 +132,7 @@ export default function InviteScreen({ session }) {
               </form>
               <button onClick={() => { setSignupMode(m => !m); setAuthErr(null); setAuthInfo(null); }}
                 className="mt-4 w-full text-center text-[11px] text-white/40 hover:text-white/70 transition-colors">
-                {signupMode ? '← I already have an account' : "I don't have an account yet — create one"}
+                {signupMode ? '← I already have an account' : "I don't have an account yet. Create one"}
               </button>
             </>
           ) : preview === undefined ? (

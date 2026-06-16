@@ -56,7 +56,7 @@ export const PLANS = {
     hidden: true,        // never shown on the pricing page
     paid: false,
     grandfathered: true,
-    tagline: 'Early-access — every feature unlocked.',
+    tagline: 'Early access, every feature unlocked.',
     price: { monthly: 0, annual: 0 },
     limits: { seats: Infinity, workspaces: Infinity, historyDays: Infinity },
     features: { voiceNotes: true, recurringTasks: true, bulkImport: true, prioritySupport: true },
@@ -75,7 +75,7 @@ export const PLANS = {
     highlights: [
       'Up to 3 members',
       '1 workspace',
-      'Unlimited tasks — board, priority matrix & schedule',
+      'Unlimited tasks across board, priority matrix & schedule',
       'Team chat & direct messages',
       '30-day message history',
       'Export your data anytime',
@@ -134,7 +134,7 @@ export const DEFAULT_PLAN_ID = 'founding';
 export const FEATURE_META = {
   voiceNotes: {
     label: 'Voice notes',
-    blurb: 'Record and send voice messages in team chat and direct messages — great for briefing distributed teammates async.',
+    blurb: 'Record and send voice messages in team chat and direct messages. Great for briefing distributed teammates async.',
     tier: 'pro',
   },
   recurringTasks: {
@@ -149,7 +149,7 @@ export const FEATURE_META = {
   },
   seats: {
     label: 'More members',
-    blurb: 'Invite more people — staff, freelancers, or outside collaborators — into this workspace.',
+    blurb: 'Invite more people into this workspace: staff, freelancers, or outside collaborators.',
     tier: 'pro',
     isLimit: true,
   },
@@ -191,16 +191,16 @@ export const FEATURE_TABLE = [
 ----------------------------------------------------------------------------- */
 export const PRICING_COPY = {
   eyebrow: 'Plans & pricing',
-  headline: 'Your whole team in one place — even the people who aren’t in your company.',
-  sub: 'Coordinate tasks and who’s-doing-what, and talk to everyone — staff, freelancers, contractors, and outside collaborators — in one shared hub. Start free, upgrade as your team grows.',
+  headline: 'Your whole team in one place, even the people who aren’t in your company.',
+  sub: 'Coordinate tasks and who’s-doing-what, and talk to your whole team in one shared hub: staff, freelancers, contractors, and outside collaborators. Start free, and upgrade as your team grows.',
   benefits: [
     'One shared place for who’s doing what',
     'Built-in team chat & direct messages',
-    'Bring in anyone — inside or outside your company',
+    'Bring in anyone, inside or outside your company',
   ],
   // Honest early-access framing. Doubles as the reason existing users keep everything.
   earlyAccessNote:
-    'Command Center is in early access — founding members get every feature free for now. These are the plans we’re validating; pricing isn’t final.',
+    'Command Center is in early access, and founding members get every feature free for now. These are the plans we’re validating; pricing isn’t final.',
   annualLabel: 'Billed annually',
   monthlyLabel: 'Billed monthly',
   annualBadge: 'Save ~2 months',
