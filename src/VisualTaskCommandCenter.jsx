@@ -993,7 +993,7 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showOwner 
             {done && <Check className="w-2.5 h-2.5 text-black" strokeWidth={3} />}
           </button>
           <PriorityDot priority={task.priority} />
-          {isPrivate && <Lock className="w-3 h-3 text-white/40 shrink-0" />}
+          {isPrivate && <span title="Private — visible only to the creator and assignee"><Lock className="w-3 h-3 text-white/40 shrink-0" /></span>}
           {isRecurring(task.recurring) && <RefreshCw className="w-3 h-3 text-white/30 shrink-0" />}
           {task.blocked && <PauseCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
         </div>
@@ -1586,6 +1586,7 @@ function QuickAdd() {
               );
             })}
             <div className="w-px h-6 bg-white/10 self-center mx-1" />
+            <span className="self-center text-[11px] font-medium text-white/40">Visibility</span>
             <button onClick={() => setPrivacy(privacy === 'private' ? 'workspace' : 'private')}
               className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
                 privacy === 'private' ? 'text-white' : 'text-white/50 border-white/10 bg-white/5')}
@@ -1639,7 +1640,7 @@ function CommandPalette() {
     { id: 'v-mat', label: 'Go to Priority Matrix', icon: Grid3x3, run: () => { setView('matrix'); setPaletteOpen(false); } },
     { id: 'v-proj', label: 'Go to Projects', icon: FolderKanban, run: () => { setView('projects'); setPaletteOpen(false); } },
     { id: 'v-sched', label: 'Go to Schedule', icon: CalendarDays, run: () => { setView('schedule'); setPaletteOpen(false); } },
-    { id: 'v-priv', label: 'Go to Private', icon: Lock, run: () => { setView('private'); setPaletteOpen(false); } },
+    { id: 'v-priv', label: 'Go to Private tasks', icon: Lock, run: () => { setView('private'); setPaletteOpen(false); } },
     { id: 'v-mine', label: 'Go to My Tasks', icon: UserCog, run: () => { setView('mine'); setPaletteOpen(false); } },
     { id: 'v-chat', label: 'Go to Chat', icon: MessageSquare, run: () => { setView('chat'); setPaletteOpen(false); } },
     { id: 'v-dms', label: 'Go to Direct messages', icon: MessagesSquare, run: () => { setView('dms'); setPaletteOpen(false); } },
@@ -1764,14 +1765,14 @@ function Sidebar() {
             <Sparkles className="w-4 h-4 text-white" />
           </div>
           <div className="leading-tight">
-            <div className="text-[15px] font-semibold text-white font-display tracking-tight">Command</div>
-            <div className="text-[10px] text-white/40 uppercase tracking-widest">Visual task center</div>
+            <div className="text-[15px] font-semibold text-white font-display tracking-tight">Command Center</div>
+            <div className="text-[10px] text-white/40 uppercase tracking-widest">Visual task management</div>
           </div>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-        <div className="px-3 pb-2 text-[10px] font-medium uppercase tracking-widest text-white/30">Workspace</div>
+        <div className="px-3 pb-2 text-[10px] font-medium uppercase tracking-widest text-white/30">Team</div>
         {item('dashboard', LayoutDashboard, 'Dashboard')}
         {item('kanban', KanbanSquare, 'Kanban', counts.all)}
         {item('matrix', Grid3x3, 'Priority Matrix')}
@@ -1781,9 +1782,9 @@ function Sidebar() {
         {item('dms', MessagesSquare, 'Direct messages', dmUnread)}
         {isOwner && item('members', Users, 'Members')}
 
-        <div className="px-3 pt-5 pb-2 text-[10px] font-medium uppercase tracking-widest text-white/30">Lanes</div>
+        <div className="px-3 pt-5 pb-2 text-[10px] font-medium uppercase tracking-widest text-white/30">My views</div>
         {item('mine', UserCog, 'My Tasks', counts.mine)}
-        {item('private', Lock, 'Private', counts.private)}
+        {item('private', Lock, 'Private tasks', counts.private)}
       </div>
 
       <div className="p-3 border-t border-white/5">
@@ -2602,7 +2603,7 @@ function DashboardView() {
 
   return (
     <div className="space-y-6">
-      <ViewHeader title="Mission control" subtitle="Today's ranked priorities, flagged blockers, and where your energy should go." accent={new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric'})} />
+      <ViewHeader title="Dashboard" subtitle="Today's ranked priorities, flagged blockers, and where your energy should go." accent={new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric'})} />
 
       <Card title="Top 3 priorities — right now" subtitle="Auto-ranked by priority, due date, urgency, and blockers." accent="#a78bfa">
         {top3.length === 0 ? (
@@ -2664,8 +2665,8 @@ function DashboardView() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card title="Unassigned — needs an owner" subtitle="Pick these up or assign them out" accent={UNASSIGNED_STYLE.hex}>
-          {unassignedPriority.length === 0 ? <EmptyState icon={Sparkles} text="Nothing unassigned — everything has an owner." /> :
+        <Card title="Unassigned — needs an assignee" subtitle="Pick these up or assign them out" accent={UNASSIGNED_STYLE.hex}>
+          {unassignedPriority.length === 0 ? <EmptyState icon={Sparkles} text="Nothing unassigned — everything's assigned." /> :
             <div className="space-y-2">{unassignedPriority.map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}</div>}
         </Card>
         <Card title="Overdue" subtitle={overdue.length ? "Needs attention" : "All clear"} accent="#f43f5e">
@@ -2887,7 +2888,7 @@ function PrivateView() {
             <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/30 backdrop-blur px-2.5 h-6 text-[10px] font-medium uppercase tracking-widest text-white/70 mb-3">
               <Lock className="w-3 h-3" />Private · you + assignee
             </div>
-            <h1 className="text-3xl lg:text-4xl font-semibold text-white font-display tracking-tight" style={{letterSpacing:'-0.02em'}}>My private list</h1>
+            <h1 className="text-3xl lg:text-4xl font-semibold text-white font-display tracking-tight" style={{letterSpacing:'-0.02em'}}>Private tasks</h1>
             <p className="text-sm text-white/50 mt-2 max-w-md">Private tasks are visible only to you and anyone they're assigned to — never the whole workspace.</p>
           </div>
           <button onClick={() => setQuickAddOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-white text-black text-xs font-semibold hover:bg-white/90">
@@ -2953,7 +2954,7 @@ function MyTasksView() {
         <div className="relative flex items-start justify-between gap-4 flex-wrap">
           <div>
             <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 h-6 text-[10px] font-medium uppercase tracking-widest text-emerald-300 mb-3">
-              <UserCog className="w-3 h-3" />My workspace
+              <UserCog className="w-3 h-3" />Assigned to me
             </div>
             <h1 className="text-3xl lg:text-4xl font-semibold text-white font-display tracking-tight">My Tasks</h1>
             <p className="text-sm text-white/50 mt-2">Everything assigned to you — prioritize and get it done.</p>
@@ -3140,7 +3141,7 @@ function ProjectsView() {
 
   return (
     <div className="space-y-6">
-      <ViewHeader title="Projects & areas" subtitle="Work grouped by where it lives." />
+      <ViewHeader title="Projects" subtitle="Work grouped by where it lives." />
       <div className="flex items-center justify-between -mt-2">
         <div className="text-[11px] text-white/40">{projects.length} project{projects.length === 1 ? '' : 's'}</div>
         {canManage && (
@@ -3912,7 +3913,7 @@ function DmThread({ conversationId, peerId, onBack }) {
         <span className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold"
           style={{ background: peer.soft, color: peer.hex, border: `1px solid ${peer.hex}33` }}>{peer.initials}</span>
         <div className="text-sm font-semibold text-white/90">{peer.label === 'Me' ? 'You' : peer.label}</div>
-        <div className="text-[10px] text-white/35">Private conversation</div>
+        <div className="text-[10px] text-white/35">Direct message</div>
       </div>
 
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-4">
