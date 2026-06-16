@@ -294,12 +294,12 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     } catch (e) { console.error('Failed to load direct messages:', e); }
   }, [currentWorkspaceId, userId]);
 
-  const markDmRead = useCallback(async (conversationId) => {
+  const markDmRead = useCallback(async (conversationId, coverAt) => {
     if (!conversationId) return;
     setDmConversations(prev => prev.map(c => c.id === conversationId ? { ...c, unread: 0 } : c));
     try {
-      await directMessagesApi.markRead(conversationId);
-      console.log('[DM-READ] cursor written', { conversationId, at: new Date().toISOString() });   // TEMP diagnostic
+      await directMessagesApi.markRead(conversationId, coverAt);
+      console.log('[DM-READ] cursor written', { conversationId, coverAt: coverAt || null, at: new Date().toISOString() });   // TEMP diagnostic
     } catch (e) {
       console.error('[DM-READ] cursor WRITE FAILED (check RLS/permissions on dm_reads)', conversationId, e);   // TEMP diagnostic
     }
@@ -4084,7 +4084,8 @@ function DmThread({ conversationId, peerId, onBack }) {
       .catch(e => console.error('[DM-READ] re-read failed', e));   // TEMP diagnostic
   }, [conversationId, peerId]);
 
-  // Load + subscribe to this thread; mark read while open. Remounts per conversation (keyed).
+  // Load + subscribe to this thread. (My read cursor is advanced by the latest-message effect below,
+  // which runs on open AND on every new message, incoming or outgoing.) Remounts per conversation.
   useEffect(() => {
     let on = true;
     directMessagesApi.listMessages(conversationId, 200)
@@ -4092,8 +4093,6 @@ function DmThread({ conversationId, peerId, onBack }) {
       .catch(e => console.error('Failed to load DM thread:', e))
       .finally(() => { if (on) setLoading(false); });
     refreshReads();
-    markDmRead(conversationId);
-    signalRead(nowISO());   // broadcast my read cursor so the peer's receipt flips to Seen live
     const unsub = directMessagesApi.subscribeThread(({ type, message }) => {
       if (!message || !on) return;
       setItems(prev => {
@@ -4101,27 +4100,39 @@ function DmThread({ conversationId, peerId, onBack }) {
         if (type === 'UPDATE') return prev.map(m => m.id === message.id ? message : m);
         return prev.some(m => m.id === message.id) ? prev : [...prev, message];
       });
-      // A new message from the peer while I'm viewing means I've read it: advance + rebroadcast, and
-      // clear the typing indicator immediately (don't wait for the peer's "stopped typing" event).
-      if (type === 'INSERT' && message.senderId !== userId) { markDmRead(conversationId); signalRead(nowISO()); setShownTyping(''); }
-      refreshReads();   // peer likely advanced their cursor around new activity
+      // Clear the typing indicator immediately on a peer message (don't wait for "stopped typing").
+      if (type === 'INSERT' && message.senderId !== userId) setShownTyping('');
+      refreshReads();   // peer may have advanced their cursor around new activity
     }, conversationId);
     return () => { on = false; unsub(); };
-  }, [conversationId, userId, markDmRead, refreshReads, signalRead]);
+  }, [conversationId, userId, refreshReads]);
 
-  // RELIABLE read receipts (persisted dm_reads is the source of truth). While the thread is open, on a
-  // 4s interval AND on window focus: (a) re-WRITE my cursor so the peer reliably sees "Seen" even if a
-  // realtime mark-read was missed, and (b) re-READ the peer's cursor so my own ticks flip. This is the
-  // foundation — it no longer depends on a new message arriving or on the presence broadcast.
+  // Keep MY read cursor at the latest message WHILE the conversation is open. THIS is the fix for the
+  // already-open case: it re-runs whenever the LATEST message changes (incoming OR outgoing), so the
+  // cursor advances on EVERY new message, not only on open. It writes a cover-time = the message's
+  // SERVER timestamp, so the cursor covers a just-arrived message regardless of client clock skew. No
+  // stale closure: it's a deps-driven effect (recreated each render), not a once-subscribed handler.
+  const latestMsg = items.length ? items[items.length - 1] : null;
+  const latestMsgId = latestMsg ? latestMsg.id : null;
+  const latestMsgAt = latestMsg ? latestMsg.createdAt : null;
+  useEffect(() => {
+    if (isSelf || !conversationId || !latestMsgId) return;
+    markDmRead(conversationId, latestMsgAt);
+    signalRead(latestMsgAt || nowISO());
+    console.log('[DM-READ] cursor advanced on incoming message while active', { conversationId, to: latestMsgAt, latestMsgId });   // TEMP diagnostic
+  }, [conversationId, latestMsgId, latestMsgAt, isSelf, markDmRead, signalRead]);
+
+  // Re-READ the peer's cursor on a 4s interval AND on focus, so MY tick flips to Seen even when the
+  // peer reads without sending a reply. (Writing MY cursor is the latest-message effect's job above.)
+  // The persisted dm_reads cursor is the source of truth; the presence broadcast is a faster path.
   useEffect(() => {
     if (isSelf) return undefined;
-    const tick = () => { markDmRead(conversationId); signalRead(nowISO()); refreshReads(); };
-    const id = setInterval(tick, 4000);
-    const onFocus = () => tick();
+    const id = setInterval(refreshReads, 4000);
+    const onFocus = () => refreshReads();
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onFocus);
     return () => { clearInterval(id); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus); };
-  }, [isSelf, refreshReads, markDmRead, conversationId, signalRead]);
+  }, [isSelf, refreshReads]);
 
   useEffect(() => () => {
     clearInterval(timerRef.current);

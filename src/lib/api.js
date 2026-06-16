@@ -682,12 +682,17 @@ export const directMessages = {
   },
 
   /** Advance my read cursor for a conversation (upsert on the (conversation_id,user_id) PK). */
-  async markRead(conversationId) {
+  async markRead(conversationId, coverAt) {
     const session = await auth.getSession();
     if (!session) throw new Error('Not authenticated');
+    // Anchor the cursor to the latest message's SERVER timestamp when provided (coverAt), so it
+    // covers a just-arrived message even if the client clock differs from the server. Writing the
+    // client's own now() can land BEFORE a message the server stamped at ~the same instant, which
+    // left an already-open conversation showing "unread" / "not seen". Fall back to now().
+    const lastReadAt = coverAt || new Date().toISOString();
     const { error } = await supabase
       .from('dm_reads')
-      .upsert({ conversation_id: conversationId, user_id: session.user.id, last_read_at: new Date().toISOString() },
+      .upsert({ conversation_id: conversationId, user_id: session.user.id, last_read_at: lastReadAt },
               { onConflict: 'conversation_id,user_id' });
     if (error) throw error;
   },
