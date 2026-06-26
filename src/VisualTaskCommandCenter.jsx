@@ -1053,25 +1053,34 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showOwner 
   );
 }
 
-/** Render text with @mentions lightly highlighted (cosmetic; the mention payload is the uuid[]). */
+/** Render text with @mentions shown as styled pills. Matches the FULL display name of any workspace
+ *  member (longest-first) so "@Ahmed Magdy" highlights as one pill, not just "@Ahmed". Cosmetic — the
+ *  mention payload is the uuid[]. */
 function MentionText({ text }) {
-  const s = text || '';
+  const { members } = useApp();
+  const s = String(text || '');
   if (!s.includes('@')) return s;
-  return String(s).split(/(@[\p{L}\p{N}_]+)/u).map((p, i) =>
-    (p.startsWith('@') && p.length > 1)
-      ? <span key={i} className="text-violet-300 font-medium">{p}</span>
-      : p);
+  const names = (members || []).map(m => m.displayName || m.email).filter(Boolean).sort((a, b) => b.length - a.length);
+  if (!names.length) return s;
+  const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp('(@(?:' + names.map(esc).join('|') + '))', 'g');
+  const known = new Set(names.map(n => '@' + n));
+  return s.split(re).map((p, i) => known.has(p)
+    ? <span key={i} className="rounded px-1 -mx-0.5 bg-violet-500/20 text-violet-200 font-medium">{p}</span>
+    : p);
 }
 
-/** A textarea with an inline @-mention picker. As you type `@query`, a dropdown of workspace members
- *  appears; picking one inserts `@Display Name ` and records the user id. onMentionsChange reports the
- *  ids whose `@name` is still present in the text (so deleting the name removes the mention). The
- *  server-side trigger is the real gate — it only notifies a mentioned user who can see the surface. */
+/** A textarea with an inline @-mention picker. Type `@` (at the start or after a space) and a dropdown
+ *  of workspace members opens — pick one and `@Display Name ` is inserted and the user id is recorded.
+ *  The dropdown is PORTALED to <body> and anchored above the field, so it's never clipped by a modal /
+ *  chat container's overflow. onMentionsChange reports the ids whose `@name` is still in the text. The
+ *  server trigger is the real gate — it only notifies a mentioned user who can actually see the surface. */
 function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onEnter, onTyping, onBlur, rows = 2, placeholder, className, autoFocus, textareaRef }) {
   const innerRef = useRef(null);
-  const taRef = textareaRef || innerRef;   // share the element with a parent (e.g. the Composer's autosize)
-  const pickedRef = useRef(new Map());   // userId -> displayName, for everyone picked from the dropdown
+  const taRef = textareaRef || innerRef;
+  const pickedRef = useRef(new Map());   // userId -> displayName for everyone picked from the dropdown
   const [menu, setMenu] = useState(null); // { q, at } while an @token is active before the cursor
+  const [pos, setPos] = useState(null);   // fixed-position anchor for the portaled dropdown
   const candidates = (members || []).filter(m => m.userId !== meId);
 
   const report = (text) => {
@@ -1080,18 +1089,24 @@ function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onE
     for (const [uid, name] of pickedRef.current.entries()) if (name && text.includes('@' + name)) ids.push(uid);
     onMentionsChange(ids);
   };
+  const openMenuFor = (text, caret) => {
+    const m = text.slice(0, caret).match(/(?:^|\s)@([^\s@]*)$/);
+    if (m && candidates.length) {
+      const r = taRef.current?.getBoundingClientRect();
+      if (r) setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 268)), bottom: window.innerHeight - r.top + 6, width: Math.max(200, Math.min(r.width, 280)) });
+      setMenu({ q: m[1].toLowerCase(), at: caret - m[1].length - 1 });
+    } else { setMenu(null); }
+  };
   const handleChange = (e) => {
     const text = e.target.value;
     onChange(text); onTyping?.();
-    const pos = e.target.selectionStart ?? text.length;
-    const m = text.slice(0, pos).match(/(?:^|\s)@([^\s@]*)$/);
-    setMenu(m && candidates.length ? { q: m[1].toLowerCase(), at: pos - m[1].length - 1 } : null);
+    openMenuFor(text, e.target.selectionStart ?? text.length);
     report(text);
   };
-  const filtered = menu ? candidates.filter(m => (m.displayName || m.email || '').toLowerCase().includes(menu.q)).slice(0, 6) : [];
+  const filtered = menu ? candidates.filter(m => (m.displayName || m.email || '').toLowerCase().includes(menu.q)).slice(0, 8) : [];
   const pick = (mem) => {
-    const name = mem.displayName || mem.email; const ta = taRef.current; const pos = ta?.selectionStart ?? value.length;
-    const next = value.slice(0, menu.at) + '@' + name + ' ' + value.slice(pos);
+    const name = mem.displayName || mem.email; const ta = taRef.current; const caret = ta?.selectionStart ?? value.length;
+    const next = value.slice(0, menu.at) + '@' + name + ' ' + value.slice(caret);
     pickedRef.current.set(mem.userId, name); onChange(next); setMenu(null); report(next);
     requestAnimationFrame(() => { const c = menu.at + name.length + 2; if (ta) { ta.focus(); ta.setSelectionRange(c, c); } });
   };
@@ -1102,18 +1117,23 @@ function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onE
   };
   return (
     <div className="relative flex-1 min-w-0">
-      <textarea ref={taRef} value={value} onChange={handleChange} onKeyDown={onKeyDown} onBlur={onBlur}
-        rows={rows} placeholder={placeholder} autoFocus={autoFocus} className={cx(className, 'w-full')} />
-      {menu && filtered.length > 0 && (
-        <div className="absolute z-[55] bottom-full mb-1 left-0 w-56 max-h-44 overflow-y-auto rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1">
+      <textarea ref={taRef} value={value} onChange={handleChange} onKeyDown={onKeyDown}
+        onClick={(e) => openMenuFor(e.target.value, e.target.selectionStart ?? 0)}
+        onBlur={onBlur} rows={rows} placeholder={placeholder} autoFocus={autoFocus} className={cx(className, 'w-full')} />
+      {menu && pos && filtered.length > 0 && createPortal(
+        <div className="fixed z-[80] max-h-52 overflow-y-auto rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1"
+          style={{ left: pos.left, bottom: pos.bottom, width: pos.width }}>
+          <div className="px-3 pt-1 pb-1.5 text-[10px] font-medium uppercase tracking-widest text-white/40">Mention someone</div>
           {filtered.map(m => (
             <button key={m.userId} type="button" onMouseDown={(ev) => { ev.preventDefault(); pick(m); }}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-white/80 hover:bg-white/5 text-left">
-              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: assigneeColor(m.userId).hex }} />
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-white/85 hover:bg-violet-500/15 text-left">
+              <span className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-semibold shrink-0"
+                style={{ background: assigneeColor(m.userId).soft, color: assigneeColor(m.userId).hex }}>{initialsOf(m.displayName || m.email)}</span>
               <span className="truncate">{m.displayName || m.email}</span>
             </button>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -4808,10 +4828,13 @@ function MembersView() {
                     </button>
                   )}
                   {canModify ? (
-                    <select value={m.role} onChange={(e) => changeRole(m.userId, e.target.value)} aria-label={`Role for ${m.displayName || m.email}`}
-                      className="text-[11px] h-7 rounded-lg bg-white/5 border border-white/10 text-white/80 pl-2 pr-1 outline-none focus:border-white/25 cursor-pointer">
-                      {settableRoles.map(r => <option key={r} value={r} className="bg-[#0f1017]">{ROLE_LABELS[r]}</option>)}
-                    </select>
+                    <div className="relative">
+                      <select value={m.role} onChange={(e) => changeRole(m.userId, e.target.value)} aria-label={`Role for ${m.displayName || m.email}`}
+                        className="appearance-none text-[11px] h-7 rounded-lg bg-white/5 border border-white/10 text-white/80 pl-2.5 pr-6 outline-none focus:border-white/25 hover:bg-white/10 hover:border-white/20 cursor-pointer transition-colors">
+                        {settableRoles.map(r => <option key={r} value={r} className="bg-[#0f1017]">{ROLE_LABELS[r]}</option>)}
+                      </select>
+                      <ChevronDown className="w-3 h-3 text-white/45 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
                   ) : (
                     <span title={isLastOwner ? 'The last owner — promote another owner first to change this' : undefined}
                       className="text-[10px] uppercase tracking-wide text-white/40 bg-white/5 border border-white/10 rounded-md px-1.5 h-5 flex items-center">{ROLE_LABELS[m.role] || m.role}</span>
@@ -4919,8 +4942,11 @@ function AppShell() {
         [data-theme="light"] .text-white, [data-theme="light"] .text-white\\/95, [data-theme="light"] .text-white\\/90, [data-theme="light"] .text-white\\/85 { color: #17181c !important; }
         [data-theme="light"] .text-white\\/70, [data-theme="light"] .text-white\\/80 { color: #3a3c44 !important; }
         [data-theme="light"] .text-white\\/60, [data-theme="light"] .text-white\\/55, [data-theme="light"] .text-white\\/50 { color: #5a5d69 !important; }
-        [data-theme="light"] .text-white\\/45, [data-theme="light"] .text-white\\/40 { color: #6a6d79 !important; }
-        [data-theme="light"] .text-white\\/30, [data-theme="light"] .text-white\\/25 { color: #9a9da9 !important; }
+        [data-theme="light"] .text-white\\/45, [data-theme="light"] .text-white\\/40, [data-theme="light"] .text-white\\/35 { color: #6a6d79 !important; }
+        [data-theme="light"] .text-white\\/30, [data-theme="light"] .text-white\\/25, [data-theme="light"] .text-white\\/20 { color: #6f7280 !important; }
+        [data-theme="light"] [class*="placeholder-white"]::placeholder { color: rgba(0,0,0,0.45) !important; }
+        [data-theme="light"] .border-white\\/15, [data-theme="light"] .border-white\\/20 { border-color: rgba(0,0,0,0.14) !important; }
+        [data-theme="light"] select option { color: #17181c !important; background: #ffffff !important; }
         [data-theme="light"] .border-white\\/5, [data-theme="light"] .border-white\\/10, [data-theme="light"] .border-white\\/\\[0\\.06\\], [data-theme="light"] .border-white\\/\\[0\\.08\\] { border-color: rgba(0,0,0,0.08) !important; }
         [data-theme="light"] .bg-white\\/\\[0\\.04\\], [data-theme="light"] .bg-white\\/\\[0\\.03\\], [data-theme="light"] .bg-white\\/\\[0\\.02\\], [data-theme="light"] .bg-white\\/\\[0\\.015\\], [data-theme="light"] .bg-white\\/\\[0\\.005\\], [data-theme="light"] .bg-white\\/5 { background: rgba(0,0,0,0.025) !important; }
         [data-theme="light"] .bg-white\\/\\[0\\.08\\], [data-theme="light"] .bg-white\\/10 { background: rgba(0,0,0,0.06) !important; }
