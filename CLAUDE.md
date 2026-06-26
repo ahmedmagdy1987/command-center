@@ -1,10 +1,11 @@
 # Command Center — project guide for Claude
 
 > Orientation file so any future session is instantly up to speed. Last verified against the
-> live DB on **2026-06-26** (latest migration `20260626065335` — message edit + soft-delete). Public
-> sign-up is now **OPEN** (`SIGNUP_ENABLED = true`). A full multi-tenant security audit on **2026-06-26**
-> proved RLS tenant isolation across every table via rolled-back impersonation tests — **0 cross-tenant
-> leaks** (see *Pre-launch security audit* below).
+> live DB on **2026-06-26** (latest migration `20260626111955` — @mention notifications). Public
+> sign-up is **OPEN** (`SIGNUP_ENABLED = true`). Tenant isolation is proven by rolled-back impersonation
+> tests — **0 cross-tenant leaks** (45 assertions; see *Pre-launch security audit*) — and the
+> **workspace roles** system added since (owner/admin/member/guest) has its own **35/35** rolled-back
+> role-boundary proof (see *Workspace roles, mentions & guest UX*).
 
 ## What this is
 
@@ -57,13 +58,16 @@ Workspace **"Command Center"** — id `11111111-1111-1111-1111-111111111111`, **
 | **Ahmed Magdy** | ahmedkassim157@gmail.com | `owner` | **Test owner account.** id `cdbcc2e5-…b98f909`. |
 | **VA** | ahmedkassim17777@gmail.com (display_name "Ahmed") | `member` | The VA. id `0598a0bc-…d42a12d`. |
 
-Role today is the **global** `members.role` ('owner' | 'member'); owner-gated actions key off it.
-(`workspace_members.role` mirrors it but isn't the authority yet — see Roadmap.)
+Authorization is **per-workspace** via `workspace_members.role` — now a four-rung ladder
+**owner > admin > member > guest** (the global `members.role` is vestigial, profile-only). The three live
+people are unchanged (Tony & Ahmed Magdy = `owner`, VA = `member`); admin/guest exist in the model and are
+exercised by the rolled-back proofs. See *Workspace roles, mentions & guest UX*.
 
-## Data model (8 base tables)
+## Data model (12 base tables)
 
 `tasks`, `projects`, `members`, `comments`, `messages`, `notifications`, `workspaces`,
-`workspace_members`. Every tenant-scoped table carries a `workspace_id`.
+`workspace_members`, plus `invitations` (workspace invites) and the direct-messages trio
+`dm_conversations` / `dm_messages` / `dm_reads`. Every tenant-scoped table carries a `workspace_id`.
 
 - `tasks.id` is **TEXT** (client-generated); `comments.task_id` / `notifications.task_id` are TEXT FKs.
 - `members` cols: `id` (=auth user id), `email`, `display_name`, `role`, `created_at`. **No `name` col.**
@@ -94,6 +98,22 @@ public/anon). Live in the **`private`** (non-PostgREST/non-API) schema so they d
   (incl. other members' private tasks the deleter can't see). Exposed as the SECURITY INVOKER passthrough
   `public.project_task_count(p_project_id, p_workspace_id)` — same Option-B advisor-clean shape as
   `create_workspace`. Read-only (no writes); it's the deletion gate, not a write path.
+- **Roles engine** (`…103433`, `search_path` hardened in `…103550`): `private.workspace_role(ws_id) → text`
+  and `private.workspace_role_rank(ws_id) → int` give the caller's role / rank (**owner 3 · admin 2 · member
+  1 · guest 0**) in a workspace; `private._role_rank(text) → int` is the pure name→rank map. They gate every
+  role-aware policy/RPC. Role changes flow ONLY through `public.set_member_role(p_ws,p_user,p_role)` /
+  `public.remove_member(p_ws,p_user)` (advisor-clean INVOKER → private DEFINER `_set_member_role`), with
+  guardrails: caller must out-rank both the target AND the new role, last-owner is protected, no
+  self-escalation, admins can't touch owners/other admins or grant admin (only an owner creates admins).
+  `workspace_members.role` stays SELECT-only under RLS — these RPCs are its sole write path.
+- **Mention visibility helpers** (`…111955`): `private.can_see_task(p_user,p_task)` and
+  `private.can_see_team_chat(p_user,p_ws)` evaluate a surface's visibility for an ARBITRARY user (mirroring the
+  live SELECT policies incl. the guest own/assigned rule) so a @mention NEVER notifies someone who couldn't
+  already see the comment's task / the team chat.
+- **Invitation RPCs** (`…041903`): `public.create_invitation` (owner+admin-gated, rank≥2) /
+  `accept_invitation` (email-bound, inserts the `workspace_members` row only for `auth.uid()`) /
+  `invitation_preview` / `revoke_invitation` — advisor-clean private DEFINER + public INVOKER passthroughs.
+  See *Post-Bundle-3 work* and the flagged **invite-as-role** item.
 
 **Sanctioned write path:** `create_workspace` is the **ONLY** way to write `workspaces` /
 `workspace_members` — both are SELECT-only under RLS for `authenticated` (no INSERT/UPDATE/DELETE policy
@@ -117,6 +137,11 @@ or grant). Direct inserts are denied (verified); all creation goes through the R
 - All three (rewritten in 2B-1): key off **`assignee_id`, never `owner`**; stamp
   `notifications.workspace_id` = the task's `workspace_id`; types `task_assigned` / `comment_added` /
   `task_completed`.
+- `notify_on_comment_mention` (AFTER INSERT on comments) / `notify_on_message_mention` (AFTER INSERT on
+  messages) (`…111955`) → a `mention`-type notification to each user in the row's explicit `mentions uuid[]`
+  (no text parsing), **only if** `can_see_task` / `can_see_team_chat` passes (guests excluded from team-chat
+  mentions; a comment mention requires the task be visible to that user). `notify_on_comment_added` was
+  amended to SKIP a participant who's also @mentioned (the mention supersedes — no double-notify).
 - `notify_*` fns are SECURITY DEFINER with EXECUTE revoked; clients have **no INSERT grant** on
   `notifications` (rows come only from these triggers). RLS lets a recipient read/update/delete only
   their own rows.
@@ -459,9 +484,10 @@ For a true behavior-preservation proof, also run a temporary **second-workspace 
 - **Invitations** (`20260602041903`). `invitations` table (SELECT-only under RLS: an owner sees their
   workspace's invites, an invitee sees pending invites to their own email) + four sanctioned RPCs
   (`create_invitation` / `accept_invitation` / `invitation_preview` / `revoke_invitation`, advisor-clean
-  private DEFINER + public INVOKER passthroughs). `create_invitation` is **owner-gated** and always sets
-  `role='member'`; `accept_invitation` is **email-bound** and inserts the `workspace_members` row only for
-  `auth.uid()` (no privilege escalation, no inviting as owner). UI: `InviteScreen.jsx` + `/invite/:token`.
+  private DEFINER + public INVOKER passthroughs). `create_invitation` is **owner+admin-gated** (rank≥2, since
+  the roles migration) and always sets `role='member'` (see the flagged *invite-as-role*); `accept_invitation`
+  is **email-bound** and inserts the `workspace_members` row only for `auth.uid()` (no privilege escalation, no
+  inviting as owner). UI: `InviteScreen.jsx` + `/invite/:token`.
 - **Workspace slugs** (`20260604102655`). `workspaces.slug` (unique) + `private._slugify`; `create_workspace`
   generates a unique slug; `?ws=` accepts a slug or an id.
 - **Direct messages** (`20260604125857` + `20260604130054` FK indexes). `dm_conversations(user_lo,user_hi)`,
@@ -499,6 +525,46 @@ cursor) → adopt Realtime Authorization (private channels) before scale; (c) **
 Fixed in-pass: workspace-scoped task-reconcile, removed the global-presence footgun default, no-empty catches.
 **(Current lint baseline: 31 errors / 2 warnings.)**
 
+## Workspace roles, mentions & guest UX (2026-06-26, after the audit above)
+
+**Workspace roles — owner/admin/member/guest** (`20260626103433`, hardened `20260626103550`). Promoted
+`workspace_members.role` from 2 values to the four-rung ladder (CHECK owner/admin/member/guest) and made it
+the authority for every gate (see *Roles engine*). Capabilities: **owner** = everything incl. delete-workspace
++ manage all roles; **admin** = invite + manage members below admin + project delete, but can't touch
+owners/admins or grant admin; **member** = full task/chat/projects, but edits/deletes only their OWN tasks;
+**guest** = sees + works ONLY their own/assigned tasks + DMs, excluded from team chat / projects / others'
+tasks. The task SELECT predicate gained the guest clause `(role<>'guest' OR creator/assignee)`; member task
+UPDATE/DELETE tightened to own/assigned (admin+ = any — the one intended behavior change).
+`set_member_role`/`remove_member` carry the guardrails. **Proven** by a 35/35 rolled-back boundary proof
+(every cross-rank action allowed/denied as specified) + an isolation re-audit showing no regression
+(member visibility old==new). App derives `myRole`/`isOwner`/`isAdmin`/`isMember`/`isGuest` from the current
+membership (gated behind `membershipsLoaded`); a Members page with a role dropdown (owner sets any; admin sets
+member/guest) + remove. Design doc: `ROLES_AND_PERMISSIONS.md`.
+
+**@mention notifications** (`20260626111955`; DB + app). Explicit `mentions uuid[]` on `comments` + `messages`
+(populated from an @-picker, NOT text-parsed); visibility-gated triggers (see Triggers) deliver a `mention`
+notification ONLY to users who can already see the surface — a mention can never leak task/chat content to
+someone otherwise walled off. UI: a portaled `@`-picker with keyboard nav in both composers + full-name
+mention pills. **Proven** by a 9/9 gate proof + 7/7 isolation. Due-soon/overdue + email digests deferred (a
+pg_cron follow-up). Design doc: `NOTIFICATIONS_AND_ACTIVITY.md`.
+
+**Guest nav cleanup + assignee dropdown** (app only; no DB). Guests now get a flat **My Tasks + Direct
+messages** nav (sidebar + mobile) and are bounced off any other view to `/my-tasks` (`GUEST_VIEWS`) —
+nav-visibility only, no permission change. The assignee picker became a scalable, portaled, type-to-filter,
+keyboard combobox (`AssigneeSelect`, single-select — multi-assignee is a separate DB-touching decision)
+replacing the inline name-pills in QuickAdd + TaskModal + the top-bar filter. A systemic light-mode
+accent-contrast sweep + an @-mention keyboard/contrast fix pass landed alongside.
+
+**FLAGGED, not applied — invite-as-role** (needs a DB change, so stopped per discipline). Today
+`create_invitation` always sets `role='member'` and `invitations_role_check` only allows `('member','owner')`,
+so an owner/admin can't pick *guest* at invite time (they reassign after the invitee joins). Letting them
+choose member/guest at invite time needs (1) widen the CHECK to all four roles, and (2)
+`create_invitation(p_workspace_id,p_email,p_role)` validating `p_role ∈ {member,guest}` (rank≥2 caller;
+owner/admin still assigned only via `set_member_role`). A **6/6 rolled-back proof** confirmed it works
+end-to-end (owner/admin invite as guest → invitation carries it → accept applies it; admin-invites-admin and
+member-caller both rejected) — **awaiting approval before applying.** `accept_invitation` already applies
+`inv.role`, so there's no accept-side change.
+
 ## Roadmap / next
 
 **Public sign-up is now OPEN** (`SIGNUP_ENABLED = true` in `AuthScreen.jsx`). Onboarding routes a
@@ -511,8 +577,14 @@ traffic, complete the **auth dashboard hardening** below.
 polish (3B-3), Phase 2 fully (per-member `assignee_id` + independent privacy; legacy `owner` gone), Bundles
 1–3, **voice-notes storage scoping** (`20260602041008`), **invitations** (`20260602041903`), **workspace
 slugs** (`20260604102655`), **direct messages** (`20260604125857`/`…130054`), **message edit + soft-delete**
-(`20260626065335`), and the **per-account Free/Pro packaging realignment** (config only). `members.role` is
-vestigial for authz. **(Current lint baseline: 31 errors / 2 warnings.)**
+(`20260626065335`), **workspace roles owner/admin/member/guest** (`20260626103433`/`…103550`), **@mention
+notifications** (`20260626111955`), **guest nav cleanup + the scalable `AssigneeSelect` dropdown** (app), and
+the **per-account Free/Pro packaging realignment** (config only). `members.role` is vestigial for authz.
+**(Current lint baseline: 31 errors / 2 warnings.)**
+
+**Proven & ready to apply (awaiting approval):** **invite-as-role** — let an owner/admin pick member/guest at
+invite time (needs the `invitations_role_check` widen + a `p_role` arg on `create_invitation`; 6/6 rolled-back
+proof passed). See the flagged item under *Workspace roles, mentions & guest UX*.
 
 **Before real paid traffic (flagged by the 2026-06-26 audit — none applied yet):**
 1. **Auth dashboard hardening** (Supabase dashboard — no code): enable Leaked Password Protection (clears the
