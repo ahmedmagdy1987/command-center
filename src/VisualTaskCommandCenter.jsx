@@ -1338,7 +1338,9 @@ function TaskModal() {
           <div className="flex flex-wrap gap-2">
             <SelectPill label="Status" value={t.status} options={Object.values(STATUSES).map(s => [s.id, s.label])} onChange={v => set({ status: v })} />
             <SelectPill label="Priority" value={t.priority} options={Object.values(PRIORITIES).map(p => [p.id, p.label])} onChange={v => set({ priority: v })} color={priority.hex} />
-            <SelectPill label="Assignee" value={t.assigneeId || ''} options={[['', 'Unassigned'], ...(t.assigneeId && !members.some(m => m.userId === t.assigneeId) ? [[t.assigneeId, resolveAssignee(t.assigneeId).label]] : []), ...members.map(m => [m.userId, m.userId === meId ? 'Me' : (m.displayName || m.email)])]} onChange={v => set({ assigneeId: v || null })} color={resolveAssignee(t.assigneeId).hex} />
+            <AssigneeSelect label="Assignee" value={t.assigneeId || ''}
+              options={[['', 'Unassigned'], ...(meId ? [[meId, 'Me']] : []), ...(t.assigneeId && t.assigneeId !== meId && !members.some(m => m.userId === t.assigneeId) ? [[t.assigneeId, resolveAssignee(t.assigneeId).label]] : []), ...members.filter(m => m.userId !== meId).map(m => [m.userId, m.displayName || m.email])]}
+              onChange={v => set({ assigneeId: v || null })} />
             <SelectPill label="Visibility" value={t.privacy} options={[['workspace', 'Shared'], ['private', 'Private']]} onChange={v => set({ privacy: v })} />
             <SelectPill label="Project" value={t.project} options={projects.map(p => [p.id, p.name])} onChange={v => set({ project: v })} />
             <SelectPill label="Effort" value={t.effort} options={Object.values(EFFORTS).map(e => [e.id, `${e.label} (${e.mins}m)`])} onChange={v => set({ effort: v, estimatedMinutes: EFFORTS[v].mins })} />
@@ -1447,6 +1449,115 @@ function SelectPill({ label, value, options, onChange, color }) {
         {options.map(([v,l]) => <option key={v} value={v} className="bg-[#0f1017] text-white">{l}</option>)}
       </select>
     </div>
+  );
+}
+
+/** A scalable assignee combobox: a trigger pill showing the current selection, and a PORTALED,
+ *  type-to-filter, keyboard-navigable dropdown of people — clean whether the workspace has 3 or 30
+ *  members. `options` is [[value, label], …] (same shape as SelectPill/FilterPill); value/onChange use
+ *  those values. SINGLE-SELECT — the data model is one assignee per task. (A future multi-select is NOT
+ *  localized here: it would need the assignee_id data model, all three callers, matchesAssignee and
+ *  resolveAssignee to move to arrays — a separate, DB-touching decision.) Avatars are derived from the
+ *  value (a user id) where possible; 'all' shows a group icon, '' / 'unassigned' a neutral dot. */
+function AssigneeSelect({ label, value, options, onChange, variant = 'field' }) {
+  const { meId, theme } = useApp();
+  const [open, setOpen] = useState(false);
+  const [shown, setShown] = useState(false);   // drives the gentle enter/exit transition
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
+  const [pos, setPos] = useState(null);
+  const btnRef = useRef(null);
+  const listRef = useRef(null);
+
+  const avatarFor = (v, lbl) => {
+    if (v === 'all') return { all: true };
+    if (v === '' || v === 'unassigned' || v == null) return { hex: UNASSIGNED_STYLE.hex, soft: UNASSIGNED_STYLE.soft, initials: '·' };
+    const c = assigneeColor(v === 'me' ? meId : v);
+    return { hex: c.hex, soft: c.soft, initials: initialsOf(lbl) };
+  };
+  const current = options.find(([v]) => v === value);
+  const curAv = current ? avatarFor(current[0], current[1]) : null;
+  const filtered = query ? options.filter(([, l]) => (l || '').toLowerCase().includes(query.toLowerCase())) : options;
+
+  const place = useCallback(() => {
+    const r = btnRef.current?.getBoundingClientRect(); if (!r) return;
+    const width = Math.max(r.width, 224);
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+    const below = window.innerHeight - r.bottom;
+    const up = below < 300 && r.top > below;
+    setPos(up ? { left, width, up: true, bottom: window.innerHeight - r.top + 6 } : { left, width, up: false, top: r.bottom + 6 });
+  }, []);
+  const openMenu = () => { place(); setQuery(''); setActive(Math.max(0, options.findIndex(([v]) => v === value))); setOpen(true); requestAnimationFrame(() => setShown(true)); };
+  const close = () => { setShown(false); setTimeout(() => setOpen(false), 160); };
+  const choose = (o) => { onChange(o[0]); close(); };
+  const onSearchKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+    if (!filtered.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive(a => (a + 1) % filtered.length); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(a => (a - 1 + filtered.length) % filtered.length); }
+    else if (e.key === 'Enter') { e.preventDefault(); choose(filtered[Math.min(active, filtered.length - 1)]); }
+  };
+  useEffect(() => { if (open && listRef.current) listRef.current.children[active]?.scrollIntoView({ block: 'nearest' }); }, [active, open]);
+  useEffect(() => {   // keep the fixed-position menu anchored to its trigger while open (scroll/resize)
+    if (!open) return undefined;
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => { window.removeEventListener('scroll', place, true); window.removeEventListener('resize', place); };
+  }, [open, place]);
+
+  const triggerCls = variant === 'filter'
+    ? 'relative inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] px-2.5 h-9 text-xs cursor-pointer transition-colors shrink-0'
+    : 'relative inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 px-3 h-8 text-xs cursor-pointer transition-colors';
+
+  return (
+    <>
+      <button type="button" ref={btnRef} onClick={() => (open ? close() : openMenu())} aria-haspopup="listbox" aria-expanded={open} className={triggerCls}>
+        {variant === 'filter' && <Filter className="w-3 h-3 text-white/40 shrink-0" />}
+        {curAv && !curAv.all && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: curAv.hex }} />}
+        <span className="text-white/40 shrink-0">{label}:</span>
+        <span className="text-white/95 font-medium truncate max-w-[140px]">{current ? current[1] : (value || '')}</span>
+        <ChevronDown className={cx('w-3 h-3 text-white/40 shrink-0 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && pos && createPortal(
+        <>
+          <div className="fixed inset-0 z-[70]" onClick={close} />
+          <div role="listbox" aria-label={label}
+            className={cx('fixed z-[71] rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl overflow-hidden flex flex-col transition-all duration-150 ease-out',
+              shown ? 'opacity-100 translate-y-0' : cx('opacity-0', pos.up ? 'translate-y-1' : '-translate-y-1'))}
+            style={{ left: pos.left, width: pos.width, ...(pos.up ? { bottom: pos.bottom } : { top: pos.top }) }}>
+            <div className="p-1.5 border-b border-white/5">
+              <input autoFocus value={query} onChange={e => { setQuery(e.target.value); setActive(0); }} onKeyDown={onSearchKey}
+                placeholder="Search people…"
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 h-8 text-xs text-white/90 placeholder-white/40 outline-none focus:border-violet-400/50" />
+            </div>
+            <div ref={listRef} className="max-h-60 overflow-y-auto py-1">
+              {filtered.length === 0 ? (
+                <div className="px-3 py-3 text-center text-[11px] text-white/40">No one found</div>
+              ) : filtered.map((o, i) => {
+                const av = avatarFor(o[0], o[1]);
+                const isSel = o[0] === value;
+                return (
+                  <button key={String(o[0]) || 'unassigned'} type="button" role="option" aria-selected={isSel}
+                    onMouseEnter={() => setActive(i)} onClick={() => choose(o)}
+                    className={cx('w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-left transition-colors',
+                      i === active ? 'bg-violet-500/25 text-white' : 'text-white/85 hover:bg-white/5')}>
+                    {av.all ? (
+                      <span className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 bg-white/10 text-white/60"><Users className="w-3 h-3" /></span>
+                    ) : (
+                      <span className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-semibold shrink-0"
+                        style={theme === 'light' ? { background: av.hex, color: '#0b0b12' } : { background: av.soft, color: av.hex }}>{av.initials}</span>
+                    )}
+                    <span className="flex-1 truncate">{o[1]}</span>
+                    {isSel && <Check className="w-3.5 h-3.5 text-violet-300 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>,
+        document.body
+      )}
+    </>
   );
 }
 
@@ -1665,36 +1776,9 @@ function QuickAdd() {
         </div>
         <div className="p-4 space-y-3">
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => setAssigneeId(null)}
-              className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
-                assigneeId === null ? 'text-white' : 'text-white/50 border-white/10 bg-white/5')}
-              style={assigneeId === null ? { background: UNASSIGNED_STYLE.soft, borderColor: UNASSIGNED_STYLE.hex + '55', color: UNASSIGNED_STYLE.hex } : {}}>
-              <span className="w-1.5 h-1.5 rounded-full" style={{ background: UNASSIGNED_STYLE.hex }} />Unassigned
-            </button>
-            {meId && (() => {
-              const c = assigneeColor(meId);
-              const sel = assigneeId === meId;
-              return (
-                <button onClick={() => setAssigneeId(meId)}
-                  className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
-                    sel ? 'text-white' : 'text-white/50 border-white/10 bg-white/5')}
-                  style={sel ? { background: c.soft, borderColor: c.hex + '55', color: c.hex } : {}}>
-                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: c.hex }} />Me
-                </button>
-              );
-            })()}
-            {members.filter(m => m.userId !== meId).map(m => {
-              const c = assigneeColor(m.userId);
-              const sel = assigneeId === m.userId;
-              return (
-                <button key={m.userId} onClick={() => setAssigneeId(m.userId)}
-                  className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
-                    sel ? 'text-white' : 'text-white/50 border-white/10 bg-white/5')}
-                  style={sel ? { background: c.soft, borderColor: c.hex + '55', color: c.hex } : {}}>
-                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: c.hex }} />{m.displayName || m.email}
-                </button>
-              );
-            })}
+            <AssigneeSelect label="Assignee" value={assigneeId ?? ''}
+              options={[['', 'Unassigned'], ...(meId ? [[meId, 'Me']] : []), ...members.filter(m => m.userId !== meId).map(m => [m.userId, m.displayName || m.email])]}
+              onChange={v => setAssigneeId(v || null)} />
             <div className="w-px h-6 bg-white/10 self-center mx-1" />
             <span className="self-center text-[11px] font-medium text-white/40">Visibility</span>
             <button onClick={() => setPrivacy(privacy === 'private' ? 'workspace' : 'private')}
@@ -2647,7 +2731,7 @@ function TopBar() {
 
         {showFilters && (
           <div className="hidden sm:flex items-center gap-1 pl-2 overflow-x-auto no-scrollbar">
-            <FilterPill label="Assignee" value={filters.assignee} options={[['all','All'],['me','Me'], ...members.filter(m => m.userId !== meId).map(m => [m.userId, m.displayName || m.email]), ['unassigned','Unassigned']]} onChange={v => setFilters(f => ({ ...f, assignee: v }))} />
+            <AssigneeSelect variant="filter" label="Assignee" value={filters.assignee} options={[['all','All'], ...(meId ? [['me','Me']] : []), ...members.filter(m => m.userId !== meId).map(m => [m.userId, m.displayName || m.email]), ['unassigned','Unassigned']]} onChange={v => setFilters(f => ({ ...f, assignee: v }))} />
             <FilterPill label="Visibility" value={filters.privacy} options={[['all','All'],['workspace','Shared'],['private','Private']]} onChange={v => setFilters(f => ({ ...f, privacy: v }))} />
             <FilterPill label="Project" value={filters.project} options={[['all','All'], ...projects.map(p => [p.id, p.name])]} onChange={v => setFilters(f => ({ ...f, project: v }))} />
           </div>
@@ -4975,7 +5059,7 @@ function AppShell() {
         [data-theme="light"] .bg-white\\/\\[0\\.08\\], [data-theme="light"] .bg-white\\/10 { background: rgba(0,0,0,0.06) !important; }
         [data-theme="light"] .search-input { background: #ffffff !important; border-color: rgba(0,0,0,0.12) !important; color: #17181c !important; }
         [data-theme="light"] .search-input::placeholder { color: rgba(0,0,0,0.4) !important; }
-        [data-theme="light"] .hover\\:bg-white\\/5:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.04\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.07\\]:hover { background: rgba(0,0,0,0.04) !important; }
+        [data-theme="light"] .hover\\:bg-white\\/5:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.04\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.06\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.07\\]:hover, [data-theme="light"] .hover\\:bg-white\\/10:hover { background: rgba(0,0,0,0.04) !important; }
 
         /* Action buttons — keep dark-on-light for "New" button */
         [data-theme="light"] .bg-white { background: #17181c !important; color: #ffffff !important; }
