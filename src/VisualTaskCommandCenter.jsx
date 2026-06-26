@@ -4955,6 +4955,21 @@ function AppShell() {
         [data-theme="light"] [class*="placeholder-white"]::placeholder { color: rgba(0,0,0,0.45) !important; }
         [data-theme="light"] .border-white\\/15, [data-theme="light"] .border-white\\/20 { border-color: rgba(0,0,0,0.14) !important; }
         [data-theme="light"] select option { color: #17181c !important; background: #ffffff !important; }
+        /* Accent TEXT: dark-mode accents are bright (readable on dark) but wash out on light-tinted
+           surfaces — mention pills, the recurrence preview chip, badges, links, the DM "Seen" tick,
+           and error text. Darken them for light mode (the heroes are re-exempted below). */
+        [data-theme="light"] .text-violet-100, [data-theme="light"] .text-violet-200, [data-theme="light"] .text-violet-300, [data-theme="light"] .text-violet-400, [data-theme="light"] .text-violet-300\\/70, [data-theme="light"] .text-violet-300\\/80, [data-theme="light"] .text-violet-200\\/90, [data-theme="light"] .text-violet-200\\/80, [data-theme="light"] .text-violet-100\\/90 { color: #6d28d9 !important; }
+        [data-theme="light"] .text-emerald-200, [data-theme="light"] .text-emerald-300, [data-theme="light"] .text-emerald-400, [data-theme="light"] .text-emerald-300\\/80 { color: #047857 !important; }
+        [data-theme="light"] .text-amber-100, [data-theme="light"] .text-amber-200, [data-theme="light"] .text-amber-300 { color: #b45309 !important; }
+        [data-theme="light"] .text-sky-300, [data-theme="light"] .text-sky-400 { color: #0369a1 !important; }
+        [data-theme="light"] .text-rose-200, [data-theme="light"] .text-rose-300, [data-theme="light"] .text-rose-400, [data-theme="light"] .text-rose-300\\/70, [data-theme="light"] .text-rose-300\\/80, [data-theme="light"] .text-rose-300\\/90, [data-theme="light"] .text-rose-100\\/90 { color: #be123c !important; }
+        [data-theme="light"] .hover\\:text-violet-200:hover { color: #6d28d9 !important; }
+        [data-theme="light"] .hover\\:text-rose-200:hover, [data-theme="light"] .hover\\:text-rose-300:hover, [data-theme="light"] .hover\\:text-rose-400:hover { color: #be123c !important; }
+        /* EXCEPTION: the Private + My Tasks heroes stay DARK in light mode, so their accent eyebrows
+           must stay BRIGHT (and a touch brighter, since "ASSIGNED TO ME" read weak). Higher specificity
+           than the global accent rules above, so these win inside the heroes. */
+        [data-theme="light"] .from-\\[\\#0d2a20\\] .text-emerald-200, [data-theme="light"] .from-\\[\\#0d2a20\\] .text-emerald-300, [data-theme="light"] .from-\\[\\#0d2a20\\] .text-emerald-400 { color: #a7f3d0 !important; }
+        [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-200, [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-300, [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-400 { color: #c4b5fd !important; }
         [data-theme="light"] .border-white\\/5, [data-theme="light"] .border-white\\/10, [data-theme="light"] .border-white\\/\\[0\\.06\\], [data-theme="light"] .border-white\\/\\[0\\.08\\] { border-color: rgba(0,0,0,0.08) !important; }
         [data-theme="light"] .bg-white\\/\\[0\\.04\\], [data-theme="light"] .bg-white\\/\\[0\\.03\\], [data-theme="light"] .bg-white\\/\\[0\\.02\\], [data-theme="light"] .bg-white\\/\\[0\\.015\\], [data-theme="light"] .bg-white\\/\\[0\\.005\\], [data-theme="light"] .bg-white\\/5 { background: rgba(0,0,0,0.025) !important; }
         [data-theme="light"] .bg-white\\/\\[0\\.08\\], [data-theme="light"] .bg-white\\/10 { background: rgba(0,0,0,0.06) !important; }
