@@ -12,8 +12,8 @@ const SIGNUP_ENABLED = true;
 
 /**
  * Welcome / sign-in screen. `mode` ('signin' | 'reset') is driven by the route (/login vs
- * /forgot-password), so those transitions are real navigations. Sign-up, when enabled, is an
- * in-screen toggle layered on the signin view (no dedicated route yet — it's still closed).
+ * /forgot-password), so those transitions are real navigations. Sign-up (now open) is an
+ * in-screen toggle layered on the signin view (no dedicated route yet).
  */
 export default function AuthScreen({ mode = 'signin', initialSignup = false }) {
   const navigate = useNavigate();

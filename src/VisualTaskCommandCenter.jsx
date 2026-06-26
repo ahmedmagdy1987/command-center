@@ -4513,7 +4513,7 @@ function MembersView() {
     <div className="space-y-6">
       <ViewHeader title="Members" subtitle="People in this workspace, and pending invitations." />
 
-      <Card title="Invite by email" subtitle="They'll join as a member. Copy the link and send it to them (public sign-up stays closed).">
+      <Card title="Invite a teammate" subtitle="They'll join as a member. No email is sent automatically — copy the invite link below and share it with them.">
         {entitlements.atSeatLimit && (
           <button type="button" onClick={() => requestUpgrade('seats')}
             className="w-full mb-3 flex items-center gap-2 px-3 py-2.5 rounded-xl border border-violet-400/30 bg-violet-500/10 text-left hover:bg-violet-500/15 transition-colors">
@@ -4527,7 +4527,7 @@ function MembersView() {
             className="flex-1 h-9 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white/90 outline-none focus:border-white/25 transition-colors" />
           <button type="submit" disabled={busy || !email.trim()}
             className={cx('h-9 px-4 rounded-xl text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors', (busy || !email.trim()) ? 'bg-violet-500/40 cursor-not-allowed' : 'bg-violet-500 hover:bg-violet-400')}>
-            <Mail className="w-3.5 h-3.5" />Create invite
+            <Mail className="w-3.5 h-3.5" />Create invite link
           </button>
         </form>
         {err && <p className="text-[11px] text-rose-300 mt-2">{err}</p>}

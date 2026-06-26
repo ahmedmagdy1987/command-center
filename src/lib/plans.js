@@ -176,13 +176,14 @@ export const FEATURE_TABLE = [
   { label: 'Members (seats)', type: 'limit', key: 'seats' },
   { label: 'Workspaces', type: 'limit', key: 'workspaces' },
   { label: 'Tasks, board, priority matrix & schedule', type: 'always' },
+  { label: 'Recurring tasks', type: 'always' },
+  { label: 'Bulk import', type: 'always' },
   { label: 'Team chat & direct messages', type: 'always' },
   { label: 'Message history', type: 'history', key: 'historyDays' },
   { label: 'Real-time sync & notifications', type: 'always' },
   { label: 'Export your data (JSON)', type: 'always' },
+  // The only Free→Pro feature levers (✓ / —): keep these last so the upgrade reason stands out.
   { label: 'Voice notes', type: 'feature', key: 'voiceNotes' },
-  { label: 'Recurring tasks', type: 'feature', key: 'recurringTasks' },
-  { label: 'Bulk import', type: 'feature', key: 'bulkImport' },
   { label: 'Priority support', type: 'feature', key: 'prioritySupport' },
 ];
 

@@ -69,7 +69,7 @@ export default function LandingPage() {
             <div className="mt-5 flex flex-wrap gap-x-5 gap-y-1.5 text-[12px] text-white/40">
               <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-emerald-400" /> Real-time sync</span>
               <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-emerald-400" /> Private &amp; shared tasks</span>
-              <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-emerald-400" /> Team chat &amp; voice notes</span>
+              <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-emerald-400" /> Team chat &amp; direct messages</span>
             </div>
           </div>
 
