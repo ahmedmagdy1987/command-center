@@ -2163,8 +2163,19 @@ function MobileTabs() {
 /* A single in-app notification toast. Self-dismisses after 5s. Rendered through a
    portal to <body> by NotificationBell so the sticky header's backdrop-filter
    (which establishes a containing block for fixed descendants) cannot clip it. */
+// Per-type visual for a notification (icon + accent). Due reminders get their own glanceable icons
+// (clock = due soon, alert = overdue); other types keep the generic bell. The hex reads on both dark and
+// light (a saturated icon on a subtle, same-hue chip). Deep-linking is unchanged — due_soon/overdue carry
+// a task_id, so handleOpen already routes them to openTask.
+function notifVisual(type, light) {
+  if (type === 'overdue')  return { Icon: AlertCircle, hex: '#f43f5e' };
+  if (type === 'due_soon') return { Icon: Clock,       hex: '#fb923c' };
+  return { Icon: Bell, hex: light ? '#6d28d9' : '#c4b5fd' };
+}
+
 function NotificationToast({ n, light, onOpen, onDismiss }) {
   const { id } = n;
+  const tv = notifVisual(n.type, light);
   const [leaving, setLeaving] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => {
@@ -2178,14 +2189,12 @@ function NotificationToast({ n, light, onOpen, onDismiss }) {
     <button onClick={() => onOpen(n)}
       className={cx('pointer-events-auto flex items-start gap-2.5 w-full text-left px-3.5 py-3 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl hover:border-white/20 transition-colors',
         leaving ? 'animate-[fadeSlideOut_.18s_ease_forwards]' : 'animate-[slideUp_.2s_ease]')}>
-      <span className="mt-0.5 w-7 h-7 rounded-lg border flex items-center justify-center shrink-0" style={{
-        background: light ? 'rgba(124,58,237,0.12)' : 'rgba(139,92,246,0.15)',
-        borderColor: light ? 'rgba(124,58,237,0.35)' : 'rgba(139,92,246,0.30)',
-      }}>
-        <Bell className="w-3.5 h-3.5" style={{ color: light ? '#6d28d9' : '#c4b5fd' }} />
+      <span className="mt-0.5 w-7 h-7 rounded-lg border flex items-center justify-center shrink-0"
+        style={{ background: tv.hex + '1f', borderColor: tv.hex + '55' }}>
+        <tv.Icon className="w-3.5 h-3.5" style={{ color: tv.hex }} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-[11px] font-semibold text-white/90">New notification</span>
+        <span className="block text-[11px] font-semibold text-white/90">{n.title || 'New notification'}</span>
         <span className="block text-xs text-white/60 leading-snug">{n.message}</span>
       </span>
     </button>
@@ -2402,10 +2411,12 @@ function NotificationBell() {
                         exitingNotifIds.has(n.id) && 'animate-[fadeSlideOut_.18s_ease_forwards]')}>
                       <button onClick={() => handleOpen(n)}
                         className="min-w-0 flex-1 text-left flex items-start gap-2.5 pl-3 pr-1 py-2.5">
-                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0" style={{
-                          background: n.read ? 'transparent' : (light ? '#7c3aed' : '#a78bfa'),
-                          boxShadow: n.read ? 'none' : `0 0 6px ${light ? 'rgba(124,58,237,0.45)' : 'rgba(167,139,250,0.7)'}`,
-                        }} />
+                        {(() => { const tv = notifVisual(n.type, light); return (
+                          <span className="relative mt-0.5 shrink-0">
+                            <tv.Icon className="w-4 h-4" style={{ color: tv.hex }} />
+                            {!n.read && <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full" style={{ background: light ? '#7c3aed' : '#a78bfa', boxShadow: `0 0 6px ${light ? 'rgba(124,58,237,0.45)' : 'rgba(167,139,250,0.7)'}` }} />}
+                          </span>
+                        ); })()}
                         <span className="min-w-0 flex-1">
                           <span className={cx('block text-xs leading-snug', n.read ? 'text-white/55' : 'text-white/90')}>{n.message}</span>
                           <span className="block mt-0.5 text-[10px] text-white/35">{timeAgo(n.createdAt)}</span>
