@@ -1,7 +1,7 @@
 # Command Center — project guide for Claude
 
 > Orientation file so any future session is instantly up to speed. Last verified against the
-> live DB on **2026-06-26** (latest migration `20260626135949` — invite-as-role: choose member/guest). Public
+> live DB on **2026-06-26** (latest migration `20260626152653` — due-date reminders via pg_cron). Public
 > sign-up is **OPEN** (`SIGNUP_ENABLED = true`). Tenant isolation is proven by rolled-back impersonation
 > tests — **0 cross-tenant leaks** (45 assertions; see *Pre-launch security audit*) — and the
 > **workspace roles** system added since (owner/admin/member/guest) has its own **35/35** rolled-back
@@ -564,6 +564,31 @@ member-caller both rejected), re-run green before apply; advisors clean (only th
 WARN). UI: the Members invite form has a **Member|Guest** toggle (both owner & admin see the same two options
 — invites can't grant owner/admin); `api.invitations.create(ws,email,role)` passes `p_role`.
 
+## Due-date reminders — proactive notifications via pg_cron (2026-06-26)
+
+**Due-date reminders** (`20260626152555`, hardened `…152653`). The first **time-based** notification +
+the project's first **scheduler**. Completes the notification system (was deferred in
+`NOTIFICATIONS_AND_ACTIVITY.md`).
+- **Mechanism:** **`pg_cron` is now ENABLED** (`create extension pg_cron`; it was available but not
+  installed). An **hourly** job `cron.schedule('due-date-reminders','0 * * * *', 'select
+  private._run_due_reminders()')` runs an **in-DB** SECURITY DEFINER function — **no Edge Function / pg_net
+  / HTTP / secrets**. `private._run_due_reminders()` (search_path='', EXECUTE-revoked, like the notify
+  exemplars) notifies the **assignee** when their task is **due within 24h** (`due_soon`) or **past due**
+  (`overdue`), via an atomic updating CTE (`UPDATE … RETURNING → INSERT`). Unassigned tasks are skipped;
+  `actor_id=null`. New `notifications.type` values `due_soon`/`overdue` (type has no CHECK).
+- **Dedupe:** `tasks.due_reminder_stage text default 'none'` (`none → due_soon → overdue`, monotonic) so each
+  fires once, never per-run; a BEFORE UPDATE trigger `reset_due_reminder_stage` resets it to `'none'` when
+  `due_date` changes (reschedule re-arms). All UTC `timestamptz` math (date-only due dates are noon-anchored).
+- **Role/tenant safety = by construction:** a reminder ALWAYS targets the assignee, who can always see their
+  own task (incl. a **guest** assignee → their own reminder); body carries only the title; notifications RLS
+  unchanged (recipient-only). **Proven:** 11/11 rolled-back feasibility proof + a **19/19 cross-tenant
+  isolation re-audit** (0 leaks across every WS-scoped surface incl. the new due-reminder notifications — the
+  45/45 isolation holds). Advisors clean. UI: bell + toast gain glanceable icons (clock=due_soon,
+  alert=overdue); deep-link unchanged (they carry `task_id` → `openTask`). Design doc: `DUE_DATE_REMINDERS.md`.
+- **Manual trigger (no waiting for the hour):** `select private._run_due_reminders();` as the service role
+  (Supabase MCP `execute_sql`) — or inspect the schedule via `select * from cron.job` / runs via
+  `cron.job_run_details`.
+
 ## Roadmap / next
 
 **Public sign-up is now OPEN** (`SIGNUP_ENABLED = true` in `AuthScreen.jsx`). Onboarding routes a
@@ -577,9 +602,10 @@ polish (3B-3), Phase 2 fully (per-member `assignee_id` + independent privacy; le
 1–3, **voice-notes storage scoping** (`20260602041008`), **invitations** (`20260602041903`), **workspace
 slugs** (`20260604102655`), **direct messages** (`20260604125857`/`…130054`), **message edit + soft-delete**
 (`20260626065335`), **workspace roles owner/admin/member/guest** (`20260626103433`/`…103550`), **@mention
-notifications** (`20260626111955`), **guest nav cleanup + the scalable `AssigneeSelect` dropdown** (app), and
-the **per-account Free/Pro packaging realignment** (config only). `members.role` is vestigial for authz.
-**(Current lint baseline: 31 errors / 2 warnings.)**
+notifications** (`20260626111955`), **guest nav cleanup + the scalable `AssigneeSelect` dropdown** (app),
+**invite-as-role** (`20260626135949`), **concurrency-safe subtask checklists** (app), **due-date reminders via
+pg_cron** (`20260626152555`/`…152653`), and the **per-account Free/Pro packaging realignment** (config only).
+`members.role` is vestigial for authz. **(Current lint baseline: 31 errors / 2 warnings.)**
 
 **Invite-as-role is DONE** (`20260626135949`) — an owner/admin picks member/guest at invite time (the
 `invitations_role_check` widen + `p_role` arg on `create_invitation` + the Members invite-form toggle; 6/6
