@@ -3764,6 +3764,23 @@ function ChatView() {
   const presenceKey = currentWorkspaceId ? `chat-presence-${currentWorkspaceId}` : null;
   const { others, signalTyping, stopTyping, signalRecording } = usePresence(presenceKey, userId, myName);
 
+  // Peer typing indicator with the same safety net as the DM thread: it auto-expires 5s after the last
+  // presence update (so a missed "stopped typing" broadcast can't leave it stuck) and is cleared the
+  // moment a message arrives (see the subscription below). Deferred set so it isn't a synchronous
+  // setState in the effect body.
+  const [shownTyping, setShownTyping] = useState('');
+  const typingExpiryRef = useRef(null);
+  useEffect(() => {
+    const label = presenceLabel(others);
+    const t = setTimeout(() => {
+      setShownTyping(label);
+      clearTimeout(typingExpiryRef.current);
+      if (label) typingExpiryRef.current = setTimeout(() => setShownTyping(''), 5000);
+    }, 0);
+    return () => clearTimeout(t);
+  }, [others]);
+  useEffect(() => () => clearTimeout(typingExpiryRef.current), []);
+
   // Sender names from members.
   useEffect(() => {
     let on = true;
@@ -3784,10 +3801,12 @@ function ChatView() {
         if (type === 'UPDATE') return prev.map(m => m.id === message.id ? message : m);
         return prev.some(m => m.id === message.id) ? prev : [...prev, message];
       });
+      // Clear the typing indicator immediately on someone else's message (don't wait for "stopped typing").
+      if (type === 'INSERT' && message.senderId !== userId) setShownTyping('');
       markChatRead();
     }, 'messages-thread', currentWorkspaceId);
     return () => { on = false; unsub(); };
-  }, [markChatRead, currentWorkspaceId]);
+  }, [markChatRead, currentWorkspaceId, userId]);
 
   // Stop any in-flight recording on unmount.
   useEffect(() => () => {
@@ -3898,7 +3917,7 @@ function ChatView() {
         )}
       />
 
-      <TypingStrip label={presenceLabel(others)} />
+      <TypingStrip label={shownTyping} />
 
       <Composer
         placeholder="Message the workspace…  (Enter to send, Shift+Enter for a new line)"
