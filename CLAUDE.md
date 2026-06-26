@@ -1,8 +1,10 @@
 # Command Center — project guide for Claude
 
 > Orientation file so any future session is instantly up to speed. Last verified against the
-> live DB on **2026-06-02** (latest migration `20260602024124`, Bundle 3 — projects
-> create/rename/delete + the `project_task_count` deletion-gate RPC).
+> live DB on **2026-06-26** (latest migration `20260626065335` — message edit + soft-delete). Public
+> sign-up is now **OPEN** (`SIGNUP_ENABLED = true`). A full multi-tenant security audit on **2026-06-26**
+> proved RLS tenant isolation across every table via rolled-back impersonation tests — **0 cross-tenant
+> leaks** (see *Pre-launch security audit* below).
 
 ## What this is
 
@@ -447,6 +449,55 @@ For a true behavior-preservation proof, also run a temporary **second-workspace 
   **always push to GitHub.** Don't leave work uncommitted/unpushed. After a wipe, follow
   **[`RESTORE.md`](RESTORE.md)** to rebuild the local env (toolchain → clone → git TLS fix →
   `npm install` → launch Claude *inside* the repo so `.mcp.json` loads → recreate `.env` → MCP auth).
+
+## Post-Bundle-3 work (the ledger had drifted ahead of this doc — now caught up)
+
+- **Voice-notes storage scoped to the workspace** (`20260602041008`). `voice_notes_select_member` now allows a
+  read only if the object is in the caller's own folder OR referenced by a `messages`/`dm_messages` row in a
+  workspace the caller belongs to / a DM they participate in — closing the old global members-existence gate.
+  (Was "Required before invitations #2"; **DONE**.)
+- **Invitations** (`20260602041903`). `invitations` table (SELECT-only under RLS: an owner sees their
+  workspace's invites, an invitee sees pending invites to their own email) + four sanctioned RPCs
+  (`create_invitation` / `accept_invitation` / `invitation_preview` / `revoke_invitation`, advisor-clean
+  private DEFINER + public INVOKER passthroughs). `create_invitation` is **owner-gated** and always sets
+  `role='member'`; `accept_invitation` is **email-bound** and inserts the `workspace_members` row only for
+  `auth.uid()` (no privilege escalation, no inviting as owner). UI: `InviteScreen.jsx` + `/invite/:token`.
+- **Workspace slugs** (`20260604102655`). `workspaces.slug` (unique) + `private._slugify`; `create_workspace`
+  generates a unique slug; `?ws=` accepts a slug or an id.
+- **Direct messages** (`20260604125857` + `20260604130054` FK indexes). `dm_conversations(user_lo,user_hi)`,
+  `dm_messages`, `dm_reads`, all participant-gated by `private.is_dm_participant`; a conversation is created
+  ONLY by the `get_or_create_dm_conversation` RPC, which enforces BOTH users are members of the workspace (no
+  cross-tenant contact). `messages` + `dm_messages` are REPLICA IDENTITY FULL and in the realtime publication.
+- **Message edit + soft-delete** (`20260626065335`). `edited_at`/`deleted_at` on `messages` + `dm_messages`;
+  the text-or-audio CHECK relaxed for a content-stripped tombstone; `enforce_message_edit_window()` BEFORE
+  UPDATE trigger is the authoritative **10-minute** gate for edit AND soft-delete — stamps the audit cols
+  server-side, strips content on delete, makes a tombstone immutable. App renders "This message was deleted" /
+  "(edited)"; the UI uses **soft-delete only** (hard-delete `remove()` kept but unused). 16-assertion
+  rolled-back proof.
+- **Packaging realignment** (app/config only, no DB). Recurring tasks + bulk import are now **Free**; voice
+  notes are the **Pro** perk; the pricing page leads with Free+Pro (Business de-emphasized into a strip); the
+  billing model reads **per-account** (one subscription covers the owner's workspaces). Everything still
+  resolves to `founding` (all-access), so this is positioning only. **`SIGNUP_ENABLED` is now `true`.**
+
+## Pre-launch security audit (2026-06-26)
+
+Full multi-tenant audit, security-first. **Tenant isolation PROVEN** by rolled-back impersonation tests with
+real cross-tenant actors (a user in workspace `amego` only vs `Command Center`, plus a workspace co-member who
+isn't a DM participant): **23/23** cross-table assertions + **6/6** comments + the **16/16** edit-delete proof
+→ **0 cross-tenant leaks** across tasks, projects, comments, messages, notifications,
+dm_conversations/messages/reads, workspaces, workspace_members, members, AND voice-notes storage; cross-tenant
+writes blocked (`42501`); DM participant isolation holds even inside a shared workspace. The `comments` SELECT
+policy (`EXISTS(SELECT 1 FROM tasks …)`) correctly inherits tasks' RLS (proven, not assumed). RPC DEFINER
+bodies reviewed — all owner/membership/participant-gated; `accept_invitation` email-bound; anon has **no**
+SELECT/INSERT/UPDATE/DELETE on any table. Client: **no XSS sinks** (no `dangerouslySetInnerHTML`; React
+auto-escapes every user string; one static `mailto:` link), only the **anon key** client-side (no
+`service_role`), `.env` gitignored/untracked. **Open items (flagged, not fixed):** (a) every entitlement gate
+is **client-side only** — UX not security, moot under `founding`, must be enforced server-side before real
+paid plans; (b) presence/typing channels are **public Realtime broadcast** (metadata only — name/typing/read
+cursor) → adopt Realtime Authorization (private channels) before scale; (c) **auth dashboard hardening**
+(leaked-password protection, password policy, email-confirm + SMTP, captcha, rate limits) before real traffic.
+Fixed in-pass: workspace-scoped task-reconcile, removed the global-presence footgun default, no-empty catches.
+**(Current lint baseline: 31 errors / 2 warnings.)**
 
 ## Roadmap / next
 
