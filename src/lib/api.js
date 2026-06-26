@@ -163,9 +163,11 @@ export const invitations = {
     if (error) throw error;
     return data || [];
   },
-  /** Owner-only: create (or refresh) the single pending invite for an email. Returns the row incl. token. */
-  async create(workspaceId, email) {
-    const { data, error } = await supabase.rpc('create_invitation', { p_workspace_id: workspaceId, p_email: email });
+  /** Owner+admin: create (or refresh) the single pending invite for an email, at the chosen role
+   *  ('member' | 'guest'; the RPC rejects owner/admin — those are assigned via set_member_role after
+   *  join). Returns the row incl. token. */
+  async create(workspaceId, email, role = 'member') {
+    const { data, error } = await supabase.rpc('create_invitation', { p_workspace_id: workspaceId, p_email: email, p_role: role });
     if (error) throw error;
     return Array.isArray(data) ? data[0] : data;
   },

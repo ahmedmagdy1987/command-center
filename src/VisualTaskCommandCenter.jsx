@@ -4800,6 +4800,7 @@ function MembersView() {
   const [invites, setInvites] = useState([]);
   const [reloadKey, setReloadKey] = useState(0);
   const [email, setEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('member');   // invite-time role: member | guest (owner/admin assigned after join, via set_member_role)
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [lastLink, setLastLink] = useState(null);
@@ -4838,9 +4839,9 @@ function MembersView() {
     if (entitlements.atSeatLimit) { requestUpgrade('seats'); return; }
     setBusy(true); setErr(''); setCopied(false);
     try {
-      const inv = await invitationsApi.create(currentWorkspaceId, v);
+      const inv = await invitationsApi.create(currentWorkspaceId, v, inviteRole);
       const url = inviteUrl(inv.token);
-      setLastLink({ email: inv.email, url });
+      setLastLink({ email: inv.email, url, role: inv.role });
       setEmail('');
       await copy(url);
       reload();
@@ -4887,7 +4888,7 @@ function MembersView() {
         onConfirm={doRemove}
         onClose={() => setRemoveTarget(null)} />
 
-      <Card title="Invite a teammate" subtitle="They'll join as a member. No email is sent automatically — copy the invite link below and share it with them.">
+      <Card title="Invite a teammate" subtitle="Pick whether they join as a full member or a limited guest. No email is sent automatically — copy the invite link below and share it with them.">
         {entitlements.atSeatLimit && (
           <button type="button" onClick={() => requestUpgrade('seats')}
             className="w-full mb-3 flex items-center gap-2 px-3 py-2.5 rounded-xl border border-violet-400/30 bg-violet-500/10 text-left hover:bg-violet-500/15 transition-colors">
@@ -4898,16 +4899,30 @@ function MembersView() {
         )}
         <form onSubmit={submit} className="flex flex-col sm:flex-row gap-2">
           <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="teammate@example.com"
-            className="flex-1 h-9 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white/90 outline-none focus:border-white/25 transition-colors" />
+            className="flex-1 h-9 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white/90 outline-none focus:border-violet-400/50 transition-colors" />
+          <div className="inline-flex shrink-0 rounded-xl border border-white/10 bg-white/5 p-0.5" role="radiogroup" aria-label="Invite as role">
+            {['member', 'guest'].map(r => (
+              <button key={r} type="button" role="radio" aria-checked={inviteRole === r} onClick={() => setInviteRole(r)}
+                className={cx('px-3 h-8 rounded-lg text-xs font-medium capitalize transition-colors',
+                  inviteRole === r ? 'bg-white/10 text-white' : 'text-white/50 hover:text-white/80')}>
+                {r}
+              </button>
+            ))}
+          </div>
           <button type="submit" disabled={busy || !email.trim()}
             className={cx('h-9 px-4 rounded-xl text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors', (busy || !email.trim()) ? 'bg-violet-500/40 cursor-not-allowed' : 'bg-violet-500 hover:bg-violet-400')}>
             <Mail className="w-3.5 h-3.5" />Create invite link
           </button>
         </form>
+        <p className="text-[11px] text-white/40 mt-2">
+          {inviteRole === 'guest'
+            ? 'Guests only see tasks assigned to them + direct messages — good for clients or freelancers. You can change their role later.'
+            : 'Members get full access to this workspace (tasks, chat, projects). You can change their role later.'}
+        </p>
         {err && <p className="text-[11px] text-rose-300 mt-2">{err}</p>}
         {lastLink && (
           <div className="mt-3 p-3 rounded-xl border border-white/10 bg-white/[0.03]">
-            <div className="text-[11px] text-white/50 mb-1.5">{copied ? 'Link copied. ' : ''}Send this to {lastLink.email}:</div>
+            <div className="text-[11px] text-white/50 mb-1.5">{copied ? 'Link copied. ' : ''}Send this to {lastLink.email} — joins as <span className="capitalize text-white/70">{lastLink.role || 'member'}</span>:</div>
             <div className="flex items-center gap-2">
               <code className="flex-1 truncate text-[11px] text-white/70">{lastLink.url}</code>
               <button onClick={() => copy(lastLink.url)} className="shrink-0 text-[11px] px-2 h-7 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">Copy</button>
