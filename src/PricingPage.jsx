@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Check, ArrowRight, Minus, Users, MessagesSquare, Globe } from 'lucide-react';
 import {
-  PLANS, PUBLIC_PLAN_IDS, FEATURE_TABLE, PRICING_COPY, BILLING_CYCLE,
+  PLANS, PUBLIC_PLAN_IDS, MAIN_PLAN_IDS, SECONDARY_PLAN_IDS, FEATURE_TABLE, PRICING_COPY, BILLING_CYCLE,
   monthlyEquivalent, priceFor, annualSavings, formatMoney, formatLimit, formatHistory,
 } from './lib/plans';
 import { SiteHeader, SiteFooter } from './SiteChrome';
@@ -20,7 +20,9 @@ export default function PricingPage({ session }) {
   const navigate = useNavigate();
   const [cycle, setCycle] = useState(BILLING_CYCLE.monthly);
   const annual = cycle === BILLING_CYCLE.annual;
-  const plans = PUBLIC_PLAN_IDS.map(id => PLANS[id]);
+  const plans = PUBLIC_PLAN_IDS.map(id => PLANS[id]);       // all public tiers — the comparison table
+  const mainPlans = MAIN_PLAN_IDS.map(id => PLANS[id]);     // Free + Pro — the primary choice
+  const secondaryPlans = SECONDARY_PLAN_IDS.map(id => PLANS[id]); // Business — de-emphasized strip
 
   const onChoose = (plan) => {
     if (!plan.paid) { navigate(session ? '/' : (plan.ctaTo || '/signup')); return; }
@@ -82,12 +84,32 @@ export default function PricingPage({ session }) {
           </div>
         </div>
 
-        {/* Tier cards */}
-        <section className="grid md:grid-cols-3 gap-5 items-stretch">
-          {plans.map(plan => (
+        {/* Primary choice: Free + Pro, two-up and centered */}
+        <section className="grid md:grid-cols-2 gap-5 items-stretch max-w-3xl mx-auto">
+          {mainPlans.map(plan => (
             <PlanCard key={plan.id} plan={plan} annual={annual} onChoose={() => onChoose(plan)} />
           ))}
         </section>
+
+        {/* Secondary: Business, de-emphasized — full details live in the comparison table below */}
+        {secondaryPlans.map(plan => (
+          <div key={plan.id} className="mt-5 max-w-3xl mx-auto rounded-2xl border border-white/[0.07] bg-white/[0.02] px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <span className="text-base font-semibold font-display">{plan.name}</span>
+                <span className="text-[12px] text-white/45">{plan.tagline}</span>
+              </div>
+              <div className="mt-0.5 text-[12px] text-white/55">
+                <span className="text-white/75 font-medium">{formatMoney(monthlyEquivalent(plan, annual ? BILLING_CYCLE.annual : BILLING_CYCLE.monthly))}/mo</span>
+                {' · '}{plan.highlights.join(' · ')}
+              </div>
+            </div>
+            <button onClick={() => onChoose(plan)}
+              className="shrink-0 h-9 px-4 rounded-xl border border-white/[0.12] bg-white/[0.04] text-xs font-semibold text-white/85 hover:bg-white/[0.08] transition-colors inline-flex items-center justify-center gap-1.5">
+              {plan.cta}<ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ))}
 
         {/* Early-access honesty note */}
         <p className="mt-6 text-center text-[12px] text-white/40 max-w-2xl mx-auto">

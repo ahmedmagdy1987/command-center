@@ -11,13 +11,17 @@ import { PLANS, DEFAULT_PLAN_ID, FEATURE_META } from './plans';
 const KNOWN_PLAN_IDS = new Set(Object.keys(PLANS));
 
 /* -----------------------------------------------------------------------------
-   PLAN-RESOLUTION SEAM  ← the one place that decides which plan a workspace is on.
+   PLAN-RESOLUTION SEAM  ← the one place that decides which plan applies.
 
-   TODAY: every workspace resolves to DEFAULT_PLAN_ID ('founding' — all-access),
+   The billing model is PER-ACCOUNT: one subscription per account (the owner)
+   covers ALL the workspaces that account owns — not a plan per workspace. The
+   `workspaces` limit caps how many workspaces one account may own.
+
+   TODAY: every account resolves to DEFAULT_PLAN_ID ('founding' — all-access),
    so nothing is gated for existing users.
 
-   LATER (the next, backend pass): read the workspace's plan from the DB, e.g.
-       return workspace?.planId ?? 'free';
+   LATER (the next, backend pass): read the account/owner's plan from the DB, e.g.
+       return account?.planId ?? 'free';
    There is NO DB column for this yet — adding one is explicitly out of scope for
    this pass. When it lands, this function is the ONLY thing that changes.
 

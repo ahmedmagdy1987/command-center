@@ -69,13 +69,16 @@ export const PLANS = {
     tagline: 'Get your first team coordinated.',
     price: { monthly: 0, annual: 0 },
     limits: { seats: 3, workspaces: 1, historyDays: 30 },
-    features: { voiceNotes: false, recurringTasks: false, bulkImport: false, prioritySupport: false },
+    // Core task management + onboarding stay FREE so adoption isn't gated: recurring tasks and bulk
+    // import are part of getting set up, not a power-team perk. Voice notes are the Pro upgrade.
+    features: { voiceNotes: false, recurringTasks: true, bulkImport: true, prioritySupport: false },
     cta: 'Start free',
     ctaTo: '/signup',
     highlights: [
       'Up to 3 members',
       '1 workspace',
       'Unlimited tasks across board, priority matrix & schedule',
+      'Recurring tasks & bulk import',
       'Team chat & direct messages',
       '30-day message history',
       'Export your data anytime',
@@ -97,8 +100,6 @@ export const PLANS = {
       'Up to 15 members',
       '3 workspaces',
       'Voice notes in chat & DMs',
-      'Recurring tasks',
-      'Bulk import',
       'Unlimited message history',
     ],
   },
@@ -124,6 +125,16 @@ export const PLANS = {
 // Order + visibility on the pricing page (excludes the hidden `founding` plan).
 export const PUBLIC_PLAN_IDS = ['free', 'pro', 'business'];
 
+// The pricing page leads with Free + Pro as the primary choice; Business is still fully defined
+// (and present in the comparison table) but de-emphasized into a secondary "larger teams" mention.
+export const MAIN_PLAN_IDS = ['free', 'pro'];
+export const SECONDARY_PLAN_IDS = ['business'];
+
+// Billing model: ONE subscription per ACCOUNT (the owner), which covers ALL the workspaces that
+// account owns — NOT a separate plan per workspace. The `workspaces` limit caps how many workspaces
+// one account may own; `seats` caps members within each of those workspaces. (No DB plan column yet;
+// every account resolves to `founding` — see entitlements.js → resolvePlanId.)
+
 // The plan every workspace resolves to right now (see entitlements.js seam).
 export const DEFAULT_PLAN_ID = 'founding';
 
@@ -132,19 +143,11 @@ export const DEFAULT_PLAN_ID = 'founding';
    lever names the cheapest tier that unlocks it so the modal can route there.
 ----------------------------------------------------------------------------- */
 export const FEATURE_META = {
+  // Voice notes are the only power FEATURE behind Pro now (recurring tasks + bulk import moved to
+  // Free). seats/workspaces are the "grows with success" LIMITS that also route here.
   voiceNotes: {
     label: 'Voice notes',
     blurb: 'Record and send voice messages in team chat and direct messages. Great for briefing distributed teammates async.',
-    tier: 'pro',
-  },
-  recurringTasks: {
-    label: 'Recurring tasks',
-    blurb: 'Set a task to repeat on a schedule so routine work never slips.',
-    tier: 'pro',
-  },
-  bulkImport: {
-    label: 'Bulk import',
-    blurb: 'Import tasks in bulk from a JSON backup to migrate work in one move. (Exporting your data is always free.)',
     tier: 'pro',
   },
   seats: {
