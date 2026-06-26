@@ -1053,15 +1053,82 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showOwner 
   );
 }
 
+/** Render text with @mentions lightly highlighted (cosmetic; the mention payload is the uuid[]). */
+function MentionText({ text }) {
+  const s = text || '';
+  if (!s.includes('@')) return s;
+  return String(s).split(/(@[\p{L}\p{N}_]+)/u).map((p, i) =>
+    (p.startsWith('@') && p.length > 1)
+      ? <span key={i} className="text-violet-300 font-medium">{p}</span>
+      : p);
+}
+
+/** A textarea with an inline @-mention picker. As you type `@query`, a dropdown of workspace members
+ *  appears; picking one inserts `@Display Name ` and records the user id. onMentionsChange reports the
+ *  ids whose `@name` is still present in the text (so deleting the name removes the mention). The
+ *  server-side trigger is the real gate — it only notifies a mentioned user who can see the surface. */
+function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onEnter, onTyping, onBlur, rows = 2, placeholder, className, autoFocus, textareaRef }) {
+  const innerRef = useRef(null);
+  const taRef = textareaRef || innerRef;   // share the element with a parent (e.g. the Composer's autosize)
+  const pickedRef = useRef(new Map());   // userId -> displayName, for everyone picked from the dropdown
+  const [menu, setMenu] = useState(null); // { q, at } while an @token is active before the cursor
+  const candidates = (members || []).filter(m => m.userId !== meId);
+
+  const report = (text) => {
+    if (!onMentionsChange) return;
+    const ids = [];
+    for (const [uid, name] of pickedRef.current.entries()) if (name && text.includes('@' + name)) ids.push(uid);
+    onMentionsChange(ids);
+  };
+  const handleChange = (e) => {
+    const text = e.target.value;
+    onChange(text); onTyping?.();
+    const pos = e.target.selectionStart ?? text.length;
+    const m = text.slice(0, pos).match(/(?:^|\s)@([^\s@]*)$/);
+    setMenu(m && candidates.length ? { q: m[1].toLowerCase(), at: pos - m[1].length - 1 } : null);
+    report(text);
+  };
+  const filtered = menu ? candidates.filter(m => (m.displayName || m.email || '').toLowerCase().includes(menu.q)).slice(0, 6) : [];
+  const pick = (mem) => {
+    const name = mem.displayName || mem.email; const ta = taRef.current; const pos = ta?.selectionStart ?? value.length;
+    const next = value.slice(0, menu.at) + '@' + name + ' ' + value.slice(pos);
+    pickedRef.current.set(mem.userId, name); onChange(next); setMenu(null); report(next);
+    requestAnimationFrame(() => { const c = menu.at + name.length + 2; if (ta) { ta.focus(); ta.setSelectionRange(c, c); } });
+  };
+  const onKeyDown = (e) => {
+    if (menu && filtered.length && (e.key === 'Enter' || e.key === 'Tab')) { e.preventDefault(); pick(filtered[0]); return; }
+    if (e.key === 'Escape' && menu) { e.preventDefault(); setMenu(null); return; }
+    if (e.key === 'Enter' && !e.shiftKey && onEnter) { e.preventDefault(); onEnter(); }
+  };
+  return (
+    <div className="relative flex-1 min-w-0">
+      <textarea ref={taRef} value={value} onChange={handleChange} onKeyDown={onKeyDown} onBlur={onBlur}
+        rows={rows} placeholder={placeholder} autoFocus={autoFocus} className={cx(className, 'w-full')} />
+      {menu && filtered.length > 0 && (
+        <div className="absolute z-[55] bottom-full mb-1 left-0 w-56 max-h-44 overflow-y-auto rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1">
+          {filtered.map(m => (
+            <button key={m.userId} type="button" onMouseDown={(ev) => { ev.preventDefault(); pick(m); }}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-white/80 hover:bg-white/5 text-left">
+              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: assigneeColor(m.userId).hex }} />
+              <span className="truncate">{m.displayName || m.email}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* =================================================================================
    TASK MODAL
 ================================================================================= */
 function TaskComments({ taskId }) {
-  const { session, currentWorkspaceId } = useApp();
+  const { session, currentWorkspaceId, members } = useApp();
   const userId = session?.user?.id;
   const [items, setItems] = useState([]);
   const [people, setPeople] = useState({});
   const [text, setText] = useState('');
+  const [mentions, setMentions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editId, setEditId] = useState(null);
   const [editText, setEditText] = useState('');
@@ -1104,9 +1171,10 @@ function TaskComments({ taskId }) {
   const send = async () => {
     const body = text.trim();
     if (!body) return;
-    setText('');
+    const mns = mentions;
+    setText(''); setMentions([]);
     try {
-      const created = await commentsApi.add(taskId, body, currentWorkspaceId);
+      const created = await commentsApi.add(taskId, body, currentWorkspaceId, mns);
       setItems(prev => prev.some(c => c.id === created.id) ? prev : [...prev, created]);
     } catch (err) {
       console.error('Failed to add comment:', err);
@@ -1169,7 +1237,7 @@ function TaskComments({ taskId }) {
                   </div>
                 </div>
               ) : (
-                <div className="text-xs text-white/70 leading-relaxed whitespace-pre-wrap break-words rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2">{c.body}</div>
+                <div className="text-xs text-white/70 leading-relaxed whitespace-pre-wrap break-words rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2"><MentionText text={c.body} /></div>
               )}
             </div>
           );
@@ -1177,10 +1245,9 @@ function TaskComments({ taskId }) {
       </div>
 
       <div className="flex items-end gap-2 mt-3">
-        <textarea value={text} onChange={e => setText(e.target.value)} rows={2}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-          placeholder="Write a comment…  (Enter to send, Shift+Enter for a new line)"
-          className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none" />
+        <MentionTextarea value={text} onChange={setText} onMentionsChange={setMentions} members={members} meId={userId} onEnter={send} rows={2}
+          placeholder="Write a comment…  (@ to mention, Enter to send)"
+          className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none" />
         <button onClick={send} disabled={!text.trim()}
           className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity shrink-0">
           <Send className="w-3.5 h-3.5" />Send
@@ -2042,6 +2109,10 @@ function NotificationBell() {
     if (n.type === 'dm_received' && n.refId) {
       setDmActiveConv(n.refId);
       setView('dms');
+      return;
+    }
+    if (n.type === 'mention' && !n.taskId) {   // a team-chat mention has no task -> open the channel
+      setView('chat');
       return;
     }
     openTask(n.taskId);
@@ -3726,7 +3797,7 @@ function MsgBubble({ m, mine, onDelete, onEdit }) {
       mine ? 'bg-violet-500/20 border-violet-500/25 rounded-tr-sm' : 'bg-white/[0.05] border-white/10 rounded-tl-sm')}>
       {m.body && (
         <div className="text-sm text-white/85 leading-relaxed whitespace-pre-wrap break-words" title={absoluteTime(m.createdAt)}>
-          {m.body}
+          <MentionText text={m.body} />
           {edited && <span className="ml-1.5 text-[10px] text-white/35 not-italic">(edited)</span>}
         </div>
       )}
@@ -3881,23 +3952,24 @@ function TypingStrip({ label }) {
 /** Shared composer: autosizing textarea (1 → ~6 rows), voice button, primary Send, a
  *  recording bar, and a visible send-failure + Retry affordance. Presentational — the view
  *  owns recording + send state and passes handlers down. */
-function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, onStartRecording, onStopRecording, micError, canVoice, onUpgradeVoice, placeholder }) {
+function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, onStartRecording, onStopRecording, micError, canVoice, onUpgradeVoice, placeholder, mentionMembers, meId }) {
   const [text, setText] = useState('');
+  const [mentions, setMentions] = useState([]);
   const [sending, setSending] = useState(false);
   const [failedBody, setFailedBody] = useState('');
   const taRef = useRef(null);
   const autosize = useCallback(() => { const el = taRef.current; if (!el) return; el.style.height = '0px'; const h = Math.min(el.scrollHeight, 140); el.style.height = h + 'px'; el.style.overflowY = el.scrollHeight > 140 ? 'auto' : 'hidden'; }, []);
   useEffect(() => { autosize(); }, [text, autosize]);
 
-  const doSend = async (body) => {
+  const doSend = async (body, mns) => {
     if (!body || sending) return;
     setSending(true);
-    try { await onSubmitText(body); setFailedBody(''); }
+    try { await onSubmitText(body, mns); setFailedBody(''); }
     catch (e) { console.error('Message send failed:', e); setFailedBody(body); }
     finally { setSending(false); }
   };
-  const submit = () => { const body = text.trim(); if (!body) return; setText(''); onStopTyping?.(); doSend(body); };
-  const retry = () => { const body = failedBody; setFailedBody(''); doSend(body); };
+  const submit = () => { const body = text.trim(); if (!body) return; const mns = mentions; setText(''); setMentions([]); onStopTyping?.(); doSend(body, mns); };
+  const retry = () => { const body = failedBody; setFailedBody(''); doSend(body, []); };
 
   return (
     <div className="border-t border-white/10 shrink-0">
@@ -3926,12 +3998,10 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
           </div>
         ) : (
           <div className="flex items-end gap-2">
-            <textarea ref={taRef} value={text} rows={1}
-              onChange={e => { setText(e.target.value); onTyping?.(); }}
-              onBlur={() => onStopTyping?.()}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } }}
+            <MentionTextarea textareaRef={taRef} value={text} onChange={setText} onMentionsChange={setMentions}
+              members={mentionMembers} meId={meId} onEnter={submit} onTyping={onTyping} onBlur={() => onStopTyping?.()} rows={1}
               placeholder={placeholder}
-              className="flex-1 max-h-[140px] bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none overflow-y-hidden leading-relaxed" />
+              className="max-h-[140px] bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none overflow-y-hidden leading-relaxed" />
             <button onClick={() => canVoice ? onStartRecording() : onUpgradeVoice?.()} disabled={sending}
               title={canVoice ? 'Record a voice note' : 'Upgrade to unlock voice notes'}
               className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 disabled:opacity-40 shrink-0">
@@ -3950,7 +4020,7 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
 }
 
 function ChatView() {
-  const { session, markChatRead, currentMember, currentWorkspaceId, requestUpgrade } = useApp();
+  const { session, markChatRead, currentMember, currentWorkspaceId, requestUpgrade, members, meId } = useApp();
   const entitlements = useEntitlements();
   const userId = session?.user?.id;
   const myName = currentMember?.display_name || currentMember?.email || 'You';
@@ -4024,8 +4094,8 @@ function ChatView() {
 
   const nameOf = (id) => (id === userId ? 'You' : (people[id]?.display_name || people[id]?.email || 'Someone'));
 
-  const sendText = async (body) => {
-    const created = await messagesApi.sendText(body, currentWorkspaceId);
+  const sendText = async (body, mentions) => {
+    const created = await messagesApi.sendText(body, currentWorkspaceId, mentions);
     setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
   };
 
@@ -4138,8 +4208,10 @@ function ChatView() {
       <TypingStrip label={shownTyping} />
 
       <Composer
-        placeholder="Message the workspace…  (Enter to send, Shift+Enter for a new line)"
+        placeholder="Message the workspace…  (@ to mention, Enter to send)"
         onSubmitText={sendText}
+        mentionMembers={members}
+        meId={meId}
         onTyping={signalTyping}
         onStopTyping={stopTyping}
         recording={recording}

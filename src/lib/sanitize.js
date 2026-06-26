@@ -148,6 +148,7 @@ export const fromDbComment = (row) => {
     taskId: row.task_id,
     authorId: row.author_id,
     body: row.body,
+    mentions: Array.isArray(row.mentions) ? row.mentions : [],   // user ids @mentioned in this comment
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -166,6 +167,7 @@ export const fromDbMessage = (row) => {
     body: row.body,
     audioPath: row.audio_path,
     audioDuration: row.audio_duration_seconds,
+    mentions: Array.isArray(row.mentions) ? row.mentions : [],   // user ids @mentioned in this message
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     editedAt: row.edited_at,     // non-null once edited; drives the "(edited)" marker

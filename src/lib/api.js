@@ -451,12 +451,14 @@ export const comments = {
     return (data || []).map(fromDbComment);
   },
 
-  /** Add a comment to a task (author = current user; enforced by RLS). */
-  async add(taskId, body, workspaceId) {
+  /** Add a comment to a task (author = current user; enforced by RLS). `mentions` is an array of
+   *  @mentioned user ids; the DB trigger notifies only those who can actually see the task. */
+  async add(taskId, body, workspaceId, mentions) {
     const session = await auth.getSession();
     if (!session) throw new Error('Not authenticated');
     const row = { task_id: taskId, author_id: session.user.id, body };
     if (workspaceId) row.workspace_id = workspaceId;   // must equal the task's workspace (RLS WITH CHECK)
+    if (Array.isArray(mentions) && mentions.length) row.mentions = mentions;
     const { data, error } = await supabase
       .from('comments')
       .insert(row)
@@ -528,11 +530,12 @@ export const messages = {
     return count || 0;
   },
 
-  async sendText(body, workspaceId) {
+  async sendText(body, workspaceId, mentions) {
     const session = await auth.getSession();
     if (!session) throw new Error('Not authenticated');
     const row = { sender_id: session.user.id, body };
     if (workspaceId) row.workspace_id = workspaceId;
+    if (Array.isArray(mentions) && mentions.length) row.mentions = mentions;   // @mentioned user ids (gated by the DB trigger)
     const { data, error } = await supabase
       .from('messages')
       .insert(row)
