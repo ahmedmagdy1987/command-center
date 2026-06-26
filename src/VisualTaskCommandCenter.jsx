@@ -31,6 +31,7 @@ const VIEW_TO_PATH = {
   members: '/members',
 };
 const PATH_TO_VIEW = Object.fromEntries(Object.entries(VIEW_TO_PATH).map(([v, p]) => [p, v]));
+const GUEST_VIEWS = new Set(['mine', 'dms']);   // a Guest's only relevant destinations: own/assigned tasks + DMs
 
 // OS-aware keyboard modifier label. The keydown handler already accepts Ctrl OR Cmd, so only
 // the *displayed* hint needs to differ: ⌘ on macOS, Ctrl elsewhere (Windows/Linux).
@@ -1927,7 +1928,7 @@ function CommandPalette() {
    SIDEBAR
 ================================================================================= */
 function Sidebar() {
-  const { view, setView, tasks, meId, chatUnread, dmUnread, canManageMembers } = useApp();
+  const { view, setView, tasks, meId, chatUnread, dmUnread, canManageMembers, isGuest } = useApp();
 
   const counts = useMemo(() => {
     const open = tasks.filter(t => t.status !== 'done');
@@ -1966,19 +1967,30 @@ function Sidebar() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-        <div className="px-3 pb-2 text-[10px] font-medium uppercase tracking-widest text-white/30">Team</div>
-        {item('dashboard', LayoutDashboard, 'Dashboard')}
-        {item('kanban', KanbanSquare, 'Kanban', counts.all)}
-        {item('matrix', Grid3x3, 'Priority Matrix')}
-        {item('projects', FolderKanban, 'Projects')}
-        {item('schedule', CalendarDays, 'Schedule')}
-        {item('chat', MessageSquare, 'Chat', chatUnread)}
-        {item('dms', MessagesSquare, 'Direct messages', dmUnread)}
-        {canManageMembers && item('members', Users, 'Members')}
+        {isGuest ? (
+          // Guests are scoped to their own/assigned tasks + DMs (they're excluded from team chat,
+          // projects, the board, etc.), so show only those two relevant destinations — no empty views.
+          <>
+            {item('mine', UserCog, 'My Tasks', counts.mine)}
+            {item('dms', MessagesSquare, 'Direct messages', dmUnread)}
+          </>
+        ) : (
+          <>
+            <div className="px-3 pb-2 text-[10px] font-medium uppercase tracking-widest text-white/30">Team</div>
+            {item('dashboard', LayoutDashboard, 'Dashboard')}
+            {item('kanban', KanbanSquare, 'Kanban', counts.all)}
+            {item('matrix', Grid3x3, 'Priority Matrix')}
+            {item('projects', FolderKanban, 'Projects')}
+            {item('schedule', CalendarDays, 'Schedule')}
+            {item('chat', MessageSquare, 'Chat', chatUnread)}
+            {item('dms', MessagesSquare, 'Direct messages', dmUnread)}
+            {canManageMembers && item('members', Users, 'Members')}
 
-        <div className="px-3 pt-5 pb-2 text-[10px] font-medium uppercase tracking-widest text-white/30">My views</div>
-        {item('mine', UserCog, 'My Tasks', counts.mine)}
-        {item('private', Lock, 'Private tasks', counts.private)}
+            <div className="px-3 pt-5 pb-2 text-[10px] font-medium uppercase tracking-widest text-white/30">My views</div>
+            {item('mine', UserCog, 'My Tasks', counts.mine)}
+            {item('private', Lock, 'Private tasks', counts.private)}
+          </>
+        )}
       </div>
 
       <div className="p-3 border-t border-white/5">
@@ -2003,18 +2015,24 @@ function Sidebar() {
    MOBILE TAB BAR
 ================================================================================= */
 function MobileTabs() {
-  const { view, setView, chatUnread, dmUnread, canManageMembers } = useApp();
+  const { view, setView, chatUnread, dmUnread, canManageMembers, isGuest } = useApp();
   const [moreOpen, setMoreOpen] = useState(false);
 
   // 5 thumb-friendly slots: the four most-used destinations + a "More" sheet for the rest. Every
   // destination is reachable (no horizontal scrolling), and Members is included (owner-gated).
-  const primary = [
-    { id: 'dashboard', icon: LayoutDashboard, label: 'Home' },
-    { id: 'kanban',    icon: KanbanSquare,    label: 'Board' },
-    { id: 'mine',      icon: UserCog,         label: 'Tasks' },
-    { id: 'chat',      icon: MessageSquare,   label: 'Chat', badge: chatUnread },
-  ];
-  const more = [
+  // Guests are scoped to My Tasks + DMs only, so they get a clean 2-tab bar and no "More".
+  const primary = isGuest
+    ? [
+        { id: 'mine', icon: UserCog,        label: 'My Tasks' },
+        { id: 'dms',  icon: MessagesSquare, label: 'Direct messages', badge: dmUnread },
+      ]
+    : [
+        { id: 'dashboard', icon: LayoutDashboard, label: 'Home' },
+        { id: 'kanban',    icon: KanbanSquare,    label: 'Board' },
+        { id: 'mine',      icon: UserCog,         label: 'Tasks' },
+        { id: 'chat',      icon: MessageSquare,   label: 'Chat', badge: chatUnread },
+      ];
+  const more = isGuest ? [] : [
     { id: 'matrix',   icon: Grid3x3,        label: 'Priority Matrix' },
     { id: 'projects', icon: FolderKanban,   label: 'Projects' },
     { id: 'schedule', icon: CalendarDays,   label: 'Schedule' },
@@ -2065,13 +2083,15 @@ function MobileTabs() {
               <span className="text-[9px] font-medium tracking-wide">{it.label}</span>
             </button>
           ))}
-          <button onClick={() => setMoreOpen(o => !o)} aria-label="More destinations" aria-expanded={moreOpen}
-            className={cx('relative flex-1 min-w-0 py-2.5 flex flex-col items-center justify-center gap-0.5 transition-colors',
-              moreActive || moreOpen ? 'text-white' : 'text-white/40')}>
-            <MoreHorizontal className="w-5 h-5" />
-            {moreBadge > 0 && <span className="absolute top-1.5 left-1/2 translate-x-2 w-2 h-2 rounded-full bg-rose-500" />}
-            <span className="text-[9px] font-medium tracking-wide">More</span>
-          </button>
+          {more.length > 0 && (
+            <button onClick={() => setMoreOpen(o => !o)} aria-label="More destinations" aria-expanded={moreOpen}
+              className={cx('relative flex-1 min-w-0 py-2.5 flex flex-col items-center justify-center gap-0.5 transition-colors',
+                moreActive || moreOpen ? 'text-white' : 'text-white/40')}>
+              <MoreHorizontal className="w-5 h-5" />
+              {moreBadge > 0 && <span className="absolute top-1.5 left-1/2 translate-x-2 w-2 h-2 rounded-full bg-rose-500" />}
+              <span className="text-[9px] font-medium tracking-wide">More</span>
+            </button>
+          )}
         </div>
       </nav>
     </>
@@ -4973,7 +4993,8 @@ function RedirectToMyTasks() {
 }
 
 function AppShell() {
-  const { view, theme, loading, membershipsLoaded, currentWorkspaceId, onSignOut } = useApp();
+  const { view, theme, loading, membershipsLoaded, currentWorkspaceId, onSignOut, isGuest } = useApp();
+  const location = useLocation();
 
   // Hold the loading state until the per-workspace role is resolved too, so role-aware UI never
   // flashes the wrong role while memberships load (same gating discipline as workspace resolution).
@@ -5002,6 +5023,12 @@ function AppShell() {
         <Route path="*" element={<Navigate to="/onboarding" replace />} />
       </Routes>
     );
+  }
+
+  // A Guest's only relevant destinations are My Tasks + DMs; bounce them off any other view (incl. the
+  // default dashboard, or a typed/bookmarked URL) to My Tasks. Role is resolved by here (membershipsLoaded).
+  if (isGuest && !GUEST_VIEWS.has(view)) {
+    return <Navigate to={`${VIEW_TO_PATH.mine}${location.search}`} replace />;
   }
 
   return (
