@@ -608,7 +608,14 @@ export const messages = {
    * onOthers receives an array of { name, typing, recording } for OTHER people who are
    * currently typing or recording. Returns { update(partial), unsubscribe() }.
    */
-  presence({ userId, name }, onOthers, channelKey = 'chat-presence') {
+  presence({ userId, name }, onOthers, channelKey) {
+    // channelKey MUST be tenant-scoped (e.g. `chat-presence-<workspaceId>` / `dm-presence-<conversationId>`).
+    // Refuse to open a global/unscoped presence channel — an unscoped name is shared across every tenant
+    // (the old `chat-presence` cross-tenant leak). No default: a missing key returns an inert no-op handle.
+    if (!channelKey) {
+      console.warn('[presence] refusing to subscribe without a scoped channelKey');
+      return { update() {}, unsubscribe() {} };
+    }
     let mine = { userId, name: name || 'Someone', typing: false, recording: false, readAt: null };
     const channel = supabase.channel(channelKey, { config: { presence: { key: userId } } });
     const emit = () => {

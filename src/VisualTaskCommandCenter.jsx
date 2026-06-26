@@ -112,11 +112,11 @@ const THEME_KEY = 'visual-command-center:theme';
 const memStore = {};
 const themeStore = {
   get(key) {
-    try { if (typeof localStorage !== 'undefined') return localStorage.getItem(key); } catch {}
+    try { if (typeof localStorage !== 'undefined') return localStorage.getItem(key); } catch { /* ignore */ }
     return memStore[key] || null;
   },
   set(key, val) {
-    try { if (typeof localStorage !== 'undefined') localStorage.setItem(key, val); } catch {}
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem(key, val); } catch { /* ignore */ }
     memStore[key] = val;
   },
 };
@@ -506,9 +506,11 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       await tasksApi.update(id, patch);
     } catch (err) {
       console.error('Update task failed:', err);
-      tasksApi.list().then(setTasks).catch(() => {});
+      // Reconcile within the CURRENT workspace only — a bare list() would pull tasks from every
+      // workspace the user belongs to into the active view (RLS-safe, but wrong scope on screen).
+      tasksApi.list(currentWorkspaceId).then(setTasks).catch(() => {});
     }
-  }, []);
+  }, [currentWorkspaceId]);
 
   // Two-phase delete: fade/slide the card out (~180ms), then remove + persist. Reduced-motion -> immediate.
   const deleteTask = useCallback((id) => {
