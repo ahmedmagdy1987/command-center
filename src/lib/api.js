@@ -263,6 +263,16 @@ export const tasks = {
     return fromDbTask(data);
   },
 
+  /** Read JUST the freshest subtasks array for a task (RLS-gated). Used to merge a single checklist
+   *  change against current DB state so a concurrent edit to another item isn't clobbered. Throws if the
+   *  task isn't visible (so we never persist a from-scratch array over a row we couldn't read). */
+  async getSubtasks(id) {
+    const { data, error } = await supabase.from('tasks').select('subtasks').eq('id', id).maybeSingle();
+    if (error) throw error;
+    if (!data) throw new Error('Task not found or not visible');
+    return Array.isArray(data.subtasks) ? data.subtasks : [];
+  },
+
   async create(partial, workspaceId) {
     const session = await auth.getSession();
     if (!session) throw new Error('Not authenticated');

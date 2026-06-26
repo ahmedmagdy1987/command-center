@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   LayoutDashboard, KanbanSquare, Grid3x3, FolderKanban, CalendarDays, Lock, UserCog,
   Plus, Search, Command, Settings, Sun, Moon, Download, Upload, RefreshCw, X, Check, CheckCheck,
-  Clock, AlertCircle, Flag, Tag, Link2, Trash2, Copy, Archive, ChevronRight, ChevronDown,
+  Clock, AlertCircle, Flag, Tag, Link2, Trash2, Copy, Archive, ChevronRight, ChevronDown, ChevronUp,
   Circle, CheckCircle2, Calendar, Zap, Timer, MoreHorizontal, Edit3, Filter,
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
   Brain, Target, Hourglass, GripVertical, Info, Keyboard, LogOut, Wifi, WifiOff, Loader2,
@@ -576,12 +576,54 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     }
   }, [tasks, currentWorkspaceId]);
 
-  const toggleSubtask = useCallback(async (taskId, subId) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-    const newSubs = task.subtasks.map(s => s.id === subId ? { ...s, done: !s.done } : s);
-    await updateTask(taskId, { subtasks: newSubs });
-  }, [tasks, updateTask]);
+  // All checklist mutations funnel through here. To avoid the lost-update CLOBBER (two people editing
+  // different items on the same shared task, or acting on a stale local snapshot), we never rewrite the
+  // whole array from local state: we re-read the FRESHEST subtasks from the DB and re-apply the SAME
+  // by-id change to that, so a concurrent change to a DIFFERENT item — already committed — is preserved.
+  // Local state + the open modal snapshot update optimistically for instant feedback, then reconcile to
+  // the merged result. (`mutate` must be a pure by-id transform so re-applying it to fresh data is safe.)
+  const mutateSubtasks = useCallback(async (taskId, mutate) => {
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, subtasks: mutate(t.subtasks || []) } : t));
+    setEditingTask(et => (et && et.id === taskId ? { ...et, subtasks: mutate(et.subtasks || []) } : et));
+    try {
+      const fresh = await tasksApi.getSubtasks(taskId);   // current DB array, not our (possibly stale) snapshot
+      const merged = mutate(fresh);                        // re-apply the by-id change to the freshest data
+      await tasksApi.update(taskId, { subtasks: merged });
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, subtasks: merged } : t));
+      setEditingTask(et => (et && et.id === taskId ? { ...et, subtasks: merged } : et));
+    } catch (err) {
+      console.error('Subtask update failed:', err);
+      tasksApi.list(currentWorkspaceId).then(setTasks).catch(() => {});   // reconcile to server on failure
+    }
+  }, [currentWorkspaceId]);
+
+  const toggleSubtask = useCallback((taskId, subId) =>
+    mutateSubtasks(taskId, subs => subs.map(s => s.id === subId ? { ...s, done: !s.done } : s)),
+  [mutateSubtasks]);
+
+  const addSubtask = useCallback((taskId, title) => {
+    const clean = (title || '').trim();
+    if (!clean) return undefined;
+    const item = { id: uid(), title: clean, done: false };   // created ONCE so the id is stable across re-applies
+    return mutateSubtasks(taskId, subs => [...subs, item]);
+  }, [mutateSubtasks]);
+
+  const removeSubtask = useCallback((taskId, subId) =>
+    mutateSubtasks(taskId, subs => subs.filter(s => s.id !== subId)),
+  [mutateSubtasks]);
+
+  // Reorder by id against the FRESH order, so a concurrent add/remove can't scramble the move.
+  const moveSubtask = useCallback((taskId, subId, dir) =>
+    mutateSubtasks(taskId, subs => {
+      const i = subs.findIndex(s => s.id === subId);
+      if (i < 0) return subs;
+      const j = i + dir;
+      if (j < 0 || j >= subs.length) return subs;
+      const next = subs.slice();
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    }),
+  [mutateSubtasks]);
 
   const exportJSON = () => {
     const blob = new Blob([JSON.stringify({ tasks, projects, exportedAt: nowISO() }, null, 2)], { type: 'application/json' });
@@ -746,7 +788,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     members, meId: userId, resolveAssignee, refreshMembers,
     setTheme, setView, setFilters, setCompact, setDraggedId,
     setPaletteOpen, setQuickAddOpen, setEditingTask,
-    addTask, updateTask, deleteTask, duplicateTask, toggleSubtask,
+    addTask, updateTask, deleteTask, duplicateTask, toggleSubtask, addSubtask, removeSubtask, moveSubtask,
     createProject, renameProject, deleteProject, exitingProjectIds,
     pendingInvites, acceptInvitation, refreshInvites,
     startDraftTask, closeEditing, exitingIds, creatorLabel,
@@ -1287,7 +1329,7 @@ function TaskComments({ taskId }) {
 }
 
 function TaskModal() {
-  const { editingTask, setEditingTask, updateTask, deleteTask, duplicateTask, projects, toggleSubtask, members, meId, resolveAssignee, closeEditing, creatorLabel, requestUpgrade } = useApp();
+  const { editingTask, setEditingTask, updateTask, deleteTask, duplicateTask, projects, toggleSubtask, addSubtask, removeSubtask, moveSubtask, members, meId, isOwner, isAdmin, resolveAssignee, closeEditing, creatorLabel, requestUpgrade } = useApp();
   const entitlements = useEntitlements();
   const t = editingTask;
   const [newSub, setNewSub] = useState('');
@@ -1297,16 +1339,16 @@ function TaskModal() {
 
   if (!t) return null;
   const set = (patch) => { updateTask(t.id, patch); setEditingTask({ ...t, ...patch }); };
-  const addSubtask = () => {
-    if (!newSub.trim()) return;
-    const sub = { id: uid(), title: newSub.trim(), done: false };
-    set({ subtasks: [...t.subtasks, sub] });
-    setNewSub('');
-  };
-  const removeSub = (id) => set({ subtasks: t.subtasks.filter(s => s.id !== id) });
-  const toggleSub = (id) => { toggleSubtask(t.id, id); setEditingTask({ ...t, subtasks: t.subtasks.map(s => s.id === id ? {...s, done:!s.done} : s) }); };
+  // Checklist editing follows the TASK edit rule: admin/owner can edit any task; member/guest only their
+  // own/assigned. On a task you can see but can't edit, the checklist renders read-only. (RLS is the real
+  // gate — this just keeps the UI honest.) The mutations themselves go through the provider's fresh-read-
+  // merge helpers (addSubtask/toggleSubtask/removeSubtask/moveSubtask) so concurrent edits don't clobber.
+  const canEditTask = isOwner || isAdmin || t.createdBy === meId || t.assigneeId === meId;
+  const submitSub = () => { const v = newSub.trim(); if (!v) return; addSubtask(t.id, v); setNewSub(''); };
 
   const priority = PRIORITIES[t.priority];
+  const assignee = resolveAssignee(t.assigneeId);
+  const doneSub = t.subtasks.filter(s => s.done).length;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center p-0 sm:p-6 animate-[fadeIn_.15s_ease]" onClick={closeEditing}>
@@ -1397,28 +1439,45 @@ function TaskModal() {
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <div className="text-[10px] font-medium uppercase tracking-widest text-white/40">Subtasks</div>
-              {t.subtasks.length > 0 && <div className="text-[10px] text-white/40 font-medium">{t.subtasks.filter(s=>s.done).length}/{t.subtasks.length}</div>}
+              <div className="text-[10px] font-medium uppercase tracking-widest text-white/40">Checklist</div>
+              {t.subtasks.length > 0 && <div className="text-[10px] text-white/40 font-medium tabular-nums">{doneSub}/{t.subtasks.length} done</div>}
             </div>
+            {t.subtasks.length > 0 && (
+              <div className="h-1 bg-white/5 rounded-full overflow-hidden mb-2.5">
+                <div className="h-full rounded-full transition-all duration-300" style={{ width: `${(doneSub / t.subtasks.length) * 100}%`, background: `linear-gradient(90deg, ${priority.hex}, ${assignee.hex})` }} />
+              </div>
+            )}
             <div className="space-y-1.5">
-              {t.subtasks.map(s => (
+              {t.subtasks.map((s, i) => (
                 <div key={s.id} className="flex items-center gap-2 group">
-                  <button onClick={() => toggleSub(s.id)} className="shrink-0 w-4 h-4 rounded border-2 flex items-center justify-center transition-all"
+                  <button onClick={() => canEditTask && toggleSubtask(t.id, s.id)} disabled={!canEditTask} aria-pressed={s.done}
+                    className={cx('shrink-0 w-4 h-4 rounded border-2 flex items-center justify-center transition-all', !canEditTask && 'cursor-default')}
                     style={{ borderColor: s.done ? priority.hex : 'rgba(255,255,255,0.2)', background: s.done ? priority.hex : 'transparent' }}>
                     {s.done && <Check className="w-2.5 h-2.5 text-black" strokeWidth={3} />}
                   </button>
                   <div className={cx('flex-1 text-sm', s.done ? 'text-white/40 line-through' : 'text-white/85')}>{s.title}</div>
-                  <button onClick={() => removeSub(s.id)} className="opacity-0 group-hover:opacity-100 text-white/30 hover:text-rose-400 transition-opacity">
-                    <X className="w-3.5 h-3.5" />
-                  </button>
+                  {canEditTask && (
+                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      <button onClick={() => moveSubtask(t.id, s.id, -1)} disabled={i === 0} aria-label="Move item up"
+                        className="text-white/30 hover:text-white/70 disabled:opacity-20 disabled:cursor-default transition-colors"><ChevronUp className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => moveSubtask(t.id, s.id, 1)} disabled={i === t.subtasks.length - 1} aria-label="Move item down"
+                        className="text-white/30 hover:text-white/70 disabled:opacity-20 disabled:cursor-default transition-colors"><ChevronDown className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => removeSubtask(t.id, s.id)} aria-label="Delete item"
+                        className="ml-0.5 text-white/30 hover:text-rose-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                  )}
                 </div>
               ))}
-              <div className="flex gap-2 pt-1">
-                <input value={newSub} onChange={e => setNewSub(e.target.value)} onKeyDown={e => e.key === 'Enter' && addSubtask()}
-                  placeholder="Add subtask…"
-                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white/90 outline-none focus:border-white/25" />
-                <button onClick={addSubtask} className="px-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white/70 text-sm">Add</button>
-              </div>
+              {canEditTask ? (
+                <div className="flex gap-2 pt-1">
+                  <input value={newSub} onChange={e => setNewSub(e.target.value)} onKeyDown={e => e.key === 'Enter' && submitSub()}
+                    placeholder="Add checklist item…"
+                    className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white/90 outline-none focus:border-violet-400/50" />
+                  <button onClick={submitSub} className="px-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white/70 text-sm">Add</button>
+                </div>
+              ) : t.subtasks.length === 0 && (
+                <div className="text-xs text-white/30 italic">No checklist items.</div>
+              )}
             </div>
           </div>
 
