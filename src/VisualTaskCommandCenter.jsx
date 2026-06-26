@@ -108,6 +108,7 @@ const EFFORTS = {
 };
 
 const THEME_KEY = 'visual-command-center:theme';
+const FIRST_RUN_HINTS_KEY = 'cc:firstRunHintsDismissed';   // persists the "dismiss starter hints" choice
 
 const memStore = {};
 const themeStore = {
@@ -1812,34 +1813,78 @@ function Sidebar() {
    MOBILE TAB BAR
 ================================================================================= */
 function MobileTabs() {
-  const { view, setView, chatUnread, dmUnread } = useApp();
-  const items = [
+  const { view, setView, chatUnread, dmUnread, isOwner } = useApp();
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  // 5 thumb-friendly slots: the four most-used destinations + a "More" sheet for the rest. Every
+  // destination is reachable (no horizontal scrolling), and Members is included (owner-gated).
+  const primary = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Home' },
     { id: 'kanban',    icon: KanbanSquare,    label: 'Board' },
-    { id: 'matrix',    icon: Grid3x3,         label: 'Matrix' },
-    { id: 'projects',  icon: FolderKanban,    label: 'Projects' },
-    { id: 'schedule',  icon: CalendarDays,    label: 'Plan' },
-    { id: 'mine',      icon: UserCog,         label: 'Mine' },
-    { id: 'private',   icon: Lock,            label: 'Private' },
+    { id: 'mine',      icon: UserCog,         label: 'Tasks' },
     { id: 'chat',      icon: MessageSquare,   label: 'Chat', badge: chatUnread },
-    { id: 'dms',       icon: MessagesSquare,  label: 'DMs',  badge: dmUnread },
   ];
+  const more = [
+    { id: 'matrix',   icon: Grid3x3,        label: 'Priority Matrix' },
+    { id: 'projects', icon: FolderKanban,   label: 'Projects' },
+    { id: 'schedule', icon: CalendarDays,   label: 'Schedule' },
+    { id: 'private',  icon: Lock,           label: 'Private tasks' },
+    { id: 'dms',      icon: MessagesSquare, label: 'Direct messages', badge: dmUnread },
+    ...(isOwner ? [{ id: 'members', icon: Users, label: 'Members' }] : []),
+  ];
+  const moreActive = more.some(m => m.id === view);
+  const moreBadge = more.reduce((n, m) => n + (m.badge || 0), 0);   // dot on "More" when a hidden item has unread
+  const go = (id) => { setView(id); setMoreOpen(false); };
+
   return (
-    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 border-t border-white/5 bg-[#0a0b11]/95 backdrop-blur">
-      <div className="flex overflow-x-auto no-scrollbar">
-        {items.map(it => (
-          <button key={it.id} onClick={() => setView(it.id)}
-            className={cx('relative flex-1 min-w-[64px] py-2.5 flex flex-col items-center justify-center gap-0.5 transition-colors',
-              view === it.id ? 'text-white' : 'text-white/40')}>
-            <it.icon className="w-5 h-5" />
-            {it.badge > 0 && (
-              <span className="absolute top-1.5 left-1/2 translate-x-2 min-w-[14px] h-3.5 px-1 rounded-full bg-rose-500 text-rose-50 text-[8px] font-bold leading-none flex items-center justify-center">{it.badge > 9 ? '9+' : it.badge}</span>
-            )}
-            <span className="text-[9px] font-medium tracking-wide">{it.label}</span>
+    <>
+      {moreOpen && createPortal(
+        <div className="lg:hidden fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label="More destinations">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setMoreOpen(false)} />
+          <div className="absolute bottom-0 left-0 right-0 rounded-t-2xl border-t border-white/10 bg-[#0f1017] pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-2xl" style={{ animation: 'slideUp .18s ease' }}>
+            <div className="mx-auto mb-1 h-1 w-9 rounded-full bg-white/15" />
+            <div className="px-4 py-2 text-[10px] font-medium uppercase tracking-widest text-white/35">More</div>
+            <div className="px-2 pb-1">
+              {more.map(it => (
+                <button key={it.id} onClick={() => go(it.id)}
+                  className={cx('w-full flex items-center gap-3 px-3 h-12 rounded-xl text-left transition-colors',
+                    view === it.id ? 'bg-white/[0.08] text-white' : 'text-white/70 hover:bg-white/[0.04]')}>
+                  <it.icon className="w-4 h-4 shrink-0" />
+                  <span className="flex-1 text-sm font-medium">{it.label}</span>
+                  {it.badge > 0 && (
+                    <span className="min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-rose-50 text-[9px] font-bold leading-none flex items-center justify-center">{it.badge > 9 ? '9+' : it.badge}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 border-t border-white/5 bg-[#0a0b11]/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
+        <div className="flex">
+          {primary.map(it => (
+            <button key={it.id} onClick={() => go(it.id)}
+              className={cx('relative flex-1 min-w-0 py-2.5 flex flex-col items-center justify-center gap-0.5 transition-colors',
+                view === it.id ? 'text-white' : 'text-white/40')}>
+              <it.icon className="w-5 h-5" />
+              {it.badge > 0 && (
+                <span className="absolute top-1.5 left-1/2 translate-x-2 min-w-[14px] h-3.5 px-1 rounded-full bg-rose-500 text-rose-50 text-[8px] font-bold leading-none flex items-center justify-center">{it.badge > 9 ? '9+' : it.badge}</span>
+              )}
+              <span className="text-[9px] font-medium tracking-wide">{it.label}</span>
+            </button>
+          ))}
+          <button onClick={() => setMoreOpen(o => !o)} aria-label="More destinations" aria-expanded={moreOpen}
+            className={cx('relative flex-1 min-w-0 py-2.5 flex flex-col items-center justify-center gap-0.5 transition-colors',
+              moreActive || moreOpen ? 'text-white' : 'text-white/40')}>
+            <MoreHorizontal className="w-5 h-5" />
+            {moreBadge > 0 && <span className="absolute top-1.5 left-1/2 translate-x-2 w-2 h-2 rounded-full bg-rose-500" />}
+            <span className="text-[9px] font-medium tracking-wide">More</span>
           </button>
-        ))}
-      </div>
-    </nav>
+        </div>
+      </nav>
+    </>
   );
 }
 
@@ -2612,6 +2657,18 @@ function Card({ children, className, title, subtitle, action, accent }) {
 function DashboardView() {
   const { tasks, projects, setEditingTask, setView, meId } = useApp();
 
+  // First run: an empty workspace gets a welcome + a clear "create your first task" path, not a wall
+  // of empty cards. (The witty empty states below are kept for steady-state — a bucket clear because
+  // you're on top of things, never genuinely-new-and-empty.)
+  if (tasks.length === 0) {
+    return (
+      <div className="space-y-6">
+        <ViewHeader title="Dashboard" subtitle="Your team's command center — tasks, priorities, and messages in one place." accent={new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric'})} />
+        <FirstRunPanel />
+      </div>
+    );
+  }
+
   const open = tasks.filter(t => t.status !== 'done');
   const ranked = [...open].map(t => ({ t, s: getNextBestScore(t, projects) })).sort((a,b) => b.s - a.s);
   const top3 = ranked.slice(0, 3);
@@ -2788,13 +2845,71 @@ function MiniRow({ task, onClick, showBlocked, showTime }) {
     </button>
   );
 }
-function EmptyState({ icon: Icon, text }) {
+function EmptyState({ icon: Icon, title, text, action }) {
   return (
     <div className="flex flex-col items-center justify-center py-6 text-center">
       <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center mb-2">
         <Icon className="w-4 h-4 text-white/40" />
       </div>
+      {title && <div className="text-sm font-medium text-white/80 mb-0.5">{title}</div>}
       <div className="text-xs text-white/40">{text}</div>
+      {action && <div className="mt-3">{action}</div>}
+    </div>
+  );
+}
+
+/* First-run welcome — shown on the Dashboard and the Board when the workspace has zero tasks, so a
+   brand-new user gets one obvious action (create a task) instead of a wall of empty cards. The
+   starter hints are lightweight + dismissible (persisted), never a blocking wizard. */
+function FirstRunPanel() {
+  const { setQuickAddOpen, setView, isOwner } = useApp();
+  const [hintsOff, setHintsOff] = useState(() => themeStore.get(FIRST_RUN_HINTS_KEY) === '1');
+  const dismissHints = () => { themeStore.set(FIRST_RUN_HINTS_KEY, '1'); setHintsOff(true); };
+  const hints = [
+    isOwner && { icon: Users, label: 'Invite a teammate', desc: 'Share this workspace with your team.', cta: 'Open Members', go: () => setView('members') },
+    { icon: KanbanSquare, label: 'Explore your views', desc: 'Board, Priority Matrix, and Schedule.', cta: 'Open the board', go: () => setView('kanban') },
+    { icon: MessageSquare, label: 'Start a conversation', desc: 'Team chat and direct messages.', cta: 'Open chat', go: () => setView('chat') },
+  ].filter(Boolean);
+  return (
+    <div className="relative rounded-3xl border border-white/[0.07] bg-gradient-to-br from-violet-500/[0.10] via-fuchsia-500/[0.05] to-transparent p-6 sm:p-8 overflow-hidden">
+      <div className="absolute top-0 right-0 w-72 h-72 rounded-full bg-violet-500/10 blur-3xl pointer-events-none" />
+      <div className="relative max-w-xl">
+        <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/25 mb-4">
+          <Sparkles className="w-5 h-5 text-white" />
+        </div>
+        <h2 className="text-2xl font-semibold text-white font-display tracking-tight">Welcome to Command Center</h2>
+        <p className="mt-2 text-sm text-white/60 leading-relaxed">
+          One shared place for who’s doing what — tasks, a board, and your schedule, plus team chat and
+          direct messages. Start by adding your first task.
+        </p>
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <button onClick={() => setQuickAddOpen(true)}
+            className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-white text-black text-sm font-semibold hover:bg-white/90 transition-colors">
+            <Plus className="w-4 h-4" />Create your first task
+          </button>
+          <span className="text-[11px] text-white/35">or press <kbd className="px-1.5 py-0.5 rounded bg-white/10 border border-white/10 font-medium text-white/55">N</kbd></span>
+        </div>
+
+        {!hintsOff && (
+          <div className="mt-7">
+            <div className="flex items-center justify-between mb-2.5">
+              <div className="text-[10px] font-medium uppercase tracking-widest text-white/35">A few things to try</div>
+              <button onClick={dismissHints} className="text-[11px] text-white/35 hover:text-white/70 transition-colors">Dismiss</button>
+            </div>
+            <div className="grid sm:grid-cols-3 gap-2.5">
+              {hints.map(h => (
+                <button key={h.label} onClick={h.go}
+                  className="text-left rounded-2xl border border-white/[0.07] bg-white/[0.02] p-3.5 hover:bg-white/[0.05] hover:border-white/15 transition-colors group">
+                  <h.icon className="w-4 h-4 text-violet-300 mb-2" />
+                  <div className="text-[13px] font-medium text-white/85">{h.label}</div>
+                  <div className="text-[11px] text-white/45 mt-0.5 leading-snug">{h.desc}</div>
+                  <div className="mt-2 text-[11px] font-medium text-violet-300/80 inline-flex items-center gap-0.5 group-hover:text-violet-200">{h.cta}<ChevronRight className="w-3 h-3" /></div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -2830,11 +2945,15 @@ function KanbanView() {
   return (
     <div className="space-y-4">
       <ViewHeader title="Kanban board" subtitle="Drag between columns. Priority color on the left, assignee chip on the right." />
-      <div className="flex gap-3 overflow-x-auto pb-4 -mx-4 lg:-mx-6 px-4 lg:px-6 snap-x">
-        {Object.values(STATUSES).filter(col => col.id !== 'scheduled').map(col => (
-          <KanbanColumn key={col.id} column={col} tasks={byStatus[col.id] || []} />
-        ))}
-      </div>
+      {tasks.length === 0 ? (
+        <FirstRunPanel />
+      ) : (
+        <div className="flex gap-3 overflow-x-auto pb-4 -mx-4 lg:-mx-6 px-4 lg:px-6 snap-x">
+          {Object.values(STATUSES).filter(col => col.id !== 'scheduled').map(col => (
+            <KanbanColumn key={col.id} column={col} tasks={byStatus[col.id] || []} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -3186,6 +3305,17 @@ function ProjectsView() {
           </button>
         )}
       </div>
+      {projects.length === 0 && (
+        <Card>
+          <EmptyState icon={FolderKanban} title="No projects yet"
+            text="Projects group your tasks by where they live — a client, an area, a workstream."
+            action={canManage ? (
+              <button onClick={() => setCreateOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-white text-black text-xs font-semibold hover:bg-white/90 transition-colors">
+                <Plus className="w-3.5 h-3.5" />New project
+              </button>
+            ) : null} />
+        </Card>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {projects.map(p => {
           const pTasks = filtered.filter(t => t.project === p.id);
