@@ -211,6 +211,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   // All members of the CURRENT workspace ([{userId, displayName, email, role}]) — for the assignee
   // picker + member-aware views/labels. Loaded per workspace via the workspace_members_list RPC.
   const [members, setMembers] = useState([]);
+  const [membersReloadKey, setMembersReloadKey] = useState(0);   // bump to re-fetch the roster (after a role change)
   // Tasks mid-exit-animation (id present -> the card renders its fade/slide-out before actual removal).
   const [exitingIds, setExitingIds] = useState(() => new Set());
   // Project cards mid-exit-animation (same two-phase pattern as tasks).
@@ -387,7 +388,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     // Clear on switch/unmount so a workspace change can't briefly show the prior workspace's roster
     // (mirrors the tasks/projects reset in the data-load effect).
     return () => { on = false; setMembers([]); };
-  }, [currentWorkspaceId]);
+  }, [currentWorkspaceId, membersReloadKey]);
 
   useEffect(() => {
     if (!currentWorkspaceId) return;
@@ -675,7 +676,17 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     [memberships, currentWorkspaceId],
   );
   const isOwner = myRole === 'owner';
+  const isAdmin = myRole === 'admin';
   const isMember = myRole === 'member';
+  const isGuest = myRole === 'guest';
+  const canManageMembers = isOwner || isAdmin;   // owner+admin manage members/invites/roles
+
+  // Reload the current workspace's roster (after a role change / removal) AND the caller's own
+  // memberships (so myRole / canManageMembers update if they changed their own role).
+  const refreshMembers = useCallback(async () => {
+    setMembersReloadKey(k => k + 1);
+    try { setMemberships(await workspaceMembersApi.listMine()); } catch (e) { console.error('refresh memberships failed:', e); }
+  }, []);
 
   // Resolve an assignee id -> { id, label, hex, soft, initials } for chips/labels. 'Me' for self,
   // 'Unassigned' (neutral) for null, display name otherwise. Color is deterministic per user id.
@@ -729,9 +740,9 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   const value = {
     tasks, projects, theme, view, filters, compact, draggedId,
     paletteOpen, quickAddOpen, editingTask,
-    loading, membershipsLoaded, syncStatus, session, currentMember, isMember, isOwner, myRole, onSignOut,
+    loading, membershipsLoaded, syncStatus, session, currentMember, isMember, isOwner, isAdmin, isGuest, canManageMembers, myRole, onSignOut,
     workspaces, currentWorkspaceId, switchWorkspace, createWorkspace,
-    members, meId: userId, resolveAssignee,
+    members, meId: userId, resolveAssignee, refreshMembers,
     setTheme, setView, setFilters, setCompact, setDraggedId,
     setPaletteOpen, setQuickAddOpen, setEditingTask,
     addTask, updateTask, deleteTask, duplicateTask, toggleSubtask,
@@ -1737,7 +1748,7 @@ function CommandPalette() {
    SIDEBAR
 ================================================================================= */
 function Sidebar() {
-  const { view, setView, tasks, meId, chatUnread, dmUnread, isOwner } = useApp();
+  const { view, setView, tasks, meId, chatUnread, dmUnread, canManageMembers } = useApp();
 
   const counts = useMemo(() => {
     const open = tasks.filter(t => t.status !== 'done');
@@ -1784,7 +1795,7 @@ function Sidebar() {
         {item('schedule', CalendarDays, 'Schedule')}
         {item('chat', MessageSquare, 'Chat', chatUnread)}
         {item('dms', MessagesSquare, 'Direct messages', dmUnread)}
-        {isOwner && item('members', Users, 'Members')}
+        {canManageMembers && item('members', Users, 'Members')}
 
         <div className="px-3 pt-5 pb-2 text-[10px] font-medium uppercase tracking-widest text-white/30">My views</div>
         {item('mine', UserCog, 'My Tasks', counts.mine)}
@@ -1813,7 +1824,7 @@ function Sidebar() {
    MOBILE TAB BAR
 ================================================================================= */
 function MobileTabs() {
-  const { view, setView, chatUnread, dmUnread, isOwner } = useApp();
+  const { view, setView, chatUnread, dmUnread, canManageMembers } = useApp();
   const [moreOpen, setMoreOpen] = useState(false);
 
   // 5 thumb-friendly slots: the four most-used destinations + a "More" sheet for the rest. Every
@@ -1830,7 +1841,7 @@ function MobileTabs() {
     { id: 'schedule', icon: CalendarDays,   label: 'Schedule' },
     { id: 'private',  icon: Lock,           label: 'Private tasks' },
     { id: 'dms',      icon: MessagesSquare, label: 'Direct messages', badge: dmUnread },
-    ...(isOwner ? [{ id: 'members', icon: Users, label: 'Members' }] : []),
+    ...(canManageMembers ? [{ id: 'members', icon: Users, label: 'Members' }] : []),
   ];
   const moreActive = more.some(m => m.id === view);
   const moreBadge = more.reduce((n, m) => n + (m.badge || 0), 0);   // dot on "More" when a hidden item has unread
@@ -2862,11 +2873,11 @@ function EmptyState({ icon: Icon, title, text, action }) {
    brand-new user gets one obvious action (create a task) instead of a wall of empty cards. The
    starter hints are lightweight + dismissible (persisted), never a blocking wizard. */
 function FirstRunPanel() {
-  const { setQuickAddOpen, setView, isOwner } = useApp();
+  const { setQuickAddOpen, setView, canManageMembers } = useApp();
   const [hintsOff, setHintsOff] = useState(() => themeStore.get(FIRST_RUN_HINTS_KEY) === '1');
   const dismissHints = () => { themeStore.set(FIRST_RUN_HINTS_KEY, '1'); setHintsOff(true); };
   const hints = [
-    isOwner && { icon: Users, label: 'Invite a teammate', desc: 'Share this workspace with your team.', cta: 'Open Members', go: () => setView('members') },
+    canManageMembers && { icon: Users, label: 'Invite a teammate', desc: 'Share this workspace with your team.', cta: 'Open Members', go: () => setView('members') },
     { icon: KanbanSquare, label: 'Explore your views', desc: 'Board, Priority Matrix, and Schedule.', cta: 'Open the board', go: () => setView('kanban') },
     { icon: MessageSquare, label: 'Start a conversation', desc: 'Team chat and direct messages.', cta: 'Open chat', go: () => setView('chat') },
   ].filter(Boolean);
@@ -4580,7 +4591,7 @@ function OnboardingScreen({ theme, onSignOut }) {
    MEMBERS VIEW (owner-only) — roster + invite-by-email (copy-link) + pending invites
 ================================================================================= */
 function MembersView() {
-  const { currentWorkspaceId, isOwner, membershipsLoaded, members, meId, startDm, requestUpgrade } = useApp();
+  const { currentWorkspaceId, myRole, canManageMembers, membershipsLoaded, members, meId, startDm, requestUpgrade, refreshMembers } = useApp();
   const entitlements = useEntitlements();
   const [invites, setInvites] = useState([]);
   const [reloadKey, setReloadKey] = useState(0);
@@ -4589,23 +4600,25 @@ function MembersView() {
   const [err, setErr] = useState('');
   const [lastLink, setLastLink] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [roleErr, setRoleErr] = useState('');         // surfaced server-side guardrail message
+  const [removeTarget, setRemoveTarget] = useState(null);
 
-  // Load the workspace's invitations (owner RLS). Only async setState -> no sync-in-effect.
+  // Load the workspace's invitations (owner+admin RLS). Only async setState -> no sync-in-effect.
   useEffect(() => {
-    if (!currentWorkspaceId || !isOwner) return;
+    if (!currentWorkspaceId || !canManageMembers) return;
     let alive = true;
     invitationsApi.listForWorkspace(currentWorkspaceId)
       .then(d => { if (alive) setInvites(d); })
       .catch(e => console.error('load invites failed:', e));
     return () => { alive = false; };
-  }, [currentWorkspaceId, isOwner, reloadKey]);
+  }, [currentWorkspaceId, canManageMembers, reloadKey]);
 
   if (!membershipsLoaded) return null;
-  if (!isOwner) {
+  if (!canManageMembers) {
     return (
       <div className="space-y-6">
         <ViewHeader title="Members" subtitle="People in this workspace." />
-        <div className="text-sm text-white/50">Only an owner can manage members and invitations.</div>
+        <div className="text-sm text-white/50">Only an owner or admin can manage members and invitations.</div>
       </div>
     );
   }
@@ -4639,9 +4652,36 @@ function MembersView() {
 
   const pending = invites.filter(i => i.status === 'pending');
 
+  // ── Role management (guardrails mirror the server-side RPC; the RPC is the real gate) ──
+  const ROLE_RANK = { owner: 3, admin: 2, member: 1, guest: 0 };
+  const ROLE_LABELS = { owner: 'Owner', admin: 'Admin', member: 'Member', guest: 'Guest' };
+  const myRank = ROLE_RANK[myRole] ?? -1;
+  const ownerCount = members.filter(m => m.role === 'owner').length;
+  // Roles this caller may assign: an owner can grant any role (incl. owner); an admin can set member/guest only.
+  const settableRoles = myRank >= 3 ? ['owner', 'admin', 'member', 'guest'] : (myRank >= 2 ? ['member', 'guest'] : []);
+
+  const changeRole = async (userId, role) => {
+    setRoleErr('');
+    try { await workspaceMembersApi.setRole(currentWorkspaceId, userId, role); await refreshMembers(); }
+    catch (e) { setRoleErr(e?.message || 'Could not change the role.'); }
+  };
+  const doRemove = async () => {
+    const t = removeTarget; setRemoveTarget(null); if (!t) return;
+    setRoleErr('');
+    try { await workspaceMembersApi.remove(currentWorkspaceId, t.userId); await refreshMembers(); }
+    catch (e) { setRoleErr(e?.message || 'Could not remove the member.'); }
+  };
+
   return (
     <div className="space-y-6">
       <ViewHeader title="Members" subtitle="People in this workspace, and pending invitations." />
+      <ConfirmModal
+        open={!!removeTarget}
+        title="Remove member?"
+        message={`Remove ${removeTarget?.displayName || removeTarget?.email || 'this person'} from the workspace? They lose access immediately; their tasks and messages stay. This can't be undone.`}
+        confirmLabel="Remove"
+        onConfirm={doRemove}
+        onClose={() => setRemoveTarget(null)} />
 
       <Card title="Invite a teammate" subtitle="They'll join as a member. No email is sent automatically — copy the invite link below and share it with them.">
         {entitlements.atSeatLimit && (
@@ -4673,24 +4713,45 @@ function MembersView() {
       </Card>
 
       <Card title="Current members" subtitle={`${members.length} in this workspace`}>
+        {roleErr && <p className="text-[11px] text-rose-300 mb-2">{roleErr}</p>}
         <div className="space-y-1.5">
-          {members.map(m => (
-            <div key={m.userId} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/[0.02]">
-              <div className="min-w-0">
-                <div className="text-sm text-white/90 truncate">{m.displayName || m.email}{m.userId === meId && <span className="text-white/40"> (you)</span>}</div>
-                <div className="text-[11px] text-white/40 truncate">{m.email}</div>
+          {members.map(m => {
+            const targetRank = ROLE_RANK[m.role] ?? -1;
+            const isSelf = m.userId === meId;
+            const isLastOwner = m.role === 'owner' && ownerCount <= 1;
+            // Who the caller may modify: owner -> anyone (except the last owner & themselves);
+            // admin -> members/guests only. The server RPC enforces this regardless of the UI.
+            const canModify = !isSelf && !isLastOwner && (myRank >= 3 ? true : (myRank >= 2 ? targetRank < 2 : false));
+            return (
+              <div key={m.userId} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/[0.02]">
+                <div className="min-w-0">
+                  <div className="text-sm text-white/90 truncate">{m.displayName || m.email}{isSelf && <span className="text-white/40"> (you)</span>}</div>
+                  <div className="text-[11px] text-white/40 truncate">{m.email}</div>
+                </div>
+                <div className="shrink-0 flex items-center gap-2">
+                  {!isSelf && (
+                    <button onClick={() => startDm(m.userId).catch(() => {})} title={`Message ${m.displayName || m.email}`}
+                      className="text-[11px] px-2 h-7 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 inline-flex items-center gap-1 transition-colors">
+                      <MessagesSquare className="w-3 h-3" />Message
+                    </button>
+                  )}
+                  {canModify ? (
+                    <select value={m.role} onChange={(e) => changeRole(m.userId, e.target.value)} aria-label={`Role for ${m.displayName || m.email}`}
+                      className="text-[11px] h-7 rounded-lg bg-white/5 border border-white/10 text-white/80 pl-2 pr-1 outline-none focus:border-white/25 cursor-pointer">
+                      {settableRoles.map(r => <option key={r} value={r} className="bg-[#0f1017]">{ROLE_LABELS[r]}</option>)}
+                    </select>
+                  ) : (
+                    <span title={isLastOwner ? 'The last owner — promote another owner first to change this' : undefined}
+                      className="text-[10px] uppercase tracking-wide text-white/40 bg-white/5 border border-white/10 rounded-md px-1.5 h-5 flex items-center">{ROLE_LABELS[m.role] || m.role}</span>
+                  )}
+                  {canModify && (
+                    <button onClick={() => setRemoveTarget(m)} aria-label={`Remove ${m.displayName || m.email}`}
+                      className="text-white/40 hover:text-rose-300 hover:bg-white/5 p-1.5 rounded-lg transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                  )}
+                </div>
               </div>
-              <div className="shrink-0 flex items-center gap-2">
-                {m.userId !== meId && (
-                  <button onClick={() => startDm(m.userId).catch(() => {})} title={`Message ${m.displayName || m.email}`}
-                    className="text-[11px] px-2 h-7 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 inline-flex items-center gap-1 transition-colors">
-                    <MessagesSquare className="w-3 h-3" />Message
-                  </button>
-                )}
-                <span className="text-[10px] uppercase tracking-wide text-white/40 bg-white/5 border border-white/10 rounded-md px-1.5 h-5 flex items-center">{m.role}</span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </Card>
 

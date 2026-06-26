@@ -115,6 +115,24 @@ export const workspaceMembers = {
     if (error) throw error;
     return (data || []).map(r => ({ userId: r.user_id, displayName: r.display_name, email: r.email, role: r.role }));
   },
+
+  /**
+   * Change a member's role (owner|admin|member|guest) via the sanctioned set_member_role RPC — the
+   * ONLY write path to workspace_members.role. ALL guardrails (owner/admin only; admins can't touch
+   * owners/admins or grant admin; no self-escalation; no granting above your own rank; never
+   * demote the last owner) are enforced server-side; a violation surfaces here as a thrown error.
+   */
+  async setRole(workspaceId, userId, role) {
+    const { error } = await supabase.rpc('set_member_role', { p_ws: workspaceId, p_user: userId, p_role: role });
+    if (error) throw error;
+  },
+
+  /** Remove a member via the remove_member RPC (owner/admin only; admins can't remove owners/admins;
+   *  never the last owner). Server-enforced; violations throw. */
+  async remove(workspaceId, userId) {
+    const { error } = await supabase.rpc('remove_member', { p_ws: workspaceId, p_user: userId });
+    if (error) throw error;
+  },
 };
 
 /* =================================================================================
