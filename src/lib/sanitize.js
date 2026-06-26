@@ -168,6 +168,8 @@ export const fromDbMessage = (row) => {
     audioDuration: row.audio_duration_seconds,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    editedAt: row.edited_at,     // non-null once edited; drives the "(edited)" marker
+    deletedAt: row.deleted_at,   // non-null = tombstone; content is stripped server-side
   };
 };
 
@@ -199,5 +201,7 @@ export const fromDbDirectMessage = (row) => {
     audioDuration: row.audio_duration_seconds,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    editedAt: row.edited_at,     // non-null once edited; drives the "(edited)" marker
+    deletedAt: row.deleted_at,   // non-null = tombstone; content is stripped server-side
   };
 };

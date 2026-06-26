@@ -3502,18 +3502,36 @@ function MsgAvatar({ name, userId, size = 28 }) {
   );
 }
 
-/** One message bubble: body / voice note + a hover-and-touch "…" actions menu (Copy, Delete own). */
-function MsgBubble({ m, mine, onDelete }) {
+// Edit/delete are allowed for 10 minutes after sending — the SAME window the DB trigger enforces.
+// This client gate is UX only (it hides the actions once stale); the server is authoritative and
+// rejects a late edit/delete that slips through (P0001), after which the caller reconciles.
+const MSG_EDIT_WINDOW_MS = 10 * 60 * 1000;
+
+/** One message bubble: tombstone / body (+ "(edited)") / voice note, an inline editor, and a
+ *  hover-and-touch "…" actions menu (Edit own · Copy · Delete own). Shared by team chat + DMs. */
+function MsgBubble({ m, mine, onDelete, onEdit }) {
   const [menu, setMenu] = useState(false);
   const [pos, setPos] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [actable, setActable] = useState(false);   // within the 10-min window — evaluated on menu open
   const btnRef = useRef(null);
-  const canCopy = !!m.body;
-  const hasMenu = canCopy || mine;
+
+  const deleted = !!m.deletedAt;
+  const edited = !!m.editedAt;
+  const hasBody = !!m.body;
+  const canCopy = hasBody && !deleted;
+  // Trigger visibility (pure): the precise 10-min window is computed in openMenu, not at render
+  // (Date.now() is impure for render), and gates Edit/Delete inside the menu via `actable`.
+  const menuBtn = !deleted && (canCopy || mine);
   const MENU_W = 144;
   // Anchor the menu to the trigger's viewport rect, then render it via a PORTAL to document.body so
   // it escapes the scroll/overflow clipping of the message list (the old absolute menu was clipped
   // and spilled off the edge). Clamp horizontally so it never runs off-screen on mobile.
   const openMenu = () => {
+    const within = Date.now() - new Date(m.createdAt).getTime() < MSG_EDIT_WINDOW_MS;
+    if (!canCopy && !(mine && within)) return;   // nothing to show (e.g. an own voice note past the window)
+    setActable(within);
     const r = btnRef.current?.getBoundingClientRect();
     if (r) {
       let left = mine ? r.right - MENU_W : r.left;
@@ -3523,12 +3541,54 @@ function MsgBubble({ m, mine, onDelete }) {
     setMenu(true);
   };
   const copy = () => { try { navigator.clipboard?.writeText(m.body || ''); } catch { /* ignore */ } setMenu(false); };
+  const startEdit = () => { setDraft(m.body || ''); setEditing(true); setMenu(false); };
+  const saveEdit = () => {
+    const next = draft.trim();
+    setEditing(false);
+    if (next && next !== (m.body || '')) onEdit?.(m, next);   // no-op if unchanged/empty
+  };
+
+  // Tombstone — content was stripped server-side; render a muted placeholder in place, no actions.
+  if (deleted) {
+    return (
+      <div className={cx('max-w-full rounded-2xl px-3 py-2 border text-[13px] italic text-white/40',
+        mine ? 'bg-white/[0.03] border-white/10 rounded-tr-sm' : 'bg-white/[0.03] border-white/10 rounded-tl-sm')}>
+        This message was deleted
+      </div>
+    );
+  }
+
+  // Inline editor for an own text message within the window.
+  if (editing) {
+    return (
+      <div className={cx('max-w-full rounded-2xl px-3 py-2 border',
+        mine ? 'bg-violet-500/20 border-violet-500/25 rounded-tr-sm' : 'bg-white/[0.05] border-white/10 rounded-tl-sm')}>
+        <textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(); }
+            else if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }
+          }}
+          rows={Math.min(6, Math.max(1, (draft.match(/\n/g)?.length || 0) + 1))}
+          className="w-full bg-transparent text-sm text-white/90 leading-relaxed outline-none resize-none" />
+        <div className="mt-1 flex items-center justify-end gap-3 text-[11px]">
+          <button onClick={() => setEditing(false)} className="text-white/45 hover:text-white/70">Cancel</button>
+          <button onClick={saveEdit} className="font-medium text-violet-300 hover:text-violet-200">Save</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={cx('group/bubble relative max-w-full rounded-2xl px-3 py-2 border',
       mine ? 'bg-violet-500/20 border-violet-500/25 rounded-tr-sm' : 'bg-white/[0.05] border-white/10 rounded-tl-sm')}>
-      {m.body && <div className="text-sm text-white/85 leading-relaxed whitespace-pre-wrap break-words" title={absoluteTime(m.createdAt)}>{m.body}</div>}
+      {m.body && (
+        <div className="text-sm text-white/85 leading-relaxed whitespace-pre-wrap break-words" title={absoluteTime(m.createdAt)}>
+          {m.body}
+          {edited && <span className="ml-1.5 text-[10px] text-white/35 not-italic">(edited)</span>}
+        </div>
+      )}
       {m.audioPath && <VoiceNote path={m.audioPath} duration={m.audioDuration} />}
-      {hasMenu && (
+      {menuBtn && (
         <button ref={btnRef} onClick={() => (menu ? setMenu(false) : openMenu())} aria-label="Message actions"
           className={cx('absolute -top-2 w-6 h-6 rounded-full bg-[#0f1017] border border-white/10 flex items-center justify-center text-white/45 hover:text-white/80 transition-opacity',
             'opacity-100 sm:opacity-0 sm:group-hover/bubble:opacity-100', mine ? '-left-2' : '-right-2')}>
@@ -3540,12 +3600,17 @@ function MsgBubble({ m, mine, onDelete }) {
           <div className="fixed inset-0 z-[70]" onClick={() => setMenu(false)} />
           <div className="fixed z-[71] w-36 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1"
             style={{ top: pos.top, left: pos.left, animation: 'slideUp .12s ease' }}>
+            {mine && hasBody && actable && (
+              <button onClick={startEdit} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5">
+                <Edit3 className="w-3.5 h-3.5" />Edit
+              </button>
+            )}
             {canCopy && (
               <button onClick={copy} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5">
                 <Copy className="w-3.5 h-3.5" />Copy
               </button>
             )}
-            {mine && (
+            {mine && actable && (
               <button onClick={() => { setMenu(false); onDelete?.(m); }} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-rose-300 hover:bg-rose-500/10">
                 <Trash2 className="w-3.5 h-3.5" />Delete
               </button>
@@ -3561,7 +3626,7 @@ function MsgBubble({ m, mine, onDelete }) {
 /** The scrollable message timeline — sticky day dividers, sender grouping, avatars (both
  *  surfaces), per-message receipts (DM), skeleton loading, empty state, sticky-bottom
  *  autoscroll, and a jump-to-latest button. Shared by the team channel and DM threads. */
-function MessageList({ items, userId, nameOf, loading, empty, onDelete, receiptFor }) {
+function MessageList({ items, userId, nameOf, loading, empty, onDelete, onEdit, receiptFor }) {
   const scrollRef = useRef(null);
   const atBottomRef = useRef(true);
   const [showJump, setShowJump] = useState(false);
@@ -3613,7 +3678,7 @@ function MessageList({ items, userId, nameOf, loading, empty, onDelete, receiptF
                         <span className="text-[10px] text-white/35 tabular-nums">{clockTime(m.createdAt)}</span>
                       </div>
                     )}
-                    <MsgBubble m={m} mine={mine} onDelete={onDelete} />
+                    <MsgBubble m={m} mine={mine} onDelete={onDelete} onEdit={onEdit} />
                     {mine && receiptFor && receiptFor(m)}
                   </div>
                 </div>
@@ -3872,10 +3937,19 @@ function ChatView() {
     if (mr && mr.state !== 'inactive') mr.stop();
   };
 
+  // Soft-delete: tombstone the message IN PLACE (don't drop it) — the server strips its content and
+  // the row stays so the thread shows "This message was deleted". Reconcile from the server on failure.
   const remove = async (m) => {
-    setItems(prev => prev.filter(x => x.id !== m.id));
-    try { await messagesApi.remove(m); }
+    setItems(prev => prev.map(x => x.id === m.id ? { ...x, body: null, audioPath: null, deletedAt: nowISO() } : x));
+    try { await messagesApi.softDelete(m); }
     catch (e) { console.error('Delete failed:', e); messagesApi.list(200, currentWorkspaceId).then(setItems).catch(() => {}); }
+  };
+
+  // Edit own text in place; the DB trigger enforces the 10-minute window + stamps edited_at.
+  const edit = async (m, body) => {
+    setItems(prev => prev.map(x => x.id === m.id ? { ...x, body, editedAt: nowISO() } : x));
+    try { await messagesApi.update(m.id, body); }
+    catch (e) { console.error('Edit failed:', e); messagesApi.list(200, currentWorkspaceId).then(setItems).catch(() => {}); }
   };
 
   return (
@@ -3906,6 +3980,7 @@ function ChatView() {
         nameOf={nameOf}
         loading={loading}
         onDelete={remove}
+        onEdit={edit}
         empty={(
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-10">
             <div className="w-12 h-12 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
@@ -3950,6 +4025,7 @@ function DirectMessagesView() {
 
   const preview = (m) => {
     if (!m) return 'No messages yet';
+    if (m.deletedAt) return 'Message deleted';
     if (m.body) return m.body;
     if (m.audioPath) return '🎤 Voice note';
     return '…';
@@ -4252,10 +4328,19 @@ function DmThread({ conversationId, peerId, onBack }) {
     if (mr && mr.state !== 'inactive') mr.stop();
   };
 
+  // Soft-delete in place (tombstone), mirroring the team chat — the row survives as
+  // "This message was deleted". Reconcile from the server on failure.
   const remove = async (m) => {
-    setItems(prev => prev.filter(x => x.id !== m.id));
-    try { await directMessagesApi.remove(m); }
+    setItems(prev => prev.map(x => x.id === m.id ? { ...x, body: null, audioPath: null, deletedAt: nowISO() } : x));
+    try { await directMessagesApi.softDelete(m); }
     catch (e) { console.error('DM delete failed:', e); directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(() => {}); }
+  };
+
+  // Edit own DM text in place; the DB trigger enforces the 10-minute window + stamps edited_at.
+  const edit = async (m, body) => {
+    setItems(prev => prev.map(x => x.id === m.id ? { ...x, body, editedAt: nowISO() } : x));
+    try { await directMessagesApi.update(m.id, body); }
+    catch (e) { console.error('DM edit failed:', e); directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(() => {}); }
   };
 
   return (
@@ -4275,6 +4360,7 @@ function DmThread({ conversationId, peerId, onBack }) {
         nameOf={nameOf}
         loading={loading}
         onDelete={remove}
+        onEdit={edit}
         receiptFor={receiptFor}
         empty={(
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-10">

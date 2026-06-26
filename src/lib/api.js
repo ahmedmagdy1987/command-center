@@ -546,6 +546,8 @@ export const messages = {
     return fromDbMessage(data);
   },
 
+  /** Edit your own message (text). The DB trigger enforces the 10-minute window and stamps
+   *  edited_at authoritatively; a stale/late edit is rejected server-side (P0001). */
   async update(id, body) {
     const { data, error } = await supabase
       .from('messages')
@@ -553,6 +555,23 @@ export const messages = {
       .eq('id', id)
       .select().single();
     if (error) throw error;
+    return fromDbMessage(data);
+  },
+
+  /**
+   * Soft-delete your own message (the UI's only delete path): set deleted_at; the BEFORE UPDATE
+   * trigger stamps it server-side, strips body + audio (tombstone), and enforces the 10-minute
+   * window. The row survives so the thread renders "This message was deleted" in place. The audio
+   * object is no longer referenced, so clean it up best-effort. (Hard-delete `remove` is kept.)
+   */
+  async softDelete(message) {
+    const { data, error } = await supabase
+      .from('messages')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', message.id)
+      .select().single();
+    if (error) throw error;
+    if (message.audioPath) supabase.storage.from('voice-notes').remove([message.audioPath]).catch(() => {}); // best-effort
     return fromDbMessage(data);
   },
 
@@ -725,6 +744,34 @@ export const directMessages = {
       supabase.storage.from('voice-notes').remove([path]).catch(() => {});   // best-effort orphan cleanup
       throw error;
     }
+    return fromDbDirectMessage(data);
+  },
+
+  /** Edit your own DM (text). The DB trigger enforces the 10-minute window and stamps edited_at. */
+  async update(id, body) {
+    const { data, error } = await supabase
+      .from('dm_messages')
+      .update({ body, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select().single();
+    if (error) throw error;
+    return fromDbDirectMessage(data);
+  },
+
+  /**
+   * Soft-delete your own DM (the UI's only delete path): set deleted_at; the BEFORE UPDATE trigger
+   * stamps it, strips body + audio (tombstone), and enforces the 10-minute window. The row survives
+   * so the thread renders "This message was deleted" in place; the audio object is cleaned up
+   * best-effort. (Hard-delete `remove` is kept.)
+   */
+  async softDelete(message) {
+    const { data, error } = await supabase
+      .from('dm_messages')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', message.id)
+      .select().single();
+    if (error) throw error;
+    if (message.audioPath) supabase.storage.from('voice-notes').remove([message.audioPath]).catch(() => {}); // best-effort
     return fromDbDirectMessage(data);
   },
 
