@@ -1,7 +1,7 @@
 # Command Center — project guide for Claude
 
 > Orientation file so any future session is instantly up to speed. Last verified against the
-> live DB on **2026-06-26** (latest migration `20260626111955` — @mention notifications). Public
+> live DB on **2026-06-26** (latest migration `20260626135949` — invite-as-role: choose member/guest). Public
 > sign-up is **OPEN** (`SIGNUP_ENABLED = true`). Tenant isolation is proven by rolled-back impersonation
 > tests — **0 cross-tenant leaks** (45 assertions; see *Pre-launch security audit*) — and the
 > **workspace roles** system added since (owner/admin/member/guest) has its own **35/35** rolled-back
@@ -485,9 +485,9 @@ For a true behavior-preservation proof, also run a temporary **second-workspace 
   workspace's invites, an invitee sees pending invites to their own email) + four sanctioned RPCs
   (`create_invitation` / `accept_invitation` / `invitation_preview` / `revoke_invitation`, advisor-clean
   private DEFINER + public INVOKER passthroughs). `create_invitation` is **owner+admin-gated** (rank≥2, since
-  the roles migration) and always sets `role='member'` (see the flagged *invite-as-role*); `accept_invitation`
-  is **email-bound** and inserts the `workspace_members` row only for `auth.uid()` (no privilege escalation, no
-  inviting as owner). UI: `InviteScreen.jsx` + `/invite/:token`.
+  the roles migration) and takes `p_role` (member|guest, default member) since *invite-as-role* (`…135949`);
+  `accept_invitation` is **email-bound** and inserts the `workspace_members` row only for `auth.uid()` (no
+  privilege escalation, no inviting as owner/admin). UI: `InviteScreen.jsx` + `/invite/:token`.
 - **Workspace slugs** (`20260604102655`). `workspaces.slug` (unique) + `private._slugify`; `create_workspace`
   generates a unique slug; `?ws=` accepts a slug or an id.
 - **Direct messages** (`20260604125857` + `20260604130054` FK indexes). `dm_conversations(user_lo,user_hi)`,
@@ -555,15 +555,14 @@ keyboard combobox (`AssigneeSelect`, single-select — multi-assignee is a separ
 replacing the inline name-pills in QuickAdd + TaskModal + the top-bar filter. A systemic light-mode
 accent-contrast sweep + an @-mention keyboard/contrast fix pass landed alongside.
 
-**FLAGGED, not applied — invite-as-role** (needs a DB change, so stopped per discipline). Today
-`create_invitation` always sets `role='member'` and `invitations_role_check` only allows `('member','owner')`,
-so an owner/admin can't pick *guest* at invite time (they reassign after the invitee joins). Letting them
-choose member/guest at invite time needs (1) widen the CHECK to all four roles, and (2)
-`create_invitation(p_workspace_id,p_email,p_role)` validating `p_role ∈ {member,guest}` (rank≥2 caller;
-owner/admin still assigned only via `set_member_role`). A **6/6 rolled-back proof** confirmed it works
-end-to-end (owner/admin invite as guest → invitation carries it → accept applies it; admin-invites-admin and
-member-caller both rejected) — **awaiting approval before applying.** `accept_invitation` already applies
-`inv.role`, so there's no accept-side change.
+**Invite-as-role — APPLIED** (`20260626135949`). `invitations_role_check` widened to all four roles and
+`create_invitation` gained `p_role` (default `'member'`, backward-compatible) validated to `member|guest`
+(rank≥2 caller; owner/admin are still assigned only via `set_member_role` after join). `accept_invitation`
+already applies `inv.role`, so no accept-side change. Proven by a **6/6 rolled-back boundary proof**
+(owner/admin invite as guest → invitation carries it → accept joins as guest; admin-invites-admin and
+member-caller both rejected), re-run green before apply; advisors clean (only the standing leaked-password
+WARN). UI: the Members invite form has a **Member|Guest** toggle (both owner & admin see the same two options
+— invites can't grant owner/admin); `api.invitations.create(ws,email,role)` passes `p_role`.
 
 ## Roadmap / next
 
@@ -582,9 +581,9 @@ notifications** (`20260626111955`), **guest nav cleanup + the scalable `Assignee
 the **per-account Free/Pro packaging realignment** (config only). `members.role` is vestigial for authz.
 **(Current lint baseline: 31 errors / 2 warnings.)**
 
-**Proven & ready to apply (awaiting approval):** **invite-as-role** — let an owner/admin pick member/guest at
-invite time (needs the `invitations_role_check` widen + a `p_role` arg on `create_invitation`; 6/6 rolled-back
-proof passed). See the flagged item under *Workspace roles, mentions & guest UX*.
+**Invite-as-role is DONE** (`20260626135949`) — an owner/admin picks member/guest at invite time (the
+`invitations_role_check` widen + `p_role` arg on `create_invitation` + the Members invite-form toggle; 6/6
+rolled-back proof). See *Workspace roles, mentions & guest UX*.
 
 **Before real paid traffic (flagged by the 2026-06-26 audit — none applied yet):**
 1. **Auth dashboard hardening** (Supabase dashboard — no code): enable Leaked Password Protection (clears the
