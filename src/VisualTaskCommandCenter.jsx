@@ -1081,6 +1081,7 @@ function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onE
   const pickedRef = useRef(new Map());   // userId -> displayName for everyone picked from the dropdown
   const [menu, setMenu] = useState(null); // { q, at } while an @token is active before the cursor
   const [pos, setPos] = useState(null);   // fixed-position anchor for the portaled dropdown
+  const [active, setActive] = useState(0); // highlighted option index for keyboard navigation
   const candidates = (members || []).filter(m => m.userId !== meId);
 
   const report = (text) => {
@@ -1095,6 +1096,7 @@ function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onE
       const r = taRef.current?.getBoundingClientRect();
       if (r) setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 268)), bottom: window.innerHeight - r.top + 6, width: Math.max(200, Math.min(r.width, 280)) });
       setMenu({ q: m[1].toLowerCase(), at: caret - m[1].length - 1 });
+      setActive(0);   // keep the first (most relevant) item highlighted as the list filters
     } else { setMenu(null); }
   };
   const handleChange = (e) => {
@@ -1111,8 +1113,14 @@ function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onE
     requestAnimationFrame(() => { const c = menu.at + name.length + 2; if (ta) { ta.focus(); ta.setSelectionRange(c, c); } });
   };
   const onKeyDown = (e) => {
-    if (menu && filtered.length && (e.key === 'Enter' || e.key === 'Tab')) { e.preventDefault(); pick(filtered[0]); return; }
-    if (e.key === 'Escape' && menu) { e.preventDefault(); setMenu(null); return; }
+    // While the picker is open, the arrow keys move the highlighted option (NOT the text caret),
+    // Enter/Tab selects it, Esc closes it.
+    if (menu && filtered.length) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(a => (a + 1) % filtered.length); return; }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); setActive(a => (a - 1 + filtered.length) % filtered.length); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pick(filtered[Math.min(active, filtered.length - 1)]); return; }
+      if (e.key === 'Escape') { e.preventDefault(); setMenu(null); return; }
+    }
     if (e.key === 'Enter' && !e.shiftKey && onEnter) { e.preventDefault(); onEnter(); }
   };
   return (
@@ -1124,9 +1132,9 @@ function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onE
         <div className="fixed z-[80] max-h-52 overflow-y-auto rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1"
           style={{ left: pos.left, bottom: pos.bottom, width: pos.width }}>
           <div className="px-3 pt-1 pb-1.5 text-[10px] font-medium uppercase tracking-widest text-white/40">Mention someone</div>
-          {filtered.map(m => (
-            <button key={m.userId} type="button" onMouseDown={(ev) => { ev.preventDefault(); pick(m); }}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-white/85 hover:bg-violet-500/15 text-left">
+          {filtered.map((m, i) => (
+            <button key={m.userId} type="button" onMouseDown={(ev) => { ev.preventDefault(); pick(m); }} onMouseEnter={() => setActive(i)}
+              className={cx('w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left', i === active ? 'bg-violet-500/25 text-white' : 'text-white/85')}>
               <span className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-semibold shrink-0"
                 style={{ background: assigneeColor(m.userId).soft, color: assigneeColor(m.userId).hex }}>{initialsOf(m.displayName || m.email)}</span>
               <span className="truncate">{m.displayName || m.email}</span>
@@ -1717,7 +1725,7 @@ function QuickAdd() {
               <Plus className="w-3.5 h-3.5" />Add task
             </button>
           </div>
-          <div className="text-[11px] text-white/30">Tip: press <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded">{shortcutLabel('N')}</kbd> or <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded">N</kbd> anywhere to capture.</div>
+          <div className="text-[11px] text-white/50">Tip: press <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded text-white/70">{shortcutLabel('N')}</kbd> or <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded text-white/70">N</kbd> anywhere to capture.</div>
         </div>
       </div>
     </div>
