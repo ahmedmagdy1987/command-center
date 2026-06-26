@@ -501,33 +501,29 @@ Fixed in-pass: workspace-scoped task-reconcile, removed the global-presence foot
 
 ## Roadmap / next
 
-Public signup must stay **CLOSED** until onboarding + invitations exist (no orphan/no-workspace users,
-no self-join).
+**Public sign-up is now OPEN** (`SIGNUP_ENABLED = true` in `AuthScreen.jsx`). Onboarding routes a
+no-workspace user to create their first workspace; invitations let an owner add members. The DB isolation
+prerequisites that gated this are all done (notify_* workspace-awareness in 2B-1; voice-notes storage
+scoping in `20260602041008`; invitations in `20260602041903`). Before leaning on open signup for real
+traffic, complete the **auth dashboard hardening** below.
 
-**Done:** Phase 3B-2 (per-workspace owner authority), **Phase 3B-3 (workspace creation + onboarding + auth
-polish)**, and **Phase 2 — generalize task assignment, now FULLY DONE** (2A `20260531205730`, 2B-1
-`20260531211450`, 2B-2 app, 2C `20260601023453`): tasks use per-member `assignee_id` + independent privacy;
-the legacy `owner` column/model is gone. Workspace creation is a real sanctioned flow (`create_workspace` RPC +
-onboarding); `members.role` is vestigial for authz. Public sign-up is still CLOSED (single `SIGNUP_ENABLED` flag
-in `AuthScreen.jsx`). **Feature bundles since:** Bundle 1 (confirm modal, Kanban add/5-col board, added-by,
-exit anims), Bundle 2 (notification delete + clear-all), Bundle 3 (projects create/rename/delete + the
-`project_task_count` deletion gate) — all frontend except Bundle 3's one RPC migration. **(Current lint
-baseline: 34 errors / 2 warnings.)**
+**Done since the early phases:** per-workspace owner authority (3B-2), workspace creation + onboarding + auth
+polish (3B-3), Phase 2 fully (per-member `assignee_id` + independent privacy; legacy `owner` gone), Bundles
+1–3, **voice-notes storage scoping** (`20260602041008`), **invitations** (`20260602041903`), **workspace
+slugs** (`20260604102655`), **direct messages** (`20260604125857`/`…130054`), **message edit + soft-delete**
+(`20260626065335`), and the **per-account Free/Pro packaging realignment** (config only). `members.role` is
+vestigial for authz. **(Current lint baseline: 31 errors / 2 warnings.)**
 
-**Required before invitations** — must land before any real multi-member / multi-workspace situation:
-1. ~~**Make the notify_* triggers workspace-aware.**~~ **DONE in Phase 2B-1** (`20260531211450`): the three
-   notify_* triggers now route off `assignee_id` to specific task participants (assignee / creator) and stamp
-   the task's `workspace_id` — no more global-`members` blast or wrong-workspace routing.
-2. **(lower) Scope the storage `voice_notes_*` policies to the workspace.** They currently gate on
-   global members-existence, not workspace. Low severity (a voice-note path is only learnable from a
-   message that's already workspace-scoped, so path-guessing is infeasible), but tighten before public
-   launch.
+**Before real paid traffic (flagged by the 2026-06-26 audit — none applied yet):**
+1. **Auth dashboard hardening** (Supabase dashboard — no code): enable Leaked Password Protection (clears the
+   one standing advisor), raise the password policy, turn ON Confirm-email + working SMTP, enable Captcha /
+   bot protection, tighten Auth rate limits, and lock the redirect-URL allowlist (incl. `/reset-password`).
+2. **Server-side entitlement enforcement** — every plan/feature/limit gate is **client-only** today (fine
+   under the all-access `founding` default, bypassable the moment real plans exist). Enforce in RLS/RPCs
+   before the paywall goes live (the `resolvePlanId` seam + a DB plan column are the landing spots).
+3. **(lower) Realtime Authorization for presence** — mark presence/typing channels private + add RLS on
+   `realtime.messages` so a known workspace/conversation UUID (or a removed member) can't observe
+   typing/name/read-receipt metadata. Message **content** is already RLS-safe; this is metadata only.
 
-**Next phases:**
-1. **Invitations** — invite a user into an existing workspace. ("Required before invitations" #1 (notify_*
-   workspace-awareness) is done in 2B-1; only #2 — voice-notes storage scoping — remains before this.)
-2. **Billing** — Stripe, per-workspace subscriptions + general product-readiness.
-
-**Reaffirmed gate:** the notify_* routing fix is **done (2B-1)**; the remaining **voice-notes storage
-scoping** (#2 under "Required before invitations" above) must still land **before public sign-up opens**
-(the `SIGNUP_ENABLED` flip) — it's the last isolation gap for a real multi-workspace, multi-member world.
+**Next product phases:** Billing (Stripe via the dormant `billing.startCheckout` seam + a per-account plan in
+the DB) and general product-readiness.
