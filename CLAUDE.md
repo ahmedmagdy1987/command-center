@@ -507,6 +507,25 @@ For a true behavior-preservation proof, also run a temporary **second-workspace 
   billing model reads **per-account** (one subscription covers the owner's workspaces). Everything still
   resolves to `founding` (all-access), so this is positioning only. **`SIGNUP_ENABLED` is now `true`.**
 
+## Red-team security audit (2026-07-06) — see [`SECURITY_AUDIT_2026-07-06.md`](SECURITY_AUDIT_2026-07-06.md)
+
+Deep adversarial pass **beyond** the 45/45 + 35/35 proofs (RLS matrix, every DEFINER body, grants,
+storage, realtime, git history, client), attacking as a low-privilege outsider (`qassemmenna14`, amego-only)
+and a throwaway guest with rolled-back PoCs. **No DB/RLS change applied; DB fixes flagged for approval.**
+**Verdict: tenant isolation + privilege separation are solid** — 0 cross-tenant reads, 0 RPC IDOR (every
+outsider RPC attempt blocked `42501`), 0 injection, 0 secrets in git history, 0 XSS; email-binding proven
+server-side; the comment-inheritance policy is safe because `tasks.id` is a global PK (colliding-id insert
+blocked `23505`). **Real findings (all flagged, not applied):** (M) presence/typing/read-cursor channels leak
+spoofable metadata — the known realtime residual, characterized; (L1) a **guest can read the full member
+email roster** via `members_select_self_or_shared`→`shares_workspace` (proven); (L2) `TRUNCATE/REFERENCES/
+TRIGGER` still granted to anon/authenticated (not API-reachable, least-privilege only); (L3) voice-note upload
+needs only a `members` row (no workspace-membership/quota → storage-DoS). **Pre-real-traffic BLOCKERS
+(operational, not code):** (1) **verify Supabase "Confirm email" is ON** — invite email-binding + account
+integrity depend on it and it's not SQL-readable; (2) server-side entitlement enforcement before billing
+(seats/workspaces/voiceNotes/historyDays — all client-only today); (3) auth-dashboard hardening + rate
+limits/captcha. Correction to the storage note above: voice-note object keys are `<uid>/<client-random>.<ext>`
+(the random is a client `uid()`, not a UUID). Current lint baseline unchanged.
+
 ## Pre-launch security audit (2026-06-26)
 
 Full multi-tenant audit, security-first. **Tenant isolation PROVEN** by rolled-back impersonation tests with
