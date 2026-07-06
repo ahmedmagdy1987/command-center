@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Mail, Lock, ArrowRight, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
+import { Mail, Lock, ArrowRight } from 'lucide-react';
 import { auth } from './lib/api';
+import AuthShell, { AuthField, AuthBanner, AuthCTA } from './AuthShell';
 
 // ── Public sign-up switch ─────────────────────────────────────────────────────
 // Public sign-up is OPEN: invitations shipped, and onboarding routes a no-workspace user to
@@ -14,6 +15,7 @@ const SIGNUP_ENABLED = true;
  * Welcome / sign-in screen. `mode` ('signin' | 'reset') is driven by the route (/login vs
  * /forgot-password), so those transitions are real navigations. Sign-up (now open) is an
  * in-screen toggle layered on the signin view (no dedicated route yet).
+ * Presentation lives in AuthShell (shared with the other pre-app screens).
  */
 export default function AuthScreen({ mode = 'signin', initialSignup = false }) {
   const navigate = useNavigate();
@@ -68,118 +70,77 @@ export default function AuthScreen({ mode = 'signin', initialSignup = false }) {
   const cta = view === 'reset' ? 'Send reset link'
             : view === 'signup' ? 'Create account'
             : 'Sign in';
+  const busyLabel = view === 'reset' ? 'Sending…'
+                  : view === 'signup' ? 'Creating account…'
+                  : 'Signing in…';
   const canSubmit = view === 'reset' ? !!email : (!!email && !!password);
 
   return (
-    <div className="min-h-screen bg-[#070810] text-white flex items-center justify-center p-6 relative overflow-hidden">
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
-        body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; background: #070810; }
-        .font-display { font-family: 'Fraunces', ui-serif, serif; font-optical-sizing: auto; font-weight: 500; }
-        @keyframes float { 0%,100% { transform: translateY(0px); } 50% { transform: translateY(-20px); } }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-      `}</style>
-
-      {/* Background glows */}
-      <div className="absolute top-1/4 -left-32 w-96 h-96 rounded-full bg-violet-500/10 blur-3xl pointer-events-none" style={{ animation: 'float 8s ease-in-out infinite' }} />
-      <div className="absolute bottom-1/4 -right-32 w-96 h-96 rounded-full bg-fuchsia-500/10 blur-3xl pointer-events-none" style={{ animation: 'float 8s ease-in-out infinite reverse' }} />
-
-      <div className="relative w-full max-w-md" style={{ animation: 'fadeIn .4s ease' }}>
-        {/* Logo */}
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-2xl shadow-fuchsia-500/30 mb-4">
-            <Sparkles className="w-7 h-7 text-white" />
-          </div>
-          <h1 className="text-2xl font-semibold text-white font-display tracking-tight">Command Center</h1>
-          <p className="text-sm text-white/40 mt-1">Visual task management</p>
-        </div>
-
-        {/* Card */}
-        <div className="rounded-2xl border border-white/10 bg-[#0f1017]/80 backdrop-blur p-6 shadow-2xl">
-          <div className="text-center mb-5">
-            <h2 className="text-base font-semibold text-white">{heading}</h2>
-            <p className="text-[11px] text-white/40 mt-1">{subheading}</p>
-          </div>
-
-          <form onSubmit={submit} className="space-y-4">
-            <div>
-              <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">Email</label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40 pointer-events-none" />
-                <input type="email" value={email} onChange={e => setEmail(e.target.value)} required autoFocus
-                  placeholder="you@example.com"
-                  className="w-full bg-black/30 border border-white/10 rounded-xl pl-10 pr-3 h-11 text-sm text-white placeholder-white/30 outline-none focus:border-violet-400/50 focus:bg-black/40 transition-colors" />
-              </div>
-            </div>
-
-            {view !== 'reset' && (
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 block">Password</label>
-                  {view === 'signin' && (
-                    <button type="button" onClick={() => navigate('/forgot-password')}
-                      className="text-[10px] font-medium text-violet-300/70 hover:text-violet-200 transition-colors">
-                      Forgot password?
-                    </button>
-                  )}
-                </div>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40 pointer-events-none" />
-                  <input type="password" value={password} onChange={e => setPassword(e.target.value)} required
-                    placeholder={view === 'signup' ? 'At least 10 characters' : 'Your password'}
-                    className="w-full bg-black/30 border border-white/10 rounded-xl pl-10 pr-3 h-11 text-sm text-white placeholder-white/30 outline-none focus:border-violet-400/50 focus:bg-black/40 transition-colors" />
-                </div>
-              </div>
-            )}
-
-            {error && (
-              <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-px" />
-                <span>{error}</span>
-              </div>
-            )}
-            {info && (
-              <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300">
-                <CheckCircle2 className="w-4 h-4 shrink-0 mt-px" />
-                <span>{info}</span>
-              </div>
-            )}
-
-            <button type="submit" disabled={loading || !canSubmit}
-              className="w-full h-11 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : (
-                <>
-                  {cta}
-                  <ArrowRight className="w-4 h-4" />
-                </>
-              )}
-            </button>
-          </form>
-
-          {view === 'reset' && (
-            <button onClick={() => navigate('/login')}
-              className="mt-4 w-full text-center text-[11px] text-white/40 hover:text-white/70 transition-colors">
-              ← Back to sign in
-            </button>
-          )}
-          {SIGNUP_ENABLED && view === 'signin' && (
-            <p className="mt-4 text-center text-[11px] text-white/40">
-              Don’t have an account?{' '}
-              <button onClick={() => setSignupOpen(true)} className="text-violet-300/80 hover:text-violet-200 font-medium">Create one</button>
-            </p>
-          )}
-          {SIGNUP_ENABLED && view === 'signup' && (
-            <button onClick={() => setSignupOpen(false)}
-              className="mt-4 w-full text-center text-[11px] text-white/40 hover:text-white/70 transition-colors">
-              ← Back to sign in
-            </button>
-          )}
-        </div>
-
-        <p className="mt-6 text-center text-[11px] text-white/30">
-          Your private tasks stay yours. Workspace tasks sync with your team.
-        </p>
+    <AuthShell>
+      <div className="text-center mb-5">
+        <h2 className="text-base font-semibold text-white">{heading}</h2>
+        <p className="text-[11px] text-white/40 mt-1">{subheading}</p>
       </div>
-    </div>
+
+      <form onSubmit={submit} className="space-y-4">
+        <div className="au-in" style={{ animationDelay: '.16s' }}>
+          <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">Email</label>
+          <AuthField icon={Mail} type="email" value={email} onChange={e => setEmail(e.target.value)} required autoFocus
+            placeholder="you@example.com" />
+        </div>
+
+        {view !== 'reset' && (
+          <div className="au-in" style={{ animationDelay: '.2s' }}>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 block">Password</label>
+              {view === 'signin' && (
+                <button type="button" onClick={() => navigate('/forgot-password')}
+                  className="text-[10px] font-medium text-violet-300/70 hover:text-violet-200 transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+                  Forgot password?
+                </button>
+              )}
+            </div>
+            <AuthField icon={Lock} type="password" value={password} onChange={e => setPassword(e.target.value)} required
+              placeholder={view === 'signup' ? 'At least 10 characters' : 'Your password'} />
+          </div>
+        )}
+
+        {error && <AuthBanner tone="error">{error}</AuthBanner>}
+        {info && <AuthBanner tone="ok">{info}</AuthBanner>}
+
+        <div className="au-in" style={{ animationDelay: '.26s' }}>
+          <AuthCTA busy={loading} busyLabel={busyLabel} disabled={loading || !canSubmit}>
+            {cta}
+            <ArrowRight className="w-4 h-4" />
+          </AuthCTA>
+        </div>
+      </form>
+
+      {view === 'reset' && (
+        <div className="au-in" style={{ animationDelay: '.32s' }}>
+          <button onClick={() => navigate('/login')}
+            className="mt-4 w-full text-center text-[11px] text-white/40 hover:text-white/70 transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+            ← Back to sign in
+          </button>
+        </div>
+      )}
+      {SIGNUP_ENABLED && view === 'signin' && (
+        <p className="au-in mt-4 text-center text-[11px] text-white/40" style={{ animationDelay: '.32s' }}>
+          Don’t have an account?{' '}
+          <button onClick={() => setSignupOpen(true)}
+            className="text-violet-300/80 hover:text-violet-200 font-medium rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+            Create one
+          </button>
+        </p>
+      )}
+      {SIGNUP_ENABLED && view === 'signup' && (
+        <div className="au-in" style={{ animationDelay: '.32s' }}>
+          <button onClick={() => setSignupOpen(false)}
+            className="mt-4 w-full text-center text-[11px] text-white/40 hover:text-white/70 transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+            ← Back to sign in
+          </button>
+        </div>
+      )}
+    </AuthShell>
   );
 }
