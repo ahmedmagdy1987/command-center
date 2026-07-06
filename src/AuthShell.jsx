@@ -24,6 +24,8 @@ export default function AuthShell({
   heading = 'Command Center',
   tagline = 'Visual task management',
   footnote = 'Your private tasks stay yours. Workspace tasks sync with your team.',
+  beforeCard = null,
+  footer = null,
   children,
 }) {
   return (
@@ -64,8 +66,14 @@ export default function AuthShell({
             <Icon className="w-7 h-7 text-white" />
           </div>
           <h1 className="text-2xl font-semibold text-white font-display tracking-tight">{heading}</h1>
-          {tagline && <p className="text-sm text-white/40 mt-1">{tagline}</p>}
+          {tagline && <p className="text-sm text-white/40 mt-1 text-center">{tagline}</p>}
         </div>
+
+        {beforeCard && (
+          <div className="au-in" style={{ animationDelay: '.08s' }}>
+            {beforeCard}
+          </div>
+        )}
 
         {/* Card. Solid surface on purpose: backdrop-blur over the continuously-drifting aurora
             would force an uncacheable per-frame blur pass. */}
@@ -77,6 +85,11 @@ export default function AuthShell({
           <p className="au-in mt-6 text-center text-[11px] text-white/35" style={{ animationDelay: '.36s' }}>
             {footnote}
           </p>
+        )}
+        {footer && (
+          <div className="au-in mt-6" style={{ animationDelay: '.36s' }}>
+            {footer}
+          </div>
         )}
       </div>
     </div>

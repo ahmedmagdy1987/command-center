@@ -16,6 +16,7 @@ import { sanitizeTask, uid, nowISO } from './lib/sanitize';
 import { resolvePlanId, computeEntitlements, getPreviewPlanId, clearPreviewPlan } from './lib/entitlements';
 import { FEATURE_META, PLANS } from './lib/plans';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import AuthShell, { AuthBanner, AuthCTA } from './AuthShell';
 
 /* Route <-> view mapping. Each main view gets its own shareable URL. */
 const VIEW_TO_PATH = {
@@ -2481,21 +2482,21 @@ function CreateWorkspaceForm({ onCreated, submitLabel = 'Create workspace', auto
       setBusy(false);
     }
   };
+  // The .au-in stage classes only exist while AuthShell's style block is mounted (onboarding);
+  // inside CreateWorkspaceModal they match nothing and the form renders statically — same layout.
   return (
     <form onSubmit={submit} className="space-y-3">
-      <input value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus={autoFocus}
-        placeholder="e.g. Acme Marketing"
-        className="w-full bg-black/30 border border-white/10 rounded-xl px-3 h-11 text-sm text-white placeholder-white/30 outline-none focus:border-violet-400/50 focus:bg-black/40 transition-colors" />
-      {error && (
-        <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300">
-          <AlertCircle className="w-4 h-4 shrink-0 mt-px" />
-          <span>{error}</span>
-        </div>
-      )}
-      <button type="submit" disabled={!trimmed || busy}
-        className="w-full h-11 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
-        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Plus className="w-4 h-4" />{submitLabel}</>}
-      </button>
+      <div className="au-in" style={{ animationDelay: '.2s' }}>
+        <input value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus={autoFocus}
+          placeholder="e.g. Acme Marketing"
+          className="w-full bg-black/30 border border-white/10 rounded-xl px-3 h-11 text-sm text-white placeholder-white/30 outline-none focus:border-violet-400/60 focus:bg-black/40 focus:ring-2 focus:ring-violet-500/20 transition-colors" />
+      </div>
+      {error && <AuthBanner tone="error">{error}</AuthBanner>}
+      <div className="au-in" style={{ animationDelay: '.26s' }}>
+        <AuthCTA busy={busy} busyLabel="Creating workspace…" disabled={!trimmed || busy}>
+          <Plus className="w-4 h-4" />{submitLabel}
+        </AuthCTA>
+      </div>
     </form>
   );
 }
@@ -4809,55 +4810,42 @@ function DmThread({ conversationId, peerId, onBack }) {
 
 /** Shown to an authenticated user who belongs to no workspace yet: create your first one.
  *  Creation is the path today; joining by invitation comes in a later phase. */
-function OnboardingScreen({ theme, onSignOut }) {
+function OnboardingScreen({ onSignOut }) {
   const { pendingInvites, acceptInvitation } = useApp();
+  // Deliberately dark-only on AuthShell, like the rest of the pre-app funnel: this route renders
+  // with no app chrome, so it carries no data-theme — the app's light-mode overrides can't reach
+  // it, and it stays coherent whichever theme the app is in.
   return (
-    <div className="min-h-screen bg-[#070810] text-white flex items-center justify-center p-6 relative overflow-hidden" data-theme={theme}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
-        body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; background: #070810; }
-        .font-display { font-family: 'Fraunces', ui-serif, serif; font-optical-sizing: auto; font-weight: 500; }
-        @keyframes float { 0%,100% { transform: translateY(0px); } 50% { transform: translateY(-20px); } }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-      `}</style>
-      <div className="absolute top-1/4 -left-32 w-96 h-96 rounded-full bg-violet-500/10 blur-3xl pointer-events-none" style={{ animation: 'float 8s ease-in-out infinite' }} />
-      <div className="absolute bottom-1/4 -right-32 w-96 h-96 rounded-full bg-fuchsia-500/10 blur-3xl pointer-events-none" style={{ animation: 'float 8s ease-in-out infinite reverse' }} />
-
-      <div className="relative w-full max-w-md" style={{ animation: 'fadeIn .4s ease' }}>
-        <div className="flex flex-col items-center mb-7">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-2xl shadow-fuchsia-500/30 mb-4">
-            <FolderKanban className="w-7 h-7 text-white" />
+    <AuthShell
+      icon={FolderKanban}
+      heading="Create your workspace"
+      tagline="A workspace is where your team's tasks, projects, and chat live. Name it to get started. You'll be its owner."
+      footnote={null}
+      beforeCard={pendingInvites.length > 0 ? (
+        <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/[0.06] p-5 shadow-2xl mb-4">
+          <div className="text-[11px] font-medium uppercase tracking-widest text-emerald-300/70 mb-2">You've been invited</div>
+          <div className="space-y-2">
+            {pendingInvites.map(inv => (
+              <div key={inv.id} className="flex items-center justify-between gap-2">
+                <div className="text-sm text-white/90 truncate">Join <span className="font-semibold">{inv.workspaceName}</span></div>
+                <button onClick={() => acceptInvitation(inv.token).catch(err => console.error('accept invite failed:', err))}
+                  className="shrink-0 h-8 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-semibold active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">Accept</button>
+              </div>
+            ))}
           </div>
-          <h1 className="text-2xl font-semibold text-white font-display tracking-tight">Create your workspace</h1>
-          <p className="text-sm text-white/45 mt-1.5 text-center">A workspace is where your team's tasks, projects, and chat live. Name it to get started. You'll be its owner.</p>
         </div>
-
-        {pendingInvites.length > 0 && (
-          <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/[0.06] p-5 shadow-2xl mb-4">
-            <div className="text-[11px] font-medium uppercase tracking-widest text-emerald-300/70 mb-2">You've been invited</div>
-            <div className="space-y-2">
-              {pendingInvites.map(inv => (
-                <div key={inv.id} className="flex items-center justify-between gap-2">
-                  <div className="text-sm text-white/90 truncate">Join <span className="font-semibold">{inv.workspaceName}</span></div>
-                  <button onClick={() => acceptInvitation(inv.token).catch(err => console.error('accept invite failed:', err))}
-                    className="shrink-0 h-8 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-semibold transition-colors">Accept</button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="rounded-2xl border border-white/10 bg-[#0f1017]/80 backdrop-blur p-6 shadow-2xl">
-          {pendingInvites.length > 0 && <div className="text-[11px] text-white/40 mb-3 text-center">Or create your own workspace</div>}
-          <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">Workspace name</label>
-          <CreateWorkspaceForm submitLabel="Create workspace & continue" />
-        </div>
-
-        <button onClick={() => onSignOut?.()} className="mt-6 mx-auto block text-[11px] text-white/30 hover:text-white/60 transition-colors">
+      ) : null}
+      footer={
+        <button onClick={() => onSignOut?.()}
+          className="mx-auto block text-[11px] text-white/35 hover:text-white/60 transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
           Sign out
         </button>
-      </div>
-    </div>
+      }
+    >
+      {pendingInvites.length > 0 && <div className="text-[11px] text-white/40 mb-3 text-center">Or create your own workspace</div>}
+      <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">Workspace name</label>
+      <CreateWorkspaceForm submitLabel="Create workspace & continue" />
+    </AuthShell>
   );
 }
 
@@ -5104,7 +5092,7 @@ function AppShell() {
   if (!currentWorkspaceId) {
     return (
       <Routes>
-        <Route path="/onboarding" element={<OnboardingScreen theme={theme} onSignOut={onSignOut} />} />
+        <Route path="/onboarding" element={<OnboardingScreen onSignOut={onSignOut} />} />
         <Route path="*" element={<Navigate to="/onboarding" replace />} />
       </Routes>
     );
