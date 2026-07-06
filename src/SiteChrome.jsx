@@ -1,13 +1,53 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Sparkles } from 'lucide-react';
+import { pointerMotionOK } from './lib/motion';
 
 /**
  * Shared marketing chrome used across the public pages (landing, pricing, terms, privacy) so the
  * header and footer stay identical everywhere. The header is sticky and scroll-aware: transparent
  * at the top of the page, with a blurred dark bar that CROSSFADES in (opacity-only — the bar is a
  * separate absolutely-positioned layer, so no layout ever changes) once the page scrolls.
+ *
+ * Also home to the shared marketing motion COMPONENTS (Magnetic, Hairline) so the landing and
+ * pricing pages share one implementation; the non-component utilities (pointerMotionOK,
+ * useRevealOnScroll) live in lib/motion.js to keep this file exporting components only
+ * (react-refresh rule). Everything animates transform/opacity only.
  */
+
+/** Magnetic wrapper for a primary CTA: the button leans a few px toward the cursor and springs
+ *  back on leave. Transform-only, writes straight to the node (no state), desktop-only. The
+ *  spring transition is inline so the component is self-contained on any page (a page-level
+ *  `transition: none !important` reduced-motion override still beats it). */
+export function Magnetic({ children, className = '' }) {
+  const ref = useRef(null);
+  const onMove = (e) => {
+    const el = ref.current;
+    if (!el || !pointerMotionOK()) return;
+    const r = el.getBoundingClientRect();
+    const dx = (e.clientX - (r.left + r.width / 2)) / (r.width / 2);
+    const dy = (e.clientY - (r.top + r.height / 2)) / (r.height / 2);
+    el.style.transform = `translate(${(dx * 5).toFixed(1)}px, ${(dy * 4).toFixed(1)}px)`;
+  };
+  const onLeave = () => { if (ref.current) ref.current.style.transform = ''; };
+  return (
+    <span
+      ref={ref}
+      onMouseMove={onMove}
+      onMouseLeave={onLeave}
+      className={`inline-flex ${className}`}
+      style={{ transition: 'transform .35s cubic-bezier(.22,1,.36,1)' }}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** Gradient hairline — the marketing pages' section divider. */
+export const Hairline = ({ className = '' }) => (
+  <div aria-hidden="true" className={`h-px bg-gradient-to-r from-transparent via-violet-400/25 to-transparent ${className}`} />
+);
+
 
 /** Text nav link with an animated gradient underline (transform-only scale-x). */
 function NavTextLink({ to, className = '', children }) {

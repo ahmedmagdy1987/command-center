@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom';
 import {
   KanbanSquare, Grid3x3, CalendarDays, UserCog, Zap, UserPlus, ArrowRight, Check, MousePointer2,
 } from 'lucide-react';
-import { SiteHeader, SiteFooter } from './SiteChrome';
+import { SiteHeader, SiteFooter, Magnetic, Hairline } from './SiteChrome';
+import { pointerMotionOK, useRevealOnScroll } from './lib/motion';
 
 /**
  * Public marketing landing page (logged-out `/`). Honest to what the product actually does: a
@@ -44,31 +45,6 @@ const STEPS = [
 const GRAIN =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E\")";
 
-/** True when it makes sense to run pointer-chasing niceties: a fine pointer and motion allowed. */
-const pointerMotionOK = () =>
-  window.matchMedia('(pointer: fine)').matches &&
-  !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-/** Magnetic wrapper for a primary CTA: the button leans a few px toward the cursor and springs
- *  back on leave. Transform-only, writes straight to the node (no state), desktop-only. */
-function Magnetic({ children, className = '' }) {
-  const ref = useRef(null);
-  const onMove = (e) => {
-    const el = ref.current;
-    if (!el || !pointerMotionOK()) return;
-    const r = el.getBoundingClientRect();
-    const dx = (e.clientX - (r.left + r.width / 2)) / (r.width / 2);
-    const dy = (e.clientY - (r.top + r.height / 2)) / (r.height / 2);
-    el.style.transform = `translate(${(dx * 5).toFixed(1)}px, ${(dy * 4).toFixed(1)}px)`;
-  };
-  const onLeave = () => { if (ref.current) ref.current.style.transform = ''; };
-  return (
-    <span ref={ref} onMouseMove={onMove} onMouseLeave={onLeave} className={`lp-magnet inline-flex ${className}`}>
-      {children}
-    </span>
-  );
-}
-
 /** Cursor-following glow for feature cards: positions a radial-gradient blob via CSS vars that a
  *  transform consumes (translate-only — the gradient itself is never repainted). */
 function glowTrack(e) {
@@ -78,9 +54,7 @@ function glowTrack(e) {
   e.currentTarget.style.setProperty('--gy', `${e.clientY - r.top}px`);
 }
 
-const Divider = () => (
-  <div aria-hidden="true" className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-violet-400/25 to-transparent" />
-);
+const Divider = () => <Hairline className="absolute top-0 inset-x-0" />;
 
 /** Skeleton task card for the decorative board. Fixed height so the drag overlay, the card it
  *  replaces, and the slot it lands on all align without any layout math. */
@@ -235,25 +209,8 @@ export default function LandingPage() {
     };
   }, []);
 
-  /* Scroll storytelling: one IntersectionObserver reveals [data-lp-reveal] sections/cards on first
-     view (then unobserves). The hidden state only exists under prefers-reduced-motion:
-     no-preference, so reduced-motion users (and any observer failure) always see everything.
-     The observer runs even under reduce (adding .lp-seen is a no-op there) so a mid-session
-     switch to no-preference can never strand content hidden. */
-  useEffect(() => {
-    const root = rootRef.current;
-    if (!root) return;
-    const els = Array.from(root.querySelectorAll('[data-lp-reveal]'));
-    if (!els.length) return;
-    if (!('IntersectionObserver' in window)) { els.forEach(el => el.classList.add('lp-seen')); return; }
-    const io = new IntersectionObserver((entries) => {
-      for (const en of entries) {
-        if (en.isIntersecting) { en.target.classList.add('lp-seen'); io.unobserve(en.target); }
-      }
-    }, { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
-    els.forEach(el => io.observe(el));
-    return () => io.disconnect();
-  }, []);
+  /* Scroll storytelling: shared reveal observer (see SiteChrome.useRevealOnScroll). */
+  useRevealOnScroll(rootRef);
 
   return (
     <div ref={rootRef} className="lp-root min-h-screen bg-[#070810] text-white relative">
@@ -338,7 +295,6 @@ export default function LandingPage() {
         }
 
         /* ---------- Micro-interactions ---------- */
-        .lp-magnet { transition: transform .35s cubic-bezier(.22,1,.36,1); will-change: transform; }
         .lp-cardGlow {
           position: absolute; top: 0; left: 0; width: 15rem; height: 15rem; border-radius: 9999px;
           background: radial-gradient(closest-side, rgba(139,92,246,.14), transparent 70%);

@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Check, ArrowRight, Minus, Users, MessagesSquare, Globe } from 'lucide-react';
 import {
   PLANS, PUBLIC_PLAN_IDS, MAIN_PLAN_IDS, SECONDARY_PLAN_IDS, FEATURE_TABLE, PRICING_COPY, BILLING_CYCLE,
   monthlyEquivalent, priceFor, annualSavings, formatMoney, formatLimit, formatHistory,
 } from './lib/plans';
-import { SiteHeader, SiteFooter } from './SiteChrome';
+import { SiteHeader, SiteFooter, Magnetic, Hairline } from './SiteChrome';
+import { useRevealOnScroll } from './lib/motion';
 
 /**
  * Public pricing page (/pricing). Reachable from the landing nav and from in-app upgrade prompts.
@@ -13,16 +14,25 @@ import { SiteHeader, SiteFooter } from './SiteChrome';
  * fuchsia brand) and the audit glossary (Workspace = tenant, Members = seats, Messages).
  * Everything reads from lib/plans.js. Positioned BROADLY via benefits, never branded narrowly.
  * No invented stats, logos, or testimonials.
+ *
+ * Motion mirrors the landing page's system (transform/opacity only, zero dependencies): a staged
+ * entrance for the header + plan cards (keyframes with fill:both, static styles = final state),
+ * drifting radial-gradient glows (no blur() filters), scroll reveals for the below-fold sections
+ * via the shared useRevealOnScroll, and the shared Magnetic primary-CTA treatment. One
+ * `.pp-root` reduced-motion override kills every decoration; the page renders complete without it.
  */
 const BENEFIT_ICONS = [Users, MessagesSquare, Globe];
 
 export default function PricingPage({ session }) {
   const navigate = useNavigate();
+  const rootRef = useRef(null);
   const [cycle, setCycle] = useState(BILLING_CYCLE.monthly);
   const annual = cycle === BILLING_CYCLE.annual;
   const plans = PUBLIC_PLAN_IDS.map(id => PLANS[id]);       // all public tiers — the comparison table
   const mainPlans = MAIN_PLAN_IDS.map(id => PLANS[id]);     // Free + Pro — the primary choice
   const secondaryPlans = SECONDARY_PLAN_IDS.map(id => PLANS[id]); // Business — de-emphasized strip
+
+  useRevealOnScroll(rootRef);
 
   const onChoose = (plan) => {
     if (!plan.paid) { navigate(session ? '/' : (plan.ctaTo || '/signup')); return; }
@@ -30,36 +40,59 @@ export default function PricingPage({ session }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#070810] text-white relative">
+    <div ref={rootRef} className="pp-root min-h-screen bg-[#070810] text-white relative">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
         body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; background: #070810; }
         .font-display { font-family: 'Fraunces', ui-serif, serif; font-optical-sizing: auto; font-weight: 500; }
-        @keyframes float { 0%,100% { transform: translateY(0px); } 50% { transform: translateY(-20px); } }
-        @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Entrance (fill: both; static styles = final state, so reduce shows the complete page) */
+        @keyframes ppFadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+        .pp-in { animation: ppFadeUp .65s cubic-bezier(.22,1,.36,1) both; }
+
+        /* Ambient drift (radial gradients — the gradient IS the softness, no blur() filters) */
+        @keyframes ppDrift1 { from { transform: translate3d(0,0,0) scale(1); } to { transform: translate3d(48px,32px,0) scale(1.12); } }
+        @keyframes ppDrift2 { from { transform: translate3d(0,0,0) scale(1.06); } to { transform: translate3d(-56px,24px,0) scale(.95); } }
+        @keyframes ppComet { 0% { transform: translateX(-240px); opacity: 0; } 10% { opacity: 1; } 55%, 100% { transform: translateX(110vw); opacity: 0; } }
+        .pp-comet { animation: ppComet 5.5s cubic-bezier(.4,0,.4,1) infinite; }
+
+        /* Scroll reveals (hidden state exists ONLY when motion is allowed) */
+        @media (prefers-reduced-motion: no-preference) {
+          [data-lp-reveal] {
+            opacity: 0;
+            transform: translateY(22px);
+            transition: opacity .65s ease var(--lp-d,0s), transform .65s cubic-bezier(.22,1,.36,1) var(--lp-d,0s);
+          }
+          [data-lp-reveal].lp-seen { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Reduced motion: kill ALL decoration; static styles are the complete page */
+        @media (prefers-reduced-motion: reduce) {
+          .pp-root *, .pp-root { animation: none !important; transition: none !important; }
+        }
       `}</style>
 
       {/* Background glows, clipped in their own layer so the page never scrolls sideways */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-[-6rem] left-1/4 w-[28rem] h-[28rem] rounded-full bg-violet-500/10 blur-3xl" style={{ animation: 'float 9s ease-in-out infinite' }} />
-        <div className="absolute top-1/3 -right-32 w-[26rem] h-[26rem] rounded-full bg-fuchsia-500/10 blur-3xl" style={{ animation: 'float 9s ease-in-out infinite reverse' }} />
+      <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+        <div className="absolute top-[-8rem] left-1/4 w-[32rem] h-[32rem] rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(139,92,246,.14), transparent 72%)', animation: 'ppDrift1 26s ease-in-out infinite alternate' }} />
+        <div className="absolute top-1/3 -right-40 w-[30rem] h-[30rem] rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(217,70,239,.11), transparent 72%)', animation: 'ppDrift2 32s ease-in-out infinite alternate' }} />
       </div>
 
       <SiteHeader session={session} />
 
-      <div className="relative max-w-6xl mx-auto px-5 lg:px-8">
+      <main className="relative max-w-6xl mx-auto px-5 lg:px-8">
         {/* Hero (compact: the three plan cards fit above the fold on a typical laptop) */}
-        <section className="pt-6 lg:pt-8 pb-5 text-center" style={{ animation: 'fadeUp .5s ease' }}>
-          <div className="inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-widest text-violet-300/80 bg-violet-500/10 border border-violet-400/20 rounded-full px-3 h-7 mb-3">
+        <section className="pt-6 lg:pt-8 pb-5 text-center">
+          <div className="pp-in inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-widest text-violet-300/80 bg-violet-500/10 border border-violet-400/20 rounded-full px-3 h-7 mb-3" style={{ animationDelay: '.05s' }}>
             {PRICING_COPY.eyebrow}
           </div>
-          <h1 className="text-2xl lg:text-3xl font-semibold font-display tracking-tight leading-[1.12] max-w-2xl mx-auto">
+          <h1 className="pp-in text-2xl lg:text-3xl font-semibold font-display tracking-tight leading-[1.12] max-w-2xl mx-auto" style={{ animationDelay: '.12s' }}>
             {PRICING_COPY.headline}
           </h1>
-          <p className="mt-2.5 text-sm lg:text-base text-white/55 max-w-xl mx-auto leading-relaxed">
+          <p className="pp-in mt-2.5 text-sm lg:text-base text-white/55 max-w-xl mx-auto leading-relaxed" style={{ animationDelay: '.22s' }}>
             {PRICING_COPY.sub}
           </p>
-          <div className="mt-3.5 flex flex-wrap justify-center gap-x-6 gap-y-1.5 text-[12px] text-white/60">
+          <div className="pp-in mt-3.5 flex flex-wrap justify-center gap-x-6 gap-y-1.5 text-[12px] text-white/60" style={{ animationDelay: '.32s' }}>
             {PRICING_COPY.benefits.map((b, i) => {
               const Icon = BENEFIT_ICONS[i] || Check;
               return (
@@ -72,7 +105,7 @@ export default function PricingPage({ session }) {
         </section>
 
         {/* Billing-cycle toggle */}
-        <div className="flex items-center justify-center gap-3 mb-5">
+        <div className="pp-in flex items-center justify-center gap-3 mb-5" style={{ animationDelay: '.42s' }}>
           <div className="inline-flex items-center p-1 rounded-full border border-white/10 bg-white/[0.03]">
             <button onClick={() => setCycle(BILLING_CYCLE.monthly)}
               className={cycleBtn(!annual)}>Monthly</button>
@@ -84,16 +117,19 @@ export default function PricingPage({ session }) {
           </div>
         </div>
 
-        {/* Primary choice: Free + Pro, two-up and centered */}
+        {/* Primary choice: Free + Pro, two-up and centered. Entrance lives on WRAPPER divs so the
+            fill:both animation can never pin the card's transform against its hover lift. */}
         <section className="grid md:grid-cols-2 gap-5 items-stretch max-w-3xl mx-auto">
-          {mainPlans.map(plan => (
-            <PlanCard key={plan.id} plan={plan} annual={annual} onChoose={() => onChoose(plan)} />
+          {mainPlans.map((plan, i) => (
+            <div key={plan.id} className="pp-in" style={{ animationDelay: `${0.52 + i * 0.12}s` }}>
+              <PlanCard plan={plan} annual={annual} onChoose={() => onChoose(plan)} />
+            </div>
           ))}
         </section>
 
         {/* Secondary: Business, de-emphasized — full details live in the comparison table below */}
         {secondaryPlans.map(plan => (
-          <div key={plan.id} className="mt-5 max-w-3xl mx-auto rounded-2xl border border-white/[0.07] bg-white/[0.02] px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3">
+          <div key={plan.id} className="pp-in mt-5 max-w-3xl mx-auto rounded-2xl border border-white/[0.07] bg-white/[0.02] px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3" style={{ animationDelay: '.78s' }}>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                 <span className="text-base font-semibold font-display">{plan.name}</span>
@@ -105,21 +141,22 @@ export default function PricingPage({ session }) {
               </div>
             </div>
             <button onClick={() => onChoose(plan)}
-              className="shrink-0 h-9 px-4 rounded-xl border border-white/[0.12] bg-white/[0.04] text-xs font-semibold text-white/85 hover:bg-white/[0.08] transition-colors inline-flex items-center justify-center gap-1.5">
+              className="shrink-0 h-9 px-4 rounded-xl border border-white/[0.12] bg-white/[0.04] text-xs font-semibold text-white/85 hover:bg-white/[0.08] active:scale-[.97] transition-all inline-flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
               {plan.cta}<ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
         ))}
 
         {/* Early-access honesty note */}
-        <p className="mt-6 text-center text-[12px] text-white/40 max-w-2xl mx-auto">
+        <p className="pp-in mt-6 text-center text-[12px] text-white/40 max-w-2xl mx-auto" style={{ animationDelay: '.9s' }}>
           {PRICING_COPY.earlyAccessNote}
         </p>
 
         {/* Comparison table */}
-        <section className="py-16">
-          <h2 className="text-2xl lg:text-3xl font-semibold font-display tracking-tight text-center mb-8">Compare plans</h2>
-          <div className="overflow-x-auto rounded-2xl border border-white/[0.06] bg-gradient-to-br from-white/[0.025] to-transparent">
+        <section className="relative mt-10 py-16">
+          <Hairline className="absolute top-0 inset-x-0" />
+          <h2 data-lp-reveal className="text-2xl lg:text-3xl font-semibold font-display tracking-tight text-center mb-8">Compare plans</h2>
+          <div data-lp-reveal style={{ '--lp-d': '120ms' }} className="overflow-x-auto rounded-2xl border border-white/[0.06] bg-gradient-to-br from-white/[0.025] to-transparent">
             <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="border-b border-white/10">
@@ -149,21 +186,31 @@ export default function PricingPage({ session }) {
         </section>
 
         {/* CTA band */}
-        <section className="pb-16">
-          <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-transparent p-8 lg:p-12 text-center">
-            <h2 className="text-2xl lg:text-3xl font-semibold font-display tracking-tight">Get your team in one place</h2>
-            <p className="mt-2 text-white/55">Start free in seconds. Bring in your people, inside or outside your company.</p>
-            <div className="mt-6 flex justify-center gap-3">
+        <section className="relative pb-16">
+          <Hairline className="absolute top-0 inset-x-0" />
+          <div data-lp-reveal className="relative overflow-hidden rounded-2xl border border-violet-400/20 bg-[#0c0d15] p-8 lg:p-12 text-center mt-16">
+            <div className="absolute inset-0 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/[0.07] to-transparent" aria-hidden="true" />
+            <div className="absolute -top-24 left-1/2 -ml-48 w-96 h-96 rounded-full" aria-hidden="true" style={{ background: 'radial-gradient(closest-side, rgba(167,139,250,.18), transparent 70%)', animation: 'ppDrift1 18s ease-in-out infinite alternate' }} />
+            <div className="absolute top-0 inset-x-0 h-px overflow-hidden" aria-hidden="true">
+              <span className="pp-comet absolute top-0 h-px w-60 bg-gradient-to-r from-transparent via-fuchsia-300/80 to-transparent" style={{ opacity: 0 }} />
+            </div>
+            <h2 className="relative text-2xl lg:text-3xl font-semibold font-display tracking-tight">Get your team in one place</h2>
+            <p className="relative mt-2 text-white/55">Start free in seconds. Bring in your people, inside or outside your company.</p>
+            <div className="relative mt-6 flex justify-center gap-3">
               {session ? (
-                <Link to="/" className="h-12 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 transition-all">
-                  Back to Command Center <ArrowRight className="w-4 h-4" />
-                </Link>
+                <Magnetic>
+                  <Link to="/" className="h-12 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+                    Back to Command Center <ArrowRight className="w-4 h-4" />
+                  </Link>
+                </Magnetic>
               ) : (
                 <>
-                  <Link to="/signup" className="h-12 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 transition-all">
-                    Get started free <ArrowRight className="w-4 h-4" />
-                  </Link>
-                  <Link to="/login" className="h-12 px-6 rounded-xl border border-white/10 bg-white/[0.03] text-white/80 font-medium text-sm flex items-center hover:bg-white/[0.06] transition-colors">
+                  <Magnetic>
+                    <Link to="/signup" className="h-12 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+                      Get started free <ArrowRight className="w-4 h-4" />
+                    </Link>
+                  </Magnetic>
+                  <Link to="/login" className="h-12 px-6 rounded-xl border border-white/10 bg-white/[0.03] text-white/80 font-medium text-sm flex items-center hover:bg-white/[0.06] active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
                     Log in
                   </Link>
                 </>
@@ -171,7 +218,7 @@ export default function PricingPage({ session }) {
             </div>
           </div>
         </section>
-      </div>
+      </main>
 
       <SiteFooter />
     </div>
@@ -181,7 +228,7 @@ export default function PricingPage({ session }) {
 /* ── Local helpers + subcomponents ─────────────────────────────────────────── */
 const cx = (...xs) => xs.filter(Boolean).join(' ');
 const cycleBtn = (active) =>
-  cx('inline-flex items-center h-9 px-4 rounded-full text-xs font-semibold transition-colors',
+  cx('inline-flex items-center h-9 px-4 rounded-full text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
     active ? 'bg-white text-[#0a0b11]' : 'text-white/60 hover:text-white');
 
 function cellFor(row, plan) {
@@ -198,13 +245,24 @@ function PlanCard({ plan, annual, onChoose }) {
   const cycle = annual ? BILLING_CYCLE.annual : BILLING_CYCLE.monthly;
   const perMonth = monthlyEquivalent(plan, cycle);
   const savings = annualSavings(plan);
+  const ctaCls = cx('h-10 w-full rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-[.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
+    plan.popular
+      ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white hover:shadow-lg hover:shadow-fuchsia-500/40 hover:brightness-110'
+      : plan.paid
+        ? 'bg-white text-[#0a0b11] hover:bg-white/90'
+        : 'border border-white/15 bg-white/[0.04] text-white/90 hover:bg-white/[0.08]');
+  const ctaBtn = (
+    <button onClick={onChoose} className={ctaCls}>
+      {plan.cta} <ArrowRight className="w-4 h-4" />
+    </button>
+  );
   return (
     <div className={cx(
-      'relative rounded-2xl border p-5 flex flex-col',
+      'relative h-full rounded-2xl border p-5 flex flex-col transition-all duration-300 hover:-translate-y-1',
       plan.popular && 'mt-3 md:mt-0',
       plan.popular
-        ? 'border-violet-400/40 bg-gradient-to-b from-violet-500/[0.10] to-white/[0.01] shadow-2xl shadow-violet-500/10'
-        : 'border-white/[0.08] bg-gradient-to-br from-white/[0.03] to-transparent',
+        ? 'border-violet-400/40 bg-gradient-to-b from-violet-500/[0.10] to-white/[0.01] shadow-2xl shadow-violet-500/10 hover:shadow-violet-500/25'
+        : 'border-white/[0.08] bg-gradient-to-br from-white/[0.03] to-transparent hover:border-violet-400/25 hover:shadow-xl hover:shadow-violet-950/40',
     )}>
       {plan.popular && (
         <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 h-6 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-[10px] font-bold uppercase tracking-widest flex items-center shadow-lg shadow-fuchsia-500/30">
@@ -225,15 +283,9 @@ function PlanCard({ plan, annual, onChoose }) {
           : 'No card required'}
       </div>
 
-      <button onClick={onChoose}
-        className={cx('mt-4 h-10 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all',
-          plan.popular
-            ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white hover:shadow-lg hover:shadow-fuchsia-500/30'
-            : plan.paid
-              ? 'bg-white text-[#0a0b11] hover:bg-white/90'
-              : 'border border-white/15 bg-white/[0.04] text-white/90 hover:bg-white/[0.08]')}>
-        {plan.cta} <ArrowRight className="w-4 h-4" />
-      </button>
+      {plan.popular
+        ? <Magnetic className="mt-4 w-full">{ctaBtn}</Magnetic>
+        : <div className="mt-4">{ctaBtn}</div>}
 
       <ul className="mt-4 space-y-2">
         {plan.inherits && <li className="text-[12px] font-medium text-white/55">Everything in {plan.inherits}, plus:</li>}
