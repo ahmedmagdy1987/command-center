@@ -1881,12 +1881,44 @@ function QuickAdd() {
    COMMAND PALETTE
 ================================================================================= */
 function CommandPalette() {
-  const { paletteOpen, setPaletteOpen, tasks, setEditingTask, setView, setQuickAddOpen, setTheme, theme, exportJSON } = useApp();
+  const { paletteOpen, setPaletteOpen, tasks, setEditingTask, setView, setQuickAddOpen, setTheme, theme, exportJSON,
+          currentWorkspaceId, setDmActiveConv, resolveAssignee } = useApp();
   const [q, setQ] = useState('');
   const inputRef = useRef(null);
   const [idx, setIdx] = useState(0);
+  // Messages aren't held in a global store, so load the workspace's team-chat + DM bodies on open
+  // and search them client-side. Both calls are RLS-scoped (team chat gates on non-guest membership,
+  // DMs on participation), so results can only ever include messages the user is already allowed to
+  // see — the same by-construction isolation as the task search (which filters the RLS-loaded tasks).
+  const [msgIndex, setMsgIndex] = useState([]);
 
   useEffect(() => { if (paletteOpen) { setQ(''); setIdx(0); setTimeout(() => inputRef.current?.focus(), 50); } }, [paletteOpen]);
+
+  useEffect(() => {
+    if (!paletteOpen) return;
+    let on = true;
+    const load = currentWorkspaceId
+      ? Promise.all([
+          messagesApi.list(200, currentWorkspaceId).catch(() => []),
+          directMessagesApi.listRecentMessages(currentWorkspaceId, 500).catch(() => []),
+        ])
+      : Promise.resolve([[], []]);   // no workspace → empty index (set async so this effect never setState-s synchronously)
+    load.then(([chat, dm]) => {
+      if (!on) return;
+      setMsgIndex([
+        ...chat.filter(m => m.body && !m.deletedAt).map(m => ({ kind: 'chat', id: m.id, body: m.body, senderId: m.senderId })),
+        ...dm.filter(m => m.body && !m.deletedAt).map(m => ({ kind: 'dm', id: m.id, body: m.body, senderId: m.senderId, conversationId: m.conversationId })),
+      ]);
+    });
+    return () => { on = false; };
+  }, [paletteOpen, currentWorkspaceId]);
+
+  // No per-message URL anchor exists (see recon) — deep-link to the channel / conversation, like notifications do.
+  const openMessage = (m) => {
+    setPaletteOpen(false);
+    if (m.kind === 'dm' && m.conversationId) { setDmActiveConv(m.conversationId); setView('dms'); }
+    else setView('chat');
+  };
 
   const commands = useMemo(() => [
     { id: 'new-task', label: 'New task', icon: Plus, run: () => { setPaletteOpen(false); setQuickAddOpen(true); } },
@@ -1905,17 +1937,22 @@ function CommandPalette() {
 
   const results = useMemo(() => {
     const term = q.trim().toLowerCase();
-    if (!term) return { cmds: commands.slice(0, 8), tasks: [] };
+    if (!term) return { cmds: commands.slice(0, 8), tasks: [], msgs: [] };
     const cmds = commands.filter(c => c.label.toLowerCase().includes(term));
     const tList = tasks.filter(t => {
       const title = (t.title || '').toLowerCase();
       const desc  = (t.description || '').toLowerCase();
       return title.includes(term) || desc.includes(term);
     }).slice(0, 6);
-    return { cmds, tasks: tList };
-  }, [q, tasks, commands]);
+    const msgs = msgIndex.filter(m => m.body.toLowerCase().includes(term)).slice(0, 6);
+    return { cmds, tasks: tList, msgs };
+  }, [q, tasks, commands, msgIndex]);
 
-  const flat = [...results.cmds.map(c => ({ type: 'cmd', item: c })), ...results.tasks.map(t => ({ type: 'task', item: t }))];
+  const flat = [
+    ...results.cmds.map(c => ({ type: 'cmd', item: c })),
+    ...results.tasks.map(t => ({ type: 'task', item: t })),
+    ...results.msgs.map(m => ({ type: 'msg', item: m })),
+  ];
 
   useEffect(() => { setIdx(0); }, [q]);
 
@@ -1927,7 +1964,8 @@ function CommandPalette() {
       const sel = flat[idx];
       if (!sel) return;
       if (sel.type === 'cmd') sel.item.run();
-      else { setEditingTask(sel.item); setPaletteOpen(false); }
+      else if (sel.type === 'task') { setEditingTask(sel.item); setPaletteOpen(false); }
+      else openMessage(sel.item);
     }
   };
 
@@ -1939,7 +1977,7 @@ function CommandPalette() {
         <div className="p-4 border-b border-white/5 flex items-center gap-3">
           <Command className="w-4 h-4 text-white/40" />
           <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)} onKeyDown={handleKey}
-            placeholder="Search tasks or run a command…"
+            placeholder="Search tasks, messages, or run a command…"
             className="flex-1 bg-transparent text-base text-white outline-none placeholder-white/30" />
           <kbd className="text-[10px] text-white/30 bg-white/5 border border-white/10 rounded px-1.5 py-0.5">Esc</kbd>
         </div>
@@ -1972,6 +2010,26 @@ function CommandPalette() {
                     <PriorityDot priority={t.priority} />
                     <span className="flex-1 truncate">{t.title}</span>
                     <AssigneeChip assigneeId={t.assigneeId} showLabel={false} />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {results.msgs.length > 0 && (
+            <div className="px-2 pt-2">
+              <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-white/30">Messages</div>
+              {results.msgs.map((m, i) => {
+                const ii = results.cmds.length + results.tasks.length + i;
+                const active = ii === idx;
+                const Icon = m.kind === 'dm' ? MessagesSquare : MessageSquare;
+                const who = resolveAssignee(m.senderId).label;
+                return (
+                  <button key={`${m.kind}-${m.id}`} onClick={() => openMessage(m)} onMouseEnter={() => setIdx(ii)}
+                    className={cx('w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm transition-colors',
+                      active ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5')}>
+                    <Icon className="w-4 h-4 shrink-0 text-white/40" />
+                    <span className="flex-1 min-w-0 truncate">{m.body}</span>
+                    <span className="text-[10px] text-white/30 shrink-0">{who} · {m.kind === 'dm' ? 'DM' : 'Team'}</span>
                   </button>
                 );
               })}
