@@ -1,28 +1,61 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Sparkles } from 'lucide-react';
 
 /**
  * Shared marketing chrome used across the public pages (landing, pricing, terms, privacy) so the
- * header and footer stay identical everywhere. The header is sticky with a subtle blurred bar.
+ * header and footer stay identical everywhere. The header is sticky and scroll-aware: transparent
+ * at the top of the page, with a blurred dark bar that CROSSFADES in (opacity-only — the bar is a
+ * separate absolutely-positioned layer, so no layout ever changes) once the page scrolls.
  */
-export function SiteHeader({ session }) {
+
+/** Text nav link with an animated gradient underline (transform-only scale-x). */
+function NavTextLink({ to, className = '', children }) {
   return (
-    <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-[#070810]/80 backdrop-blur-md">
-      <div className="max-w-6xl mx-auto px-5 lg:px-8 h-14 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/20">
+    <Link
+      to={to}
+      className={`relative h-9 px-3.5 rounded-lg text-sm font-medium text-white/70 hover:text-white items-center transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 after:content-[''] after:absolute after:left-3.5 after:right-3.5 after:bottom-1.5 after:h-px after:bg-gradient-to-r after:from-violet-400 after:to-fuchsia-400 after:origin-left after:scale-x-0 hover:after:scale-x-100 after:transition-transform after:duration-300 motion-reduce:after:transition-none ${className}`}
+    >
+      {children}
+    </Link>
+  );
+}
+
+export function SiteHeader({ session }) {
+  const [scrolled, setScrolled] = useState(() => typeof window !== 'undefined' && window.scrollY > 8);
+
+  useEffect(() => {
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => { raf = 0; setScrolled(window.scrollY > 8); });
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => { window.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf); };
+  }, []);
+
+  return (
+    <header className="sticky top-0 z-40">
+      {/* Crossfaded bar: border + blur + shadow live here and fade in on scroll */}
+      <div
+        aria-hidden="true"
+        className={`absolute inset-0 border-b border-white/[0.06] bg-[#070810]/85 backdrop-blur-md shadow-lg shadow-black/20 transition-opacity duration-300 motion-reduce:transition-none ${scrolled ? 'opacity-100' : 'opacity-0'}`}
+      />
+      <div className="relative max-w-6xl mx-auto px-5 lg:px-8 h-14 flex items-center justify-between">
+        <Link to="/" className="group flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/20 transition-transform duration-300 motion-reduce:transition-none group-hover:scale-110 group-hover:rotate-6">
             <Sparkles className="w-3.5 h-3.5 text-white" />
           </div>
           <span className="text-[15px] font-semibold font-display tracking-tight">Command Center</span>
         </Link>
         <nav className="flex items-center gap-1.5">
-          <Link to="/pricing" className="hidden sm:inline-flex h-9 px-3.5 rounded-lg text-sm font-medium text-white/70 hover:text-white hover:bg-white/[0.06] items-center transition-colors">Pricing</Link>
+          <NavTextLink to="/pricing" className="hidden sm:inline-flex">Pricing</NavTextLink>
           {session ? (
-            <Link to="/" className="h-9 px-4 rounded-lg text-sm font-semibold bg-white text-[#0a0b11] hover:bg-white/90 flex items-center transition-colors">Open app</Link>
+            <Link to="/" className="h-9 px-4 rounded-lg text-sm font-semibold bg-white text-[#0a0b11] hover:bg-white/90 active:scale-[.97] flex items-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">Open app</Link>
           ) : (
             <>
-              <Link to="/login" className="h-9 px-3.5 rounded-lg text-sm font-medium text-white/70 hover:text-white hover:bg-white/[0.06] flex items-center transition-colors">Log in</Link>
-              <Link to="/signup" className="h-9 px-4 rounded-lg text-sm font-semibold bg-white text-[#0a0b11] hover:bg-white/90 flex items-center transition-colors shadow-lg shadow-black/20">Sign up</Link>
+              <NavTextLink to="/login" className="flex">Log in</NavTextLink>
+              <Link to="/signup" className="h-9 px-4 rounded-lg text-sm font-semibold bg-white text-[#0a0b11] hover:bg-white/90 active:scale-[.97] flex items-center transition-all shadow-lg shadow-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">Sign up</Link>
             </>
           )}
         </nav>
@@ -31,25 +64,50 @@ export function SiteHeader({ session }) {
   );
 }
 
+function FooterCol({ title, links }) {
+  return (
+    <div>
+      <div className="text-[10px] font-medium uppercase tracking-widest text-white/50 mb-2">{title}</div>
+      <ul className="space-y-1 text-[13px]">
+        {links.map(([label, to]) => (
+          <li key={label}>
+            {to.startsWith('mailto:')
+              ? <a href={to} className="inline-block py-1.5 text-white/55 hover:text-white transition-colors">{label}</a>
+              : <Link to={to} className="inline-block py-1.5 text-white/55 hover:text-white transition-colors">{label}</Link>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function SiteFooter() {
   const year = new Date().getFullYear();
   return (
-    <footer className="relative border-t border-white/[0.06] mt-8">
-      <div className="max-w-6xl mx-auto px-5 lg:px-8 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-[12px] text-white/40">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center">
-            <Sparkles className="w-3 h-3 text-white" />
+    <footer className="relative mt-8 overflow-hidden">
+      <div aria-hidden="true" className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-violet-400/25 to-transparent" />
+      <div aria-hidden="true" className="absolute -top-28 left-1/2 -ml-44 h-72 rounded-full pointer-events-none" style={{ width: '22rem', background: 'radial-gradient(closest-side, rgba(139,92,246,.09), transparent 70%)' }} />
+      <div className="relative max-w-6xl mx-auto px-5 lg:px-8 pt-10 pb-8">
+        <div className="flex flex-col md:flex-row md:items-start justify-between gap-8">
+          <div className="max-w-xs">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center">
+                <Sparkles className="w-3 h-3 text-white" />
+              </div>
+              <span className="text-white/80 font-semibold font-display tracking-tight">Command Center</span>
+            </div>
+            <p className="mt-3 text-[12px] text-white/40 leading-relaxed">
+              One visual workspace for your team’s tasks, owners, and due dates — live for everyone.
+            </p>
           </div>
-          <span className="text-white/60 font-medium">Command Center</span>
-          <span className="hidden sm:inline text-white/25">·</span>
-          <span className="hidden sm:inline">© {year} Command Center. All rights reserved.</span>
+          <div className="flex gap-14">
+            <FooterCol title="Product" links={[['Pricing', '/pricing'], ['Log in', '/login'], ['Sign up', '/signup']]} />
+            <FooterCol title="Company" links={[['Terms', '/terms'], ['Privacy', '/privacy'], ['Contact', 'mailto:hello@example.com']]} />
+          </div>
         </div>
-        <nav className="flex items-center gap-4">
-          <Link to="/pricing" className="hover:text-white/70 transition-colors">Pricing</Link>
-          <Link to="/terms" className="hover:text-white/70 transition-colors">Terms</Link>
-          <Link to="/privacy" className="hover:text-white/70 transition-colors">Privacy</Link>
-          <a href="mailto:hello@example.com" className="hover:text-white/70 transition-colors">Contact</a>
-        </nav>
+        <div className="mt-9 pt-5 border-t border-white/[0.06] text-[12px] text-white/50">
+          © {year} Command Center. All rights reserved.
+        </div>
       </div>
     </footer>
   );

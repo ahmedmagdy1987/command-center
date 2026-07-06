@@ -44,6 +44,44 @@ const STEPS = [
 const GRAIN =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E\")";
 
+/** True when it makes sense to run pointer-chasing niceties: a fine pointer and motion allowed. */
+const pointerMotionOK = () =>
+  window.matchMedia('(pointer: fine)').matches &&
+  !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** Magnetic wrapper for a primary CTA: the button leans a few px toward the cursor and springs
+ *  back on leave. Transform-only, writes straight to the node (no state), desktop-only. */
+function Magnetic({ children, className = '' }) {
+  const ref = useRef(null);
+  const onMove = (e) => {
+    const el = ref.current;
+    if (!el || !pointerMotionOK()) return;
+    const r = el.getBoundingClientRect();
+    const dx = (e.clientX - (r.left + r.width / 2)) / (r.width / 2);
+    const dy = (e.clientY - (r.top + r.height / 2)) / (r.height / 2);
+    el.style.transform = `translate(${(dx * 5).toFixed(1)}px, ${(dy * 4).toFixed(1)}px)`;
+  };
+  const onLeave = () => { if (ref.current) ref.current.style.transform = ''; };
+  return (
+    <span ref={ref} onMouseMove={onMove} onMouseLeave={onLeave} className={`lp-magnet inline-flex ${className}`}>
+      {children}
+    </span>
+  );
+}
+
+/** Cursor-following glow for feature cards: positions a radial-gradient blob via CSS vars that a
+ *  transform consumes (translate-only — the gradient itself is never repainted). */
+function glowTrack(e) {
+  if (!pointerMotionOK()) return;
+  const r = e.currentTarget.getBoundingClientRect();
+  e.currentTarget.style.setProperty('--gx', `${e.clientX - r.left}px`);
+  e.currentTarget.style.setProperty('--gy', `${e.clientY - r.top}px`);
+}
+
+const Divider = () => (
+  <div aria-hidden="true" className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-violet-400/25 to-transparent" />
+);
+
 /** Skeleton task card for the decorative board. Fixed height so the drag overlay, the card it
  *  replaces, and the slot it lands on all align without any layout math. */
 function GhostCard({ w1, w2, color, dot, avatar, progress, solid, className = '', style }) {
@@ -56,7 +94,7 @@ function GhostCard({ w1, w2, color, dot, avatar, progress, solid, className = ''
       {progress ? (
         <div className="h-1 rounded-full bg-white/10 overflow-hidden relative">
           <span className="absolute inset-y-0 left-0 w-[55%] rounded-full bg-violet-400/50 overflow-hidden">
-            <span className="lp-sheen absolute inset-y-0 w-2/5 bg-gradient-to-r from-transparent via-white/40 to-transparent" />
+            <span className="lp-sheen absolute inset-y-0 w-2/5 bg-gradient-to-r from-transparent via-white/40 to-transparent" style={{ opacity: 0 }} />
           </span>
         </div>
       ) : (
@@ -70,11 +108,14 @@ function GhostCard({ w1, w2, color, dot, avatar, progress, solid, className = ''
   );
 }
 
-/** The living product mockup: a stylized board where a cursor drags a card To do → Doing on a
- *  gentle 12s loop, presence dots pulse, and a completion toast slides through. Not real data. */
+/** The living product mockup: a stylized board where a cursor drags a card Inbox → Must Do on a
+ *  gentle 12s loop, presence dots pulse, and a completion toast slides through. Not real data,
+ *  but the column names are the product's real statuses. */
 function LiveBoard() {
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#0f1017]/80 backdrop-blur p-4 shadow-2xl relative">
+    // Solid surface on purpose: backdrop-blur here would force an uncacheable per-frame blur
+    // pass, since both this card and the aurora behind it are continuously transform-animated.
+    <div className="rounded-2xl border border-white/10 bg-[#0f1017] p-4 shadow-2xl relative">
       {/* Window chrome + presence cluster */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-1.5">
@@ -100,7 +141,7 @@ function LiveBoard() {
         {/* To do */}
         <div>
           <div className="flex items-center gap-1.5 mb-2 text-[10px] uppercase tracking-widest text-white/40">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#a78bfa]" />To do
+            <span className="w-1.5 h-1.5 rounded-full bg-[#a78bfa]" />Inbox
           </div>
           <div className="relative space-y-2">
             {/* Card A — the one that gets "picked up" (its opacity hands off to the overlay) */}
@@ -122,7 +163,7 @@ function LiveBoard() {
         {/* Doing */}
         <div>
           <div className="flex items-center gap-1.5 mb-2 text-[10px] uppercase tracking-widest text-white/40">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#38bdf8]" />Doing
+            <span className="w-1.5 h-1.5 rounded-full bg-[#38bdf8]" />Must Do
           </div>
           <div className="relative space-y-2">
             {/* Landing slot: dashed hint during the drag; the landed card fades in beneath the overlay */}
@@ -182,6 +223,7 @@ export default function LandingPage() {
       }
     };
     const onMove = (e) => {
+      if (!pointerMotionOK()) return; // re-check per event so a mid-session reduce toggle freezes it
       mx = (e.clientX / window.innerWidth - 0.5) * 2;
       my = (e.clientY / window.innerHeight - 0.5) * 2;
       if (!raf) raf = requestAnimationFrame(apply);
@@ -191,6 +233,26 @@ export default function LandingPage() {
       window.removeEventListener('mousemove', onMove);
       if (raf) cancelAnimationFrame(raf);
     };
+  }, []);
+
+  /* Scroll storytelling: one IntersectionObserver reveals [data-lp-reveal] sections/cards on first
+     view (then unobserves). The hidden state only exists under prefers-reduced-motion:
+     no-preference, so reduced-motion users (and any observer failure) always see everything.
+     The observer runs even under reduce (adding .lp-seen is a no-op there) so a mid-session
+     switch to no-preference can never strand content hidden. */
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const els = Array.from(root.querySelectorAll('[data-lp-reveal]'));
+    if (!els.length) return;
+    if (!('IntersectionObserver' in window)) { els.forEach(el => el.classList.add('lp-seen')); return; }
+    const io = new IntersectionObserver((entries) => {
+      for (const en of entries) {
+        if (en.isIntersecting) { en.target.classList.add('lp-seen'); io.unobserve(en.target); }
+      }
+    }, { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
+    els.forEach(el => io.observe(el));
+    return () => io.disconnect();
   }, []);
 
   return (
@@ -250,7 +312,7 @@ export default function LandingPage() {
           84%, 100% { opacity: 0; transform: translateY(-6px) scale(.98); }
         }
         @keyframes lpPing { 0% { opacity: .7; transform: scale(1); } 70%, 100% { opacity: 0; transform: scale(2.2); } }
-        @keyframes lpSheenMove { 0% { transform: translateX(-110%); } 60%, 100% { transform: translateX(260%); } }
+        @keyframes lpSheenMove { 0% { transform: translateX(-110%); opacity: 0; } 8% { opacity: 1; } 50% { opacity: 1; } 60%, 100% { transform: translateX(260%); opacity: 0; } }
 
         .lp-float    { animation: lpFloat 7s ease-in-out infinite; }
         .lp-drag     { animation: lpDragMove 12s cubic-bezier(.45,.05,.35,1) infinite; }
@@ -264,6 +326,27 @@ export default function LandingPage() {
         .lp-ping     { animation: lpPing 3.2s cubic-bezier(0,0,.2,1) infinite; }
         .lp-ping-2   { animation-delay: 1.6s; }
         .lp-sheen    { animation: lpSheenMove 3.6s ease-in-out infinite; }
+
+        /* ---------- Scroll reveals (hidden state exists ONLY when motion is allowed) ---------- */
+        @media (prefers-reduced-motion: no-preference) {
+          [data-lp-reveal] {
+            opacity: 0;
+            transform: translateY(22px);
+            transition: opacity .65s ease var(--lp-d,0s), transform .65s cubic-bezier(.22,1,.36,1) var(--lp-d,0s);
+          }
+          [data-lp-reveal].lp-seen { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ---------- Micro-interactions ---------- */
+        .lp-magnet { transition: transform .35s cubic-bezier(.22,1,.36,1); will-change: transform; }
+        .lp-cardGlow {
+          position: absolute; top: 0; left: 0; width: 15rem; height: 15rem; border-radius: 9999px;
+          background: radial-gradient(closest-side, rgba(139,92,246,.14), transparent 70%);
+          transform: translate(calc(var(--gx, -999px) - 7.5rem), calc(var(--gy, -999px) - 7.5rem));
+          pointer-events: none;
+        }
+        @keyframes lpComet { 0% { transform: translateX(-240px); opacity: 0; } 10% { opacity: 1; } 55%, 100% { transform: translateX(110vw); opacity: 0; } }
+        .lp-comet { animation: lpComet 5.5s cubic-bezier(.4,0,.4,1) infinite; }
 
         /* ---------- Reduced motion: kill ALL decoration; static styles are the complete page ---------- */
         @media (prefers-reduced-motion: reduce) {
@@ -297,7 +380,7 @@ export default function LandingPage() {
 
       <SiteHeader />
 
-      <div className="relative max-w-6xl mx-auto px-5 lg:px-8">
+      <main className="relative max-w-6xl mx-auto px-5 lg:px-8">
         {/* Hero (compact: fits above the fold on a typical laptop) */}
         <section className="pt-8 lg:pt-12 pb-10 grid lg:grid-cols-2 gap-8 lg:gap-10 items-center">
           <div>
@@ -313,9 +396,11 @@ export default function LandingPage() {
               a priority matrix, or a schedule, live for the whole team.
             </p>
             <div className="lp-in mt-6 flex flex-wrap items-center gap-3" style={{ animationDelay: '.52s' }}>
-              <Link to="/signup" className="h-11 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
-                Get organized free <ArrowRight className="w-4 h-4" />
-              </Link>
+              <Magnetic>
+                <Link to="/signup" className="h-11 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+                  Get organized free <ArrowRight className="w-4 h-4" />
+                </Link>
+              </Magnetic>
               <Link to="/login" className="h-11 px-6 rounded-xl border border-white/10 bg-white/[0.03] text-white/80 font-medium text-sm flex items-center hover:bg-white/[0.06] active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
                 Log in
               </Link>
@@ -339,49 +424,72 @@ export default function LandingPage() {
         </section>
 
         {/* Features */}
-        <section className="py-14 border-t border-white/[0.06]">
-          <h2 className="text-2xl lg:text-3xl font-semibold font-display tracking-tight">Everything your team needs to stay on track</h2>
-          <p className="mt-2 text-white/45 max-w-2xl">One workspace for the work, the people, and the plan.</p>
+        <section className="relative py-14">
+          <Divider />
+          <div data-lp-reveal>
+            <h2 className="text-2xl lg:text-3xl font-semibold font-display tracking-tight">Everything your team needs to stay on track</h2>
+            <p className="mt-2 text-white/45 max-w-2xl">One workspace for the work, the people, and the plan.</p>
+          </div>
           <div className="mt-9 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {FEATURES.map(f => (
-              <div key={f.title} className="rounded-2xl border border-white/[0.06] bg-gradient-to-br from-white/[0.03] to-transparent p-5">
-                <div className="w-10 h-10 rounded-xl bg-violet-500/10 border border-violet-400/20 flex items-center justify-center mb-3">
-                  <f.icon className="w-5 h-5 text-violet-300" />
+            {/* Reveal lives on a WRAPPER div so its transition rule can never collide with the
+                card's own transition-all hover treatment (same-specificity cascade tie). */}
+            {FEATURES.map((f, i) => (
+              <div key={f.title} data-lp-reveal style={{ '--lp-d': `${(i % 3) * 90}ms` }}>
+                <div
+                  onMouseMove={glowTrack}
+                  className="group relative h-full overflow-hidden rounded-2xl border border-white/[0.06] bg-gradient-to-br from-white/[0.03] to-transparent p-5 transition-all duration-300 hover:-translate-y-1 hover:border-violet-400/25 hover:shadow-xl hover:shadow-violet-950/40"
+                >
+                  <span className="lp-cardGlow opacity-0 group-hover:opacity-100 transition-opacity duration-300" aria-hidden="true" />
+                  <div className="relative w-10 h-10 rounded-xl bg-violet-500/10 border border-violet-400/20 flex items-center justify-center mb-3 transition-colors duration-300 group-hover:bg-violet-500/20 group-hover:border-violet-400/40">
+                    <f.icon className="w-5 h-5 text-violet-300 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6" />
+                  </div>
+                  <h3 className="relative text-base font-semibold text-white">{f.title}</h3>
+                  <p className="relative mt-1 text-[13px] text-white/50 leading-relaxed">{f.body}</p>
                 </div>
-                <h3 className="text-base font-semibold text-white">{f.title}</h3>
-                <p className="mt-1 text-[13px] text-white/50 leading-relaxed">{f.body}</p>
               </div>
             ))}
           </div>
         </section>
 
         {/* How it works */}
-        <section className="py-14 border-t border-white/[0.06]">
-          <h2 className="text-2xl lg:text-3xl font-semibold font-display tracking-tight">How it works</h2>
+        <section className="relative py-14">
+          <Divider />
+          <h2 data-lp-reveal className="text-2xl lg:text-3xl font-semibold font-display tracking-tight">How it works</h2>
           <div className="mt-9 grid md:grid-cols-3 gap-4">
-            {STEPS.map(s => (
-              <div key={s.n} className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-sm font-bold mb-3">{s.n}</div>
-                <h3 className="text-base font-semibold text-white">{s.title}</h3>
-                <p className="mt-1 text-[13px] text-white/50 leading-relaxed">{s.body}</p>
+            {STEPS.map((s, i) => (
+              <div key={s.n} data-lp-reveal style={{ '--lp-d': `${i * 110}ms` }}>
+                <div className="group h-full rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5 transition-all duration-300 hover:-translate-y-1 hover:border-white/[0.12]">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-sm font-bold mb-3 shadow-lg shadow-violet-950/50 transition-transform duration-300 group-hover:scale-110">{s.n}</div>
+                  <h3 className="text-base font-semibold text-white">{s.title}</h3>
+                  <p className="mt-1 text-[13px] text-white/50 leading-relaxed">{s.body}</p>
+                </div>
               </div>
             ))}
           </div>
         </section>
 
         {/* CTA band */}
-        <section className="py-14 border-t border-white/[0.06]">
-          <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-transparent p-8 lg:p-12 text-center">
-            <h2 className="text-2xl lg:text-3xl font-semibold font-display tracking-tight">Ready to organize your team’s work?</h2>
-            <p className="mt-2 text-white/55">Create a workspace in seconds. It’s free to get started.</p>
-            <div className="mt-6 flex justify-center gap-3">
-              <Link to="/signup" className="h-12 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
-                Get organized free <ArrowRight className="w-4 h-4" />
-              </Link>
+        <section className="relative py-14">
+          <Divider />
+          <div data-lp-reveal className="relative overflow-hidden rounded-2xl border border-violet-400/20 bg-[#0c0d15] p-8 lg:p-12 text-center">
+            {/* Inner atmosphere: brand wash + a slow-drifting glow + a comet along the top hairline */}
+            <div className="absolute inset-0 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/[0.07] to-transparent" aria-hidden="true" />
+            <div className="absolute -top-24 left-1/2 -ml-48 w-96 h-96 rounded-full" aria-hidden="true" style={{ background: 'radial-gradient(closest-side, rgba(167,139,250,.18), transparent 70%)', animation: 'lpDrift3 18s ease-in-out infinite alternate' }} />
+            <div className="absolute top-0 inset-x-0 h-px overflow-hidden" aria-hidden="true">
+              <span className="lp-comet absolute top-0 h-px w-60 bg-gradient-to-r from-transparent via-fuchsia-300/80 to-transparent" style={{ opacity: 0 }} />
+            </div>
+            <h2 className="relative text-2xl lg:text-3xl font-semibold font-display tracking-tight">Ready to organize your team’s work?</h2>
+            <p className="relative mt-2 text-white/55">Create a workspace in seconds. It’s free to get started.</p>
+            <div className="relative mt-6 flex justify-center gap-3">
+              <Magnetic>
+                <Link to="/signup" className="h-12 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+                  Get organized free <ArrowRight className="w-4 h-4" />
+                </Link>
+              </Magnetic>
             </div>
           </div>
         </section>
-      </div>
+      </main>
 
       <SiteFooter />
     </div>
