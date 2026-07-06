@@ -1,7 +1,9 @@
 # Command Center — project guide for Claude
 
 > Orientation file so any future session is instantly up to speed. Last verified against the
-> live DB on **2026-06-26** (latest migration `20260626152653` — due-date reminders via pg_cron). Public
+> live DB on **2026-07-06** — current through `20260701161427` (harden_handle_new_user_search_path). The
+> 9ffaa42 security pass is fully CLOSED OUT: security headers + `.gitignore` verified live, the hardening
+> migration was already applied 2026-07-01, and the repo filename was reconciled to the ledger in `6ec6f95`. Public
 > sign-up is **OPEN** (`SIGNUP_ENABLED = true`). Tenant isolation is proven by rolled-back impersonation
 > tests — **0 cross-tenant leaks** (45 assertions; see *Pre-launch security audit*) — and the
 > **workspace roles** system added since (owner/admin/member/guest) has its own **35/35** rolled-back
@@ -521,7 +523,9 @@ auto-escapes every user string; one static `mailto:` link), only the **anon key*
 is **client-side only** — UX not security, moot under `founding`, must be enforced server-side before real
 paid plans; (b) presence/typing channels are **public Realtime broadcast** (metadata only — name/typing/read
 cursor) → adopt Realtime Authorization (private channels) before scale; (c) **auth dashboard hardening**
-(leaked-password protection, password policy, email-confirm + SMTP, captcha, rate limits) before real traffic.
+(leaked-password protection, password policy, email-confirm + SMTP, captcha, rate limits) before real traffic
+— since updated: password min is **10** (2026-07-06) and the leaked-password WARN is **ACCEPTED** (Free-plan
+limitation; see *Roadmap* item 1).
 Fixed in-pass: workspace-scoped task-reconcile, removed the global-presence footgun default, no-empty catches.
 **(Current lint baseline: 31 errors / 2 warnings.)**
 
@@ -612,9 +616,12 @@ pg_cron** (`20260626152555`/`…152653`), and the **per-account Free/Pro packagi
 rolled-back proof). See *Workspace roles, mentions & guest UX*.
 
 **Before real paid traffic (flagged by the 2026-06-26 audit — none applied yet):**
-1. **Auth dashboard hardening** (Supabase dashboard — no code): enable Leaked Password Protection (clears the
-   one standing advisor), raise the password policy, turn ON Confirm-email + working SMTP, enable Captcha /
-   bot protection, tighten Auth rate limits, and lock the redirect-URL allowlist (incl. `/reset-password`).
+1. **Auth dashboard hardening** (Supabase dashboard — no code): **password minimum raised 6 → 10**
+   (2026-07-06; app UI hints/validation synced same day). **Leaked Password Protection = ACCEPTED risk — do
+   NOT chase the standing `auth_leaked_password_protection` advisor WARN**: the toggle is a Supabase
+   **Pro-plan** feature and this project is on the **Free** plan; revisit at the Pro upgrade (planned before
+   real users anyway, primarily for daily backups). Still open: Confirm-email + working SMTP, Captcha / bot
+   protection, Auth rate limits, and the redirect-URL allowlist (incl. `/reset-password`).
 2. **Server-side entitlement enforcement** — every plan/feature/limit gate is **client-only** today (fine
    under the all-access `founding` default, bypassable the moment real plans exist). Enforce in RLS/RPCs
    before the paywall goes live (the `resolvePlanId` seam + a DB plan column are the landing spots).
