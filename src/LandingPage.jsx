@@ -1,6 +1,7 @@
+import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  KanbanSquare, Grid3x3, CalendarDays, UserCog, Zap, UserPlus, ArrowRight, Check,
+  KanbanSquare, Grid3x3, CalendarDays, UserCog, Zap, UserPlus, ArrowRight, Check, MousePointer2,
 } from 'lucide-react';
 import { SiteHeader, SiteFooter } from './SiteChrome';
 
@@ -8,7 +9,21 @@ import { SiteHeader, SiteFooter } from './SiteChrome';
  * Public marketing landing page (logged-out `/`). Honest to what the product actually does: a
  * visual team task command center, with no invented stats, logos, or testimonials. Copy is
  * placeholder positioning meant to be refined. Matches the app's visual language (dark, the
- * violet/fuchsia/rose gradient, Outfit + Fraunces). CTAs route to /signup and /login.
+ * violet/fuchsia/rose gradient, Outfit + Fraunces).
+ *
+ * Motion system (all decorative, all GPU-composited — transform/opacity only, no layout writes):
+ *  - Hero entrance: a single ~1.3s choreography (badge → headline line-reveals → subhead → CTAs →
+ *    trust row, mockup perspective-settles in parallel). Keyframes use `both` fill so every
+ *    element's STATIC style is its final visible state — under prefers-reduced-motion the whole
+ *    page renders complete with `animation: none`.
+ *  - Living mockup: one shared 12s loop across seven synced keyframe timelines (drag travel, card
+ *    visual, lift glow, cursor, drop hint, landed card, toast). The "drag" is sleight of hand: the
+ *    static top card fades out while an overlay clone travels `translate(calc(100% + 12px))` (one
+ *    column + the fixed gap-3) and fades away over a pre-rendered landed card. No layout ever moves.
+ *  - Ambient: radial-gradient aurora blobs (no blur() filters — the gradient IS the softness) on
+ *    slow drift loops, a static masked grid, static SVG-noise grain, and an rAF mouse parallax
+ *    (desktop fine-pointer only) that transforms the blobs' WRAPPERS so it can't fight the drift
+ *    animation on the blob itself.
  */
 const FEATURES = [
   { icon: KanbanSquare, title: 'Kanban board', body: 'Drag tasks across stages and see your whole pipeline at a glance.' },
@@ -25,82 +40,299 @@ const STEPS = [
   { n: '3', title: 'Track it your way', body: 'Kanban, priority matrix, or schedule, all live and in sync.' },
 ];
 
-export default function LandingPage() {
+/* Grain: tiny inline SVG turbulence tile, painted once and repeated. Static — never animated. */
+const GRAIN =
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E\")";
+
+/** Skeleton task card for the decorative board. Fixed height so the drag overlay, the card it
+ *  replaces, and the slot it lands on all align without any layout math. */
+function GhostCard({ w1, w2, color, dot, avatar, progress, solid, className = '', style }) {
   return (
-    <div className="min-h-screen bg-[#070810] text-white relative">
+    <div
+      className={`h-[52px] rounded-lg border p-2.5 ${solid ? 'border-violet-400/25 bg-[#171826]' : 'border-white/[0.06] bg-white/[0.03]'} ${className}`}
+      style={style}
+    >
+      <div className="h-1.5 rounded-full mb-2" style={{ width: w1, background: color, opacity: 0.55 }} />
+      {progress ? (
+        <div className="h-1 rounded-full bg-white/10 overflow-hidden relative">
+          <span className="absolute inset-y-0 left-0 w-[55%] rounded-full bg-violet-400/50 overflow-hidden">
+            <span className="lp-sheen absolute inset-y-0 w-2/5 bg-gradient-to-r from-transparent via-white/40 to-transparent" />
+          </span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5">
+          {avatar && <span className="w-3 h-3 rounded-full shrink-0" style={{ background: avatar }} />}
+          <div className="h-1 rounded-full bg-white/10" style={{ width: w2 }} />
+          {dot && <span className="w-1.5 h-1.5 rounded-full ml-auto shrink-0" style={{ background: dot }} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The living product mockup: a stylized board where a cursor drags a card To do → Doing on a
+ *  gentle 12s loop, presence dots pulse, and a completion toast slides through. Not real data. */
+function LiveBoard() {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#0f1017]/80 backdrop-blur p-4 shadow-2xl relative">
+      {/* Window chrome + presence cluster */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-rose-400/70" />
+          <span className="w-2.5 h-2.5 rounded-full bg-amber-400/70" />
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400/70" />
+        </div>
+        <div className="flex items-center -space-x-1.5">
+          {[
+            ['linear-gradient(135deg,#8b5cf6,#d946ef)', 'lp-ping'],
+            ['linear-gradient(135deg,#38bdf8,#818cf8)', 'lp-ping lp-ping-2'],
+            ['linear-gradient(135deg,#f59e0b,#f43f5e)', null],
+          ].map(([bg, ping], i) => (
+            <span key={i} className="relative w-5 h-5 rounded-full border-2 border-[#0f1017]" style={{ background: bg }}>
+              {ping && <span className={`${ping} absolute -bottom-px -right-px w-2 h-2 rounded-full bg-emerald-400`} style={{ opacity: 0 }} />}
+              {ping && <span className="absolute -bottom-px -right-px w-2 h-2 rounded-full bg-emerald-400 border border-[#0f1017]" />}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        {/* To do */}
+        <div>
+          <div className="flex items-center gap-1.5 mb-2 text-[10px] uppercase tracking-widest text-white/40">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#a78bfa]" />To do
+          </div>
+          <div className="relative space-y-2">
+            {/* Card A — the one that gets "picked up" (its opacity hands off to the overlay) */}
+            <GhostCard w1="72%" w2="44%" color="#a78bfa" avatar="linear-gradient(135deg,#8b5cf6,#d946ef)" dot="#fbbf24" className="lp-cardA" />
+            <GhostCard w1="58%" w2="36%" color="#a78bfa" dot="#f43f5e" />
+            <GhostCard w1="66%" w2="52%" color="#a78bfa" avatar="linear-gradient(135deg,#38bdf8,#818cf8)" />
+
+            {/* Drag overlay: travels exactly one column + gap right. Invisible at rest. */}
+            <div className="lp-drag absolute inset-x-0 top-0 z-10 !mt-0">
+              <div className="relative">
+                <div className="lp-dragGlow absolute -inset-1 rounded-xl bg-violet-500/25" style={{ opacity: 0 }} />
+                <GhostCard w1="72%" w2="44%" color="#a78bfa" avatar="linear-gradient(135deg,#8b5cf6,#d946ef)" dot="#fbbf24" solid className="lp-dragCard relative shadow-xl shadow-black/40" style={{ opacity: 0 }} />
+                <MousePointer2 className="lp-cursor absolute left-[58%] top-[46%] w-4 h-4 text-white drop-shadow-md" fill="white" style={{ opacity: 0 }} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Doing */}
+        <div>
+          <div className="flex items-center gap-1.5 mb-2 text-[10px] uppercase tracking-widest text-white/40">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#38bdf8]" />Doing
+          </div>
+          <div className="relative space-y-2">
+            {/* Landing slot: dashed hint during the drag; the landed card fades in beneath the overlay */}
+            <div className="relative">
+              <div className="lp-dropHint absolute inset-0 rounded-lg border border-dashed border-violet-400/40" style={{ opacity: 0 }} />
+              <GhostCard w1="72%" w2="44%" color="#38bdf8" avatar="linear-gradient(135deg,#8b5cf6,#d946ef)" dot="#fbbf24" className="lp-cardB" />
+            </div>
+            <GhostCard w1="62%" color="#38bdf8" progress />
+          </div>
+        </div>
+
+        {/* Done */}
+        <div>
+          <div className="flex items-center gap-1.5 mb-2 text-[10px] uppercase tracking-widest text-white/40">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#34d399]" />Done
+          </div>
+          <div className="space-y-2">
+            <GhostCard w1="54%" w2="40%" color="#34d399" avatar="linear-gradient(135deg,#f59e0b,#f43f5e)" />
+            <GhostCard w1="68%" w2="30%" color="#34d399" />
+          </div>
+        </div>
+      </div>
+
+      {/* Completion toast, sliding through mid-loop */}
+      <div className="lp-toast absolute bottom-3 right-3 flex items-center gap-2 rounded-xl border border-white/10 bg-[#171826] px-3 py-2 shadow-xl shadow-black/40" style={{ opacity: 0 }}>
+        <span className="w-5 h-5 rounded-full bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center">
+          <Check className="w-3 h-3 text-emerald-400" strokeWidth={3} />
+        </span>
+        <span className="space-y-1">
+          <span className="block h-1.5 w-20 rounded-full bg-white/25" />
+          <span className="block h-1 w-12 rounded-full bg-white/10" />
+        </span>
+      </div>
+    </div>
+  );
+}
+
+export default function LandingPage() {
+  const rootRef = useRef(null);
+
+  /* Mouse parallax over the ambient layers — desktop fine-pointer + motion-OK only. Writes
+     transforms straight to the [data-lp-depth] WRAPPERS via rAF (no React state, no re-render);
+     the drifting blob is a child, so the CSS drift animation and the parallax never fight. */
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    if (!window.matchMedia('(pointer: fine)').matches) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const layers = Array.from(root.querySelectorAll('[data-lp-depth]'));
+    if (!layers.length) return;
+    let raf = 0, mx = 0, my = 0;
+    const apply = () => {
+      raf = 0;
+      for (const el of layers) {
+        const d = Number(el.dataset.lpDepth) || 0;
+        el.style.transform = `translate3d(${(mx * d).toFixed(1)}px, ${(my * d).toFixed(1)}px, 0)`;
+      }
+    };
+    const onMove = (e) => {
+      mx = (e.clientX / window.innerWidth - 0.5) * 2;
+      my = (e.clientY / window.innerHeight - 0.5) * 2;
+      if (!raf) raf = requestAnimationFrame(apply);
+    };
+    window.addEventListener('mousemove', onMove, { passive: true });
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  return (
+    <div ref={rootRef} className="lp-root min-h-screen bg-[#070810] text-white relative">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
         body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; background: #070810; }
         .font-display { font-family: 'Fraunces', ui-serif, serif; font-optical-sizing: auto; font-weight: 500; }
-        @keyframes float { 0%,100% { transform: translateY(0px); } 50% { transform: translateY(-20px); } }
-        @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ---------- Hero entrance choreography (fill: both; static styles = final state) ---------- */
+        @keyframes lpFadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes lpRise { from { transform: translateY(112%); } to { transform: translateY(0); } }
+        @keyframes lpSettle {
+          from { opacity: 0; transform: perspective(1200px) rotateX(9deg) rotateY(-6deg) scale(.93) translateY(26px); }
+          to   { opacity: 1; transform: perspective(1200px) rotateX(0deg) rotateY(0deg) scale(1) translateY(0); }
+        }
+        .lp-in { animation: lpFadeUp .7s cubic-bezier(.22,1,.36,1) both; }
+        /* Clip-reveal lines: outer clips, inner rises. Padding absorbs Fraunces descenders. */
+        .lp-line { display: block; overflow: hidden; padding-bottom: .12em; margin-bottom: -.12em; }
+        .lp-line-inner { display: block; animation: lpRise .85s cubic-bezier(.22,1,.36,1) both; }
+
+        /* ---------- Ambient drift (wrappers get JS parallax; blobs get these) ---------- */
+        @keyframes lpDrift1 { from { transform: translate3d(0,0,0) scale(1); } to { transform: translate3d(56px,36px,0) scale(1.14); } }
+        @keyframes lpDrift2 { from { transform: translate3d(0,0,0) scale(1.08); } to { transform: translate3d(-64px,28px,0) scale(.94); } }
+        @keyframes lpDrift3 { from { transform: translate3d(0,0,0) scale(1); } to { transform: translate3d(38px,-30px,0) scale(1.1); } }
+
+        /* ---------- The living board: seven timelines sharing one 12s clock ---------- */
+        @keyframes lpFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+        @keyframes lpDragMove {
+          0%, 27% { transform: translate(0,0); }
+          33%     { transform: translate(calc(52% + 6px), -7px); }
+          39%, 95% { transform: translate(calc(100% + 12px), 0); }
+          100%    { transform: translate(0,0); }
+        }
+        @keyframes lpDragCard {
+          0%, 22% { opacity: 0; transform: scale(1) rotate(0deg); }
+          25%     { opacity: 1; transform: scale(1) rotate(0deg); }
+          28%, 38% { opacity: 1; transform: scale(1.05) rotate(-1.5deg); }
+          41%, 88% { opacity: 1; transform: scale(1) rotate(0deg); }
+          93%, 100% { opacity: 0; transform: scale(1) rotate(0deg); }
+        }
+        @keyframes lpDragGlow { 0%,24% { opacity: 0; } 28%,38% { opacity: 1; } 42%,100% { opacity: 0; } }
+        @keyframes lpCardA { 0%,23% { opacity: 1; } 26%,90% { opacity: 0; } 96%,100% { opacity: 1; } }
+        @keyframes lpCardB { 0%,41% { opacity: 0; } 45%,94% { opacity: 1; } 98%,100% { opacity: 0; } }
+        @keyframes lpDropHint { 0%,26% { opacity: 0; } 30%,37% { opacity: .9; } 41%,100% { opacity: 0; } }
+        @keyframes lpCursor {
+          0%, 8%  { opacity: 0; transform: translate(72px,84px) scale(1); }
+          14%     { opacity: 1; }
+          22%, 26% { opacity: 1; transform: translate(0,0) scale(1); }
+          28%, 40% { opacity: 1; transform: translate(0,0) scale(.9); }
+          44%     { opacity: 1; transform: translate(0,0) scale(1); }
+          54%, 100% { opacity: 0; transform: translate(40px,56px) scale(1); }
+        }
+        @keyframes lpToast {
+          0%, 56% { opacity: 0; transform: translateY(12px) scale(.97); }
+          61%, 78% { opacity: 1; transform: translateY(0) scale(1); }
+          84%, 100% { opacity: 0; transform: translateY(-6px) scale(.98); }
+        }
+        @keyframes lpPing { 0% { opacity: .7; transform: scale(1); } 70%, 100% { opacity: 0; transform: scale(2.2); } }
+        @keyframes lpSheenMove { 0% { transform: translateX(-110%); } 60%, 100% { transform: translateX(260%); } }
+
+        .lp-float    { animation: lpFloat 7s ease-in-out infinite; }
+        .lp-drag     { animation: lpDragMove 12s cubic-bezier(.45,.05,.35,1) infinite; }
+        .lp-dragCard { animation: lpDragCard 12s ease infinite; }
+        .lp-dragGlow { animation: lpDragGlow 12s ease infinite; }
+        .lp-cardA    { animation: lpCardA 12s ease infinite; }
+        .lp-cardB    { animation: lpCardB 12s ease infinite; }
+        .lp-dropHint { animation: lpDropHint 12s ease infinite; }
+        .lp-cursor   { animation: lpCursor 12s cubic-bezier(.45,.05,.35,1) infinite; }
+        .lp-toast    { animation: lpToast 12s ease infinite; }
+        .lp-ping     { animation: lpPing 3.2s cubic-bezier(0,0,.2,1) infinite; }
+        .lp-ping-2   { animation-delay: 1.6s; }
+        .lp-sheen    { animation: lpSheenMove 3.6s ease-in-out infinite; }
+
+        /* ---------- Reduced motion: kill ALL decoration; static styles are the complete page ---------- */
+        @media (prefers-reduced-motion: reduce) {
+          .lp-root *, .lp-root { animation: none !important; transition: none !important; }
+        }
       `}</style>
 
-      {/* Background glows, clipped in their own layer so the page never scrolls sideways */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-[-6rem] left-1/4 w-[28rem] h-[28rem] rounded-full bg-violet-500/10 blur-3xl" style={{ animation: 'float 9s ease-in-out infinite' }} />
-        <div className="absolute top-1/3 -right-32 w-[26rem] h-[26rem] rounded-full bg-fuchsia-500/10 blur-3xl" style={{ animation: 'float 9s ease-in-out infinite reverse' }} />
+      {/* Ambient depth: aurora blobs (parallax wrappers → drifting radial gradients), masked grid,
+          static grain. All clipped so the page never scrolls sideways. */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+        <div data-lp-depth="18" className="absolute -top-40 left-[6%] w-[36rem] h-[36rem]">
+          <div className="w-full h-full rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(139,92,246,.17), transparent 72%)', animation: 'lpDrift1 26s ease-in-out infinite alternate' }} />
+        </div>
+        <div data-lp-depth="-14" className="absolute top-[4rem] -right-48 w-[34rem] h-[34rem]">
+          <div className="w-full h-full rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(217,70,239,.13), transparent 72%)', animation: 'lpDrift2 32s ease-in-out infinite alternate' }} />
+        </div>
+        <div data-lp-depth="10" className="absolute top-[22rem] left-[38%] w-[30rem] h-[30rem]">
+          <div className="w-full h-full rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(99,102,241,.12), transparent 72%)', animation: 'lpDrift3 40s ease-in-out infinite alternate' }} />
+        </div>
+        <div
+          className="absolute inset-x-0 top-0 h-[44rem]"
+          style={{
+            backgroundImage: 'linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px)',
+            backgroundSize: '54px 54px',
+            maskImage: 'radial-gradient(ellipse 85% 65% at 50% 0%, black 25%, transparent 72%)',
+            WebkitMaskImage: 'radial-gradient(ellipse 85% 65% at 50% 0%, black 25%, transparent 72%)',
+          }}
+        />
+        <div className="absolute inset-0 opacity-[0.022]" style={{ backgroundImage: GRAIN }} />
       </div>
 
       <SiteHeader />
 
       <div className="relative max-w-6xl mx-auto px-5 lg:px-8">
         {/* Hero (compact: fits above the fold on a typical laptop) */}
-        <section className="pt-8 lg:pt-12 pb-10 grid lg:grid-cols-2 gap-8 lg:gap-10 items-center" style={{ animation: 'fadeUp .5s ease' }}>
+        <section className="pt-8 lg:pt-12 pb-10 grid lg:grid-cols-2 gap-8 lg:gap-10 items-center">
           <div>
-            <div className="inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-widest text-violet-300/80 bg-violet-500/10 border border-violet-400/20 rounded-full px-3 h-7 mb-4">
+            <div className="lp-in inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-widest text-violet-300/80 bg-violet-500/10 border border-violet-400/20 rounded-full px-3 h-7 mb-4" style={{ animationDelay: '.05s' }}>
               Visual task management for teams
             </div>
             <h1 className="text-3xl lg:text-4xl xl:text-5xl font-semibold font-display tracking-tight leading-[1.05]">
-              Stop losing track of who’s doing what.
+              <span className="lp-line"><span className="lp-line-inner" style={{ animationDelay: '.12s' }}>Stop losing track of</span></span>
+              <span className="lp-line"><span className="lp-line-inner bg-gradient-to-r from-violet-300 via-fuchsia-300 to-rose-300 bg-clip-text text-transparent" style={{ animationDelay: '.24s' }}>who’s doing what.</span></span>
             </h1>
-            <p className="mt-4 text-sm lg:text-base text-white/55 max-w-xl leading-relaxed">
+            <p className="lp-in mt-4 text-sm lg:text-base text-white/55 max-w-xl leading-relaxed" style={{ animationDelay: '.4s' }}>
               Pull every task, owner, and due date into one visual workspace. Track it on a kanban board,
               a priority matrix, or a schedule, live for the whole team.
             </p>
-            <div className="mt-6 flex flex-wrap items-center gap-3">
-              <Link to="/signup" className="h-11 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 transition-all">
+            <div className="lp-in mt-6 flex flex-wrap items-center gap-3" style={{ animationDelay: '.52s' }}>
+              <Link to="/signup" className="h-11 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
                 Get organized free <ArrowRight className="w-4 h-4" />
               </Link>
-              <Link to="/login" className="h-11 px-6 rounded-xl border border-white/10 bg-white/[0.03] text-white/80 font-medium text-sm flex items-center hover:bg-white/[0.06] transition-colors">
+              <Link to="/login" className="h-11 px-6 rounded-xl border border-white/10 bg-white/[0.03] text-white/80 font-medium text-sm flex items-center hover:bg-white/[0.06] active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
                 Log in
               </Link>
             </div>
-            <div className="mt-5 flex flex-wrap gap-x-5 gap-y-1.5 text-[12px] text-white/40">
+            <div className="lp-in mt-5 flex flex-wrap gap-x-5 gap-y-1.5 text-[12px] text-white/40" style={{ animationDelay: '.66s' }}>
               <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-emerald-400" /> Real-time sync</span>
               <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-emerald-400" /> Private &amp; shared tasks</span>
               <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-emerald-400" /> Team chat &amp; direct messages</span>
             </div>
           </div>
 
-          {/* Decorative stylized board (not real data; a visual hint of the UI) */}
-          <div className="relative hidden lg:block" aria-hidden="true">
-            <div className="rounded-2xl border border-white/10 bg-[#0f1017]/80 backdrop-blur p-4 shadow-2xl">
-              <div className="flex items-center gap-1.5 mb-4">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-400/70" />
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-400/70" />
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400/70" />
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                {[
-                  { label: 'To do', color: '#a78bfa', n: 3 },
-                  { label: 'Doing', color: '#38bdf8', n: 2 },
-                  { label: 'Done', color: '#34d399', n: 2 },
-                ].map(col => (
-                  <div key={col.label}>
-                    <div className="flex items-center gap-1.5 mb-2 text-[10px] uppercase tracking-widest text-white/40">
-                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: col.color }} />{col.label}
-                    </div>
-                    <div className="space-y-2">
-                      {Array.from({ length: col.n }).map((_, i) => (
-                        <div key={i} className="rounded-lg border border-white/[0.06] bg-white/[0.03] p-2.5">
-                          <div className="h-1.5 rounded-full mb-2" style={{ width: `${60 + ((i * 17) % 35)}%`, background: col.color, opacity: 0.5 }} />
-                          <div className="h-1 rounded-full bg-white/10" style={{ width: `${40 + ((i * 23) % 40)}%` }} />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+          {/* Decorative living board (not real data; a visual hint of the UI). Shown on mobile too —
+              it sits below the hero copy there and the loop is identical, minus parallax. */}
+          <div aria-hidden="true" data-lp-depth="-6">
+            <div style={{ animation: 'lpSettle 1s cubic-bezier(.22,1,.36,1) .3s both' }}>
+              <div className="lp-float">
+                <LiveBoard />
               </div>
             </div>
           </div>
@@ -143,7 +375,7 @@ export default function LandingPage() {
             <h2 className="text-2xl lg:text-3xl font-semibold font-display tracking-tight">Ready to organize your team’s work?</h2>
             <p className="mt-2 text-white/55">Create a workspace in seconds. It’s free to get started.</p>
             <div className="mt-6 flex justify-center gap-3">
-              <Link to="/signup" className="h-12 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 transition-all">
+              <Link to="/signup" className="h-12 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
                 Get organized free <ArrowRight className="w-4 h-4" />
               </Link>
             </div>
