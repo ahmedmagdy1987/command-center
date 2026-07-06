@@ -142,7 +142,7 @@ export function SiteFooter() {
           </div>
           <div className="flex gap-14">
             <FooterCol title="Product" links={[['Pricing', '/pricing'], ['Log in', '/login'], ['Sign up', '/signup']]} />
-            <FooterCol title="Company" links={[['Terms', '/terms'], ['Privacy', '/privacy'], ['Contact', 'mailto:hello@example.com']]} />
+            <FooterCol title="Company" links={[['Terms', '/terms'], ['Privacy', '/privacy'], ['Contact', 'mailto:support@opscommandcenter.com']]} />
           </div>
         </div>
         <div className="mt-9 pt-5 border-t border-white/[0.06] text-[12px] text-white/50">
