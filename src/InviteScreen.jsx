@@ -112,7 +112,7 @@ export default function InviteScreen({ session }) {
                 </div>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40 pointer-events-none" />
-                  <input type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder={signupMode ? 'At least 6 characters' : 'Your password'}
+                  <input type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder={signupMode ? 'At least 10 characters' : 'Your password'}
                     className="w-full bg-black/30 border border-white/10 rounded-xl pl-10 pr-3 h-11 text-sm text-white placeholder-white/30 outline-none focus:border-violet-400/50 transition-colors" />
                 </div>
                 {authErr && (

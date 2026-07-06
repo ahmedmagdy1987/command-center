@@ -905,8 +905,8 @@ function ChangePasswordModal({ open, onClose }) {
     e.preventDefault();
     setError(null);
 
-    if (next.length < 6) {
-      setError('Password must be at least 6 characters');
+    if (next.length < 10) {
+      setError('Password must be at least 10 characters');
       return;
     }
     if (next !== confirm) {
@@ -963,8 +963,8 @@ function ChangePasswordModal({ open, onClose }) {
             </div>
             <div>
               <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">New password</label>
-              <input type="password" value={next} onChange={e => setNext(e.target.value)} required minLength={6}
-                placeholder="At least 6 characters"
+              <input type="password" value={next} onChange={e => setNext(e.target.value)} required minLength={10}
+                placeholder="At least 10 characters"
                 className="w-full bg-black/30 border border-white/10 rounded-lg px-3 h-10 text-sm text-white placeholder-white/30 outline-none focus:border-violet-400/50" />
             </div>
             <div>

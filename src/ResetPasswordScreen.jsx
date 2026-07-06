@@ -47,11 +47,11 @@ export default function ResetPasswordScreen() {
     return () => { active = false; sub.subscription.unsubscribe(); clearTimeout(timer); };
   }, []);
 
-  const canSubmit = password.length >= 6 && password === confirm && phase !== 'saving';
+  const canSubmit = password.length >= 10 && password === confirm && phase !== 'saving';
 
   const submit = async (e) => {
     e.preventDefault();
-    if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    if (password.length < 10) { setError('Password must be at least 10 characters.'); return; }
     if (password !== confirm) { setError('Passwords don’t match.'); return; }
     setError(null);
     setPhase('saving');
@@ -124,7 +124,7 @@ export default function ResetPasswordScreen() {
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40 pointer-events-none" />
                     <input type="password" value={password} onChange={e => setPassword(e.target.value)} required autoFocus
-                      placeholder="At least 6 characters"
+                      placeholder="At least 10 characters"
                       className="w-full bg-black/30 border border-white/10 rounded-xl pl-10 pr-3 h-11 text-sm text-white placeholder-white/30 outline-none focus:border-violet-400/50 focus:bg-black/40 transition-colors" />
                   </div>
                 </div>
