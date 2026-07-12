@@ -114,7 +114,7 @@ export default function CheckoutScreen({ session }) {
           {/* Payment seam (stub) */}
           <Card>
             {done ? (
-              <Centered tone="ok" title="You’re on the list" body={`Thanks! We’ll email ${email} the moment ${plan.name} billing goes live. No charge was made.`}>
+              <Centered tone="ok" title="Thanks for your interest" body={`Billing for ${plan.name} isn’t live yet, so no charge was made — every feature stays free for founding members during early access. Check back soon.`}>
                 <button onClick={() => navigate('/')} className="primary-cta">Back to Command Center <ArrowRight className="w-4 h-4" /></button>
               </Centered>
             ) : (
@@ -125,12 +125,12 @@ export default function CheckoutScreen({ session }) {
                   <span className="ml-auto text-[10px] font-semibold uppercase tracking-widest text-amber-300/90 bg-amber-500/10 border border-amber-400/20 rounded-full px-2 h-5 flex items-center">Coming soon</span>
                 </div>
                 <p className="text-[12px] text-white/50 leading-relaxed mb-4">
-                  Card payments aren’t switched on yet. Leave your email and we’ll let you know the moment {plan.name} is ready to buy. You won’t be charged now.
+                  Card payments aren’t switched on yet, so you won’t be charged. Leave your email to register interest in {plan.name} — founding members keep every feature free during early access.
                 </p>
                 <form onSubmit={submit} className="space-y-3">
                   <div>
-                    <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">Email</label>
-                    <input type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="you@example.com"
+                    <label htmlFor="checkout-email" className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">Email</label>
+                    <input id="checkout-email" type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="you@example.com"
                       className="w-full bg-black/30 border border-white/10 rounded-xl px-3 h-11 text-sm text-white placeholder-white/30 outline-none focus:border-violet-400/50 focus:bg-black/40 transition-colors" />
                   </div>
                   {error && (
@@ -140,7 +140,7 @@ export default function CheckoutScreen({ session }) {
                   )}
                   <button type="submit" disabled={busy}
                     className="w-full h-11 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
-                    {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : (<>Notify me when billing is live <ArrowRight className="w-4 h-4" /></>)}
+                    {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : (<>Register interest <ArrowRight className="w-4 h-4" /></>)}
                   </button>
                 </form>
                 <p className="mt-3 text-[11px] text-white/30 text-center">
@@ -158,7 +158,7 @@ export default function CheckoutScreen({ session }) {
 /* ── Local layout primitives ───────────────────────────────────────────────── */
 const cx = (...xs) => xs.filter(Boolean).join(' ');
 const cycleBtn = (active) =>
-  cx('inline-flex items-center h-8 px-3.5 rounded-full text-xs font-semibold transition-colors',
+  cx('inline-flex items-center h-8 px-3.5 rounded-full text-xs font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
     active ? 'bg-white text-[#0a0b11]' : 'text-white/60 hover:text-white');
 
 function Shell({ children }) {
