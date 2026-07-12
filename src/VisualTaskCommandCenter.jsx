@@ -2534,10 +2534,18 @@ function NotificationBell() {
   useEffect(() => {
     if (!userId || !currentWorkspaceId) return;
     let mounted = true;
-    const unsub = notificationsApi.subscribe(userId, (n) => {
+    const unsub = notificationsApi.subscribe(userId, ({ type, notification: n }) => {
       if (!n || !mounted) return;
-      // Suppress notifications for the DM conversation the user is actively viewing: record it as
-      // already-read and skip the toast, so the bell only piles up for chats they're NOT looking at.
+      if (type === 'DELETE') {   // cleared / deleted on another device -> drop it here too
+        setItems(prev => prev.filter(x => x.id !== n.id));
+        setToasts(prev => prev.filter(t => t.id !== n.id));
+        return;
+      }
+      if (type === 'UPDATE') {   // marked read / updated elsewhere -> sync (the unread badge recomputes from items)
+        setItems(prev => prev.map(x => x.id === n.id ? n : x));
+        return;
+      }
+      // INSERT: suppress the toast for the DM conversation being actively viewed (record it read); else raise it.
       const viewingThisDm = n.type === 'dm_received' && n.refId && n.refId === activeConvRef.current && viewRef.current === 'dms';
       if (viewingThisDm) {
         setItems(prev => prev.some(x => x.id === n.id) ? prev : [{ ...n, read: true }, ...prev]);

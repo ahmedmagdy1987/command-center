@@ -431,22 +431,24 @@ export const notifications = {
   },
 
   /**
-   * Subscribe to new notifications for a recipient. Returns an unsubscribe function.
-   * cb is called with the app-shaped notification for each INSERT.
+   * Subscribe to a recipient's notification changes. Returns an unsubscribe function.
+   * cb is called with { type: 'INSERT'|'UPDATE'|'DELETE', notification } — INSERT for new ones, UPDATE
+   * when read-state changes, DELETE when cleared/deleted (so marking-read / clearing syncs across devices;
+   * DELETE requires REPLICA IDENTITY FULL on notifications so payload.old carries recipient_id for the filter).
    */
   subscribe(recipientId, cb, workspaceId) {
+    const base = { schema: 'public', table: 'notifications', filter: `recipient_id=eq.${recipientId}` };   // recipient scope = the security gate
+    const emit = (type, row) => {
+      const n = fromDbNotification(row);
+      if (!n) return;
+      if (workspaceId && n.workspaceId && n.workspaceId !== workspaceId) return;   // + current-workspace scope on top
+      cb({ type, notification: n });
+    };
     const channel = supabase
       .channel(`notifications-changes-${recipientId}${workspaceId ? `-${workspaceId}` : ''}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'notifications',
-        filter: `recipient_id=eq.${recipientId}`,   // server-side recipient scope (security gate) kept
-      }, (payload) => {
-        const n = fromDbNotification(payload.new);
-        if (workspaceId && n.workspaceId && n.workspaceId !== workspaceId) return;   // + current-workspace scope on top
-        cb(n);
-      })
+      .on('postgres_changes', { event: 'INSERT', ...base }, (p) => emit('INSERT', p.new))
+      .on('postgres_changes', { event: 'UPDATE', ...base }, (p) => emit('UPDATE', p.new))
+      .on('postgres_changes', { event: 'DELETE', ...base }, (p) => emit('DELETE', p.old))
       .subscribe((status, err) => {
         // Surface realtime health so live delivery can be verified (should reach SUBSCRIBED).
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
