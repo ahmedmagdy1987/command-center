@@ -137,7 +137,7 @@ export default function InviteScreen({ session }) {
         // Valid + email matches -> accept
         <div className="text-center">
           <h2 className="text-base font-semibold text-white mb-1">Join {preview.workspace_name}</h2>
-          <p className="text-[12px] text-white/45 mb-5">You'll join as a member, signed in as {myEmail}.</p>
+          <p className="text-[12px] text-white/45 mb-5">You'll be added to this workspace, signed in as {myEmail}.</p>
           {acceptErr && <div className="mb-4"><AuthBanner tone="error">{acceptErr}</AuthBanner></div>}
           <AuthCTA type="button" onClick={accept} busy={accepting} busyLabel="Accepting…" disabled={accepting}>
             Accept invitation

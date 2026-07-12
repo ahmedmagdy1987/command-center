@@ -252,9 +252,11 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   const chatViewRef = useRef(view);
   useEffect(() => { chatViewRef.current = view; }, [view]);
   const markChatRead = useCallback(() => {
-    try { localStorage.setItem('cc_chat_last_seen', new Date().toISOString()); } catch { /* ignore */ }
+    // Per-workspace key: a single global cursor mis-counts across workspaces (reading chat in A would
+    // mark B's older-but-unseen messages as read). The unread effect reads the same per-workspace key.
+    try { if (currentWorkspaceId) localStorage.setItem(`cc_chat_last_seen:${currentWorkspaceId}`, new Date().toISOString()); } catch { /* ignore */ }
     setChatUnread(0);
-  }, []);
+  }, [currentWorkspaceId]);
 
   // ---- Direct messages (1:1) ---- conversation summaries + handlers live here (the state hub);
   // the open thread loads its own messages. Read state is server-side (dm_reads), so unread + receipts
@@ -416,7 +418,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     if (!me || !currentWorkspaceId) return;
     let on = true;
     let lastSeen = null;
-    try { lastSeen = localStorage.getItem('cc_chat_last_seen'); } catch { /* ignore */ }
+    try { lastSeen = localStorage.getItem(`cc_chat_last_seen:${currentWorkspaceId}`); } catch { /* ignore */ }
     messagesApi.unreadCount(lastSeen, me, currentWorkspaceId).then(n => { if (on) setChatUnread(n); }).catch(() => {});
     const unsub = messagesApi.subscribe(({ type, message }) => {
       if (type !== 'INSERT' || !message || !on) return;
@@ -1004,7 +1006,7 @@ function ChangePasswordModal({ open, onClose }) {
 /* =================================================================================
    TASK CARD
 ================================================================================= */
-function TaskCard({ task, compact = false, onClick, draggable = true, showOwner = true }) {
+function TaskCard({ task, compact = false, onClick, draggable = true, showAssignee = true }) {
   const { setDraggedId, updateTask, projects, resolveAssignee, exitingIds, creatorLabel } = useApp();
   const priority = PRIORITIES[task.priority];
   const assignee = resolveAssignee(task.assigneeId);
@@ -1052,14 +1054,14 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showOwner 
             className="shrink-0 w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all"
             style={{ borderColor: done ? priority.hex : 'rgba(255,255,255,0.2)', background: done ? priority.hex : 'transparent' }}
           >
-            {done && <Check className="w-2.5 h-2.5 text-black" strokeWidth={3} />}
+            {done && <Check className="w-2.5 h-2.5" style={{ color: '#0a0b11' }} strokeWidth={3} />}
           </button>
           <PriorityDot priority={task.priority} />
           {isPrivate && <span title="Private: visible only to the creator and assignee"><Lock className="w-3 h-3 text-white/40 shrink-0" /></span>}
           {isRecurring(task.recurring) && <RefreshCw className="w-3 h-3 text-white/30 shrink-0" />}
           {task.blocked && <PauseCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
         </div>
-        {showOwner && <AssigneeChip assigneeId={task.assigneeId} showLabel={!compact} size="sm" />}
+        {showAssignee && <AssigneeChip assigneeId={task.assigneeId} showLabel={!compact} size="sm" />}
       </div>
 
       <div className={cx('font-medium leading-snug text-white/95 mb-2', done && 'line-through text-white/50', compact ? 'text-sm' : 'text-[15px]')}>
@@ -1295,7 +1297,7 @@ function TaskComments({ taskId }) {
                 <span className="text-xs font-medium text-white/80">{mine ? 'You' : nameOf(c.authorId)}</span>
                 <span className="text-[10px] text-white/35">{timeAgo(c.createdAt)}{edited ? ' · edited' : ''}</span>
                 {mine && editId !== c.id && (
-                  <span className="ml-auto flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <span className="ml-auto flex items-center gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100 transition-opacity">
                     <button onClick={() => { setEditId(c.id); setEditText(c.body); }} className="text-[10px] text-white/40 hover:text-white/80">Edit</button>
                     <button onClick={() => remove(c.id)} className="text-[10px] text-white/40 hover:text-rose-300">Delete</button>
                   </span>
@@ -1378,7 +1380,12 @@ function Attachments({ taskId, canEdit }) {
   const load = useCallback(() => {
     attachmentsApi.list(taskId).then(setItems).catch(() => setItems([]));
   }, [taskId]);
-  useEffect(() => { load(); }, [load]);
+  // Guarded mount load — don't setState after unmount / after the taskId changed.
+  useEffect(() => {
+    let on = true;
+    attachmentsApi.list(taskId).then(l => { if (on) setItems(l); }).catch(() => { if (on) setItems([]); });
+    return () => { on = false; };
+  }, [taskId]);
 
   const canDelete = (a) => a.uploadedBy === meId || isOwner || isAdmin;
 
@@ -1386,8 +1393,9 @@ function Attachments({ taskId, canEdit }) {
     if (!canEdit) return;
     const files = Array.from(fileList || []);
     if (!files.length) return;
+    if (items === null) { setError('Still loading attachments — try again in a moment.'); return; }   // count unknown until loaded
     setError('');
-    let count = (items || []).length;
+    let count = items.length;
     setUploading(true);
     for (const file of files) {
       // Client-side pre-checks for friendly messages; the server RLS + bucket config are authoritative.
@@ -1432,11 +1440,14 @@ function Attachments({ taskId, canEdit }) {
 
       {canEdit && (
         <div
+          role="button" tabIndex={0}
+          aria-label="Upload attachment — images, PDF, or documents up to 25 MB"
           onClick={() => fileRef.current?.click()}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileRef.current?.click(); } }}
           onDragOver={e => { e.preventDefault(); setDragActive(true); }}
           onDragLeave={() => setDragActive(false)}
           onDrop={onDrop}
-          className={cx('mb-2 rounded-lg border border-dashed px-3 py-3 text-center cursor-pointer transition-colors',
+          className={cx('mb-2 rounded-lg border border-dashed px-3 py-3 text-center cursor-pointer transition-colors outline-none focus-visible:border-violet-400/60 focus-visible:bg-violet-400/5',
             dragActive ? 'border-violet-400/60 bg-violet-400/5' : 'border-white/15 bg-white/[0.02] hover:bg-white/[0.04]')}
         >
           <div className="flex items-center justify-center gap-2 text-xs text-white/50">
@@ -1615,7 +1626,7 @@ function TaskModal() {
                   <button onClick={() => canEditTask && toggleSubtask(t.id, s.id)} disabled={!canEditTask} aria-pressed={s.done}
                     className={cx('shrink-0 w-4 h-4 rounded border-2 flex items-center justify-center transition-all', !canEditTask && 'cursor-default')}
                     style={{ borderColor: s.done ? priority.hex : 'rgba(255,255,255,0.2)', background: s.done ? priority.hex : 'transparent' }}>
-                    {s.done && <Check className="w-2.5 h-2.5 text-black" strokeWidth={3} />}
+                    {s.done && <Check className="w-2.5 h-2.5" style={{ color: '#0a0b11' }} strokeWidth={3} />}
                   </button>
                   <div className={cx('flex-1 text-sm', s.done ? 'text-white/40 line-through' : 'text-white/85')}>{s.title}</div>
                   {canEditTask && (
@@ -2045,7 +2056,7 @@ function QuickAdd() {
 ================================================================================= */
 function CommandPalette() {
   const { paletteOpen, setPaletteOpen, tasks, setEditingTask, setView, setQuickAddOpen, setTheme, theme, exportJSON,
-          currentWorkspaceId, setDmActiveConv, resolveAssignee } = useApp();
+          currentWorkspaceId, setDmActiveConv, resolveAssignee, isGuest } = useApp();
   const [q, setQ] = useState('');
   const inputRef = useRef(null);
   const [idx, setIdx] = useState(0);
@@ -2083,7 +2094,7 @@ function CommandPalette() {
     else setView('chat');
   };
 
-  const commands = useMemo(() => [
+  const commands = useMemo(() => { const all = [
     { id: 'new-task', label: 'New task', icon: Plus, run: () => { setPaletteOpen(false); setQuickAddOpen(true); } },
     { id: 'v-dash', label: 'Go to Dashboard', icon: LayoutDashboard, run: () => { setView('dashboard'); setPaletteOpen(false); } },
     { id: 'v-kan', label: 'Go to Kanban', icon: KanbanSquare, run: () => { setView('kanban'); setPaletteOpen(false); } },
@@ -2096,7 +2107,11 @@ function CommandPalette() {
     { id: 'v-dms', label: 'Go to Direct messages', icon: MessagesSquare, run: () => { setView('dms'); setPaletteOpen(false); } },
     { id: 'theme', label: `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`, icon: theme === 'dark' ? Sun : Moon, run: () => { setTheme(theme === 'dark' ? 'light' : 'dark'); setPaletteOpen(false); } },
     { id: 'export', label: 'Export JSON backup', icon: Download, run: () => { exportJSON(); setPaletteOpen(false); } },
-  ], [theme]);
+  ];
+  // Guests are bounced off every view except My Tasks + Direct messages, so don't offer nav commands
+  // that just redirect (matches the Sidebar/MobileTabs guest restriction).
+  return isGuest ? all.filter(c => ['new-task', 'v-mine', 'v-dms', 'theme', 'export'].includes(c.id)) : all;
+  }, [theme, isGuest]);
 
   const results = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -3594,7 +3609,7 @@ function PrivateSection({ title, accent, tasks }) {
 }
 
 /* =================================================================================
-   VA DESK
+   MY TASKS
 ================================================================================= */
 function MyTasksView() {
   const { tasks, setEditingTask, setQuickAddOpen, meId } = useApp();
@@ -4381,6 +4396,7 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
   const [mentions, setMentions] = useState([]);
   const [sending, setSending] = useState(false);
   const [failedBody, setFailedBody] = useState('');
+  const [failedMentions, setFailedMentions] = useState([]);   // retry must resend the same @mentions, not none
   const taRef = useRef(null);
   const autosize = useCallback(() => { const el = taRef.current; if (!el) return; el.style.height = '0px'; const h = Math.min(el.scrollHeight, 140); el.style.height = h + 'px'; el.style.overflowY = el.scrollHeight > 140 ? 'auto' : 'hidden'; }, []);
   useEffect(() => { autosize(); }, [text, autosize]);
@@ -4388,12 +4404,12 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
   const doSend = async (body, mns) => {
     if (!body || sending) return;
     setSending(true);
-    try { await onSubmitText(body, mns); setFailedBody(''); }
-    catch (e) { console.error('Message send failed:', e); setFailedBody(body); }
+    try { await onSubmitText(body, mns); setFailedBody(''); setFailedMentions([]); }
+    catch (e) { console.error('Message send failed:', e); setFailedBody(body); setFailedMentions(mns || []); }
     finally { setSending(false); }
   };
   const submit = () => { const body = text.trim(); if (!body) return; const mns = mentions; setText(''); setMentions([]); onStopTyping?.(); doSend(body, mns); };
-  const retry = () => { const body = failedBody; setFailedBody(''); doSend(body, []); };
+  const retry = () => { const body = failedBody, mns = failedMentions; setFailedBody(''); setFailedMentions([]); doSend(body, mns); };
 
   return (
     <div className="border-t border-white/10 shrink-0">
@@ -4427,6 +4443,7 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
               placeholder={placeholder}
               className="max-h-[140px] bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none overflow-y-hidden leading-relaxed" />
             <button onClick={() => canVoice ? onStartRecording() : onUpgradeVoice?.()} disabled={sending}
+              aria-label={canVoice ? 'Record a voice note' : 'Upgrade to unlock voice notes'}
               title={canVoice ? 'Record a voice note' : 'Upgrade to unlock voice notes'}
               className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 disabled:opacity-40 shrink-0">
               {canVoice ? <Mic className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}

@@ -47,6 +47,7 @@ export default function AuthScreen({ mode = 'signin', initialSignup = false }) {
     }
 
     if (!email || !password) return;
+    if (view === 'signup' && password.length < 10) { setError('Password must be at least 10 characters.'); return; }
     setLoading(true);
     try {
       if (view === 'signup') {
