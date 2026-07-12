@@ -175,6 +175,25 @@ export const fromDbComment = (row) => {
 };
 
 /* =================================================================================
+   TASK ATTACHMENTS
+================================================================================= */
+/** Convert a DB-shaped task_attachments row (snake_case) to app shape (camelCase) */
+export const fromDbAttachment = (row) => {
+  if (!row || typeof row !== 'object') return null;
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    workspaceId: row.workspace_id,
+    uploadedBy: row.uploaded_by,
+    storagePath: row.storage_path,
+    filename: row.filename,
+    mimeType: row.mime_type,
+    sizeBytes: row.size_bytes,
+    createdAt: row.created_at,
+  };
+};
+
+/* =================================================================================
    MESSAGES (team chat)
 ================================================================================= */
 /** Convert a DB-shaped chat message (snake_case columns) to app shape (camelCase) */

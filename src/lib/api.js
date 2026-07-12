@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { fromDbTask, toDbTask, sanitizeTask, fromDbNotification, fromDbComment, fromDbMessage, fromDbDmConversation, fromDbDirectMessage, uid } from './sanitize';
+import { fromDbTask, toDbTask, sanitizeTask, fromDbNotification, fromDbComment, fromDbMessage, fromDbDmConversation, fromDbDirectMessage, fromDbAttachment, uid } from './sanitize';
 
 /* =================================================================================
    AUTH
@@ -846,5 +846,93 @@ export const directMessages = {
       .on('postgres_changes', opts('DELETE'), (p) => cb({ type: 'DELETE', message: fromDbDirectMessage(p.old) }))
       .subscribe();
     return () => supabase.removeChannel(channel);
+  },
+};
+
+/* =================================================================================
+   TASK ATTACHMENTS
+   Files on a task (briefs, deliverables, images, docs). Private 'task-attachments'
+   bucket; path <workspace_id>/<task_id>/<uid>.<ext>. RLS delegates to the task
+   predicates (can_view_task for download, can_edit_task for upload; delete = uploader
+   or admin+) — the SERVER is authoritative. The MIME/size/count constants below are for
+   friendly client-side pre-validation only; never trust them for security.
+   Upload = object then metadata row (best-effort orphan-remove on failure), mirroring
+   the voice-note flow.
+   ENTITLEMENT SEAM: attachments are ungated by plan today. If they ever move behind a
+   paid tier, gate at this seam (and enforce server-side in RLS/quota) — do NOT entangle
+   plan logic into the upload path itself.
+================================================================================= */
+const ATTACHMENT_MAX_BYTES = 26214400;   // 25 MB — mirrors the bucket file_size_limit
+const ATTACHMENT_MAX_PER_TASK = 20;      // mirrors the task_attachments_insert policy
+const ATTACHMENT_ALLOWED_MIME = new Set([
+  'image/png', 'image/jpeg', 'image/gif', 'image/webp',
+  'application/pdf', 'text/plain', 'text/csv', 'application/zip',
+  'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+]);
+
+export const attachments = {
+  ALLOWED_MIME: ATTACHMENT_ALLOWED_MIME,
+  MAX_BYTES: ATTACHMENT_MAX_BYTES,
+  MAX_PER_TASK: ATTACHMENT_MAX_PER_TASK,
+
+  /** Attachments on a task (RLS-scoped to tasks the caller can view), oldest first. */
+  async list(taskId) {
+    const { data, error } = await supabase
+      .from('task_attachments')
+      .select('*')
+      .eq('task_id', taskId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return (data || []).map(fromDbAttachment);
+  },
+
+  /** Upload a File to <ws>/<task>/<uid>.<ext>, then insert its metadata row. */
+  async upload(taskId, file, workspaceId) {
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+    if (!workspaceId) throw new Error('Missing workspace');
+    const dot = file.name.lastIndexOf('.');
+    const ext = (dot > 0 ? file.name.slice(dot + 1) : '').toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+    const path = `${workspaceId}/${taskId}/${uid()}.${ext}`;
+    const contentType = file.type || 'application/octet-stream';
+    const { error: upErr } = await supabase.storage.from('task-attachments').upload(path, file, { contentType, upsert: false });
+    if (upErr) throw upErr;
+    // workspace_id is stamped server-side by the trigger from the parent task
+    const row = { task_id: taskId, uploaded_by: session.user.id, storage_path: path, filename: file.name, mime_type: file.type || null, size_bytes: file.size ?? null };
+    const { data, error } = await supabase.from('task_attachments').insert(row).select().single();
+    if (error) {
+      supabase.storage.from('task-attachments').remove([path]).catch(() => {});   // best-effort cleanup of the orphan object
+      throw error;
+    }
+    return fromDbAttachment(data);
+  },
+
+  /** Short-lived signed URL to download / preview one object. */
+  async signedUrl(path, expiresIn = 3600) {
+    const { data, error } = await supabase.storage.from('task-attachments').createSignedUrl(path, expiresIn);
+    if (error) throw error;
+    return data.signedUrl;
+  },
+
+  /** Delete an attachment. Object FIRST (the storage-delete policy needs the metadata row to
+   *  authorize it), then the metadata row. RLS enforces uploader-own or admin+ on both. */
+  async remove(attachment) {
+    if (attachment.storagePath) {
+      const { error: sErr } = await supabase.storage.from('task-attachments').remove([attachment.storagePath]);
+      if (sErr) throw sErr;
+    }
+    const { error } = await supabase.from('task_attachments').delete().eq('id', attachment.id);
+    if (error) throw error;
+  },
+
+  /** Best-effort: remove a task's attachment OBJECTS via the Storage API (frees the S3 blobs) while the
+   *  metadata rows still exist to authorize it — call BEFORE deleting the task (the rows then cascade).
+   *  Objects the caller can't delete (others' uploads, non-admin) are left for the DB orphan sweep. */
+  async removeAllForTask(taskId) {
+    const list = await this.list(taskId).catch(() => []);
+    const paths = list.map(a => a.storagePath).filter(Boolean);
+    if (paths.length) await supabase.storage.from('task-attachments').remove(paths);
   },
 };

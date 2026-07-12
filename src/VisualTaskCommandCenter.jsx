@@ -8,9 +8,9 @@ import {
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
   Brain, Target, Hourglass, GripVertical, Info, Keyboard, LogOut, Wifi, WifiOff, Loader2,
   KeyRound, Bell, MessageSquare, MessagesSquare, Send, Mic, Square, Play, Pause, Users, Mail, UserPlus, ArrowRight,
-  FileText, Shield
+  FileText, Shield, Paperclip, FileImage
 } from 'lucide-react';
-import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, directMessages as directMessagesApi, workspaces as workspacesApi, workspaceMembers as workspaceMembersApi, invitations as invitationsApi, auth } from './lib/api';
+import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, directMessages as directMessagesApi, workspaces as workspacesApi, workspaceMembers as workspaceMembersApi, invitations as invitationsApi, attachments as attachmentsApi, auth } from './lib/api';
 import { supabase } from './lib/supabase';
 import { sanitizeTask, uid, nowISO } from './lib/sanitize';
 import { resolvePlanId, computeEntitlements, getPreviewPlanId, clearPreviewPlan } from './lib/entitlements';
@@ -521,9 +521,14 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     const finish = () => {
       setTasks(p => p.filter(t => t.id !== id));
       setExitingIds(p => { const n = new Set(p); n.delete(id); return n; });
-      tasksApi.delete(id).catch(err => {
-        console.error('Delete failed:', err);
-        tasksApi.list(currentWorkspaceId).then(setTasks).catch(() => {});   // reconcile with server on failure
+      // Best-effort: remove attachment objects (Storage API) while their metadata rows still exist to
+      // authorize it, THEN delete the task (its attachment metadata cascades). The hourly DB sweep is
+      // the backstop for any objects the caller couldn't remove (others' uploads, non-admin).
+      attachmentsApi.removeAllForTask(id).catch(() => {}).finally(() => {
+        tasksApi.delete(id).catch(err => {
+          console.error('Delete failed:', err);
+          tasksApi.list(currentWorkspaceId).then(setTasks).catch(() => {});   // reconcile with server on failure
+        });
       });
     };
     if (prefersReducedMotion()) { finish(); return; }
@@ -1329,6 +1334,164 @@ function TaskComments({ taskId }) {
   );
 }
 
+// ---- Task attachments ----
+const attachHumanSize = (bytes) => {
+  if (bytes == null) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+const isImageMime = (m) => typeof m === 'string' && m.startsWith('image/');
+
+// Image rows show a thumbnail via a short-lived signed URL (fetched per-mount, like VoiceNote);
+// everything else shows a file-type icon.
+function AttachmentThumb({ attachment }) {
+  const [url, setUrl] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const isImg = isImageMime(attachment.mimeType);
+  useEffect(() => {
+    if (!isImg) return;
+    let on = true;
+    attachmentsApi.signedUrl(attachment.storagePath, 3600).then(u => { if (on) setUrl(u); }).catch(() => { if (on) setFailed(true); });
+    return () => { on = false; };
+  }, [attachment.storagePath, isImg]);
+  if (isImg && url && !failed) {
+    return <img src={url} alt="" className="w-10 h-10 rounded-md object-cover border border-white/10 shrink-0" />;
+  }
+  const Icon = isImg ? FileImage : FileText;
+  return (
+    <div className="w-10 h-10 rounded-md border border-white/10 bg-white/5 flex items-center justify-center shrink-0">
+      <Icon className="w-4 h-4 text-white/50" />
+    </div>
+  );
+}
+
+// Attachments section for the TaskModal. Read-only (list + download) when the user can't edit the task
+// — the same canEditTask gate as the checklist; the server RLS is the real authority.
+function Attachments({ taskId, canEdit }) {
+  const { meId, currentWorkspaceId, isOwner, isAdmin, creatorLabel } = useApp();
+  const [items, setItems] = useState(null);        // null = loading
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const [dragActive, setDragActive] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(null);
+  const fileRef = useRef(null);
+
+  const load = useCallback(() => {
+    attachmentsApi.list(taskId).then(setItems).catch(() => setItems([]));
+  }, [taskId]);
+  useEffect(() => { load(); }, [load]);
+
+  const canDelete = (a) => a.uploadedBy === meId || isOwner || isAdmin;
+
+  const runUpload = async (fileList) => {
+    if (!canEdit) return;
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    setError('');
+    let count = (items || []).length;
+    setUploading(true);
+    for (const file of files) {
+      // Client-side pre-checks for friendly messages; the server RLS + bucket config are authoritative.
+      if (!attachmentsApi.ALLOWED_MIME.has(file.type)) { setError(`"${file.name}" — that file type isn't allowed. Images, PDF, text, CSV, ZIP, and Office documents only.`); continue; }
+      if (file.size > attachmentsApi.MAX_BYTES) { setError(`"${file.name}" is too large — files must be under 25 MB.`); continue; }
+      if (count >= attachmentsApi.MAX_PER_TASK) { setError(`A task can have at most ${attachmentsApi.MAX_PER_TASK} attachments.`); break; }
+      try {
+        const created = await attachmentsApi.upload(taskId, file, currentWorkspaceId);
+        setItems(prev => [...(prev || []), created]);
+        count += 1;
+      } catch {
+        setError(`Couldn't upload "${file.name}". You may have hit the 25 MB file, ${attachmentsApi.MAX_PER_TASK}-per-task, or workspace storage limit — or you don't have permission.`);
+      }
+    }
+    setUploading(false);
+  };
+
+  const onPick = (e) => { if (e.target.files?.length) runUpload(e.target.files); e.target.value = ''; };
+  const onDrop = (e) => { e.preventDefault(); setDragActive(false); if (canEdit) runUpload(e.dataTransfer.files); };
+
+  const download = async (a) => {
+    setError('');
+    try { const url = await attachmentsApi.signedUrl(a.storagePath, 3600); window.open(url, '_blank', 'noopener'); }
+    catch { setError('Could not open that file. Try again.'); }
+  };
+
+  const doDelete = async (a) => {
+    setConfirmDel(null);
+    setItems(prev => (prev || []).filter(x => x.id !== a.id));   // optimistic
+    try { await attachmentsApi.remove(a); }
+    catch { setError('Could not delete that attachment.'); load(); }
+  };
+
+  const count = items?.length ?? 0;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 flex items-center gap-1.5"><Paperclip className="w-3 h-3" />Attachments</div>
+        {count > 0 && <div className="text-[10px] text-white/40 font-medium tabular-nums">{count}/{attachmentsApi.MAX_PER_TASK}</div>}
+      </div>
+
+      {canEdit && (
+        <div
+          onClick={() => fileRef.current?.click()}
+          onDragOver={e => { e.preventDefault(); setDragActive(true); }}
+          onDragLeave={() => setDragActive(false)}
+          onDrop={onDrop}
+          className={cx('mb-2 rounded-lg border border-dashed px-3 py-3 text-center cursor-pointer transition-colors',
+            dragActive ? 'border-violet-400/60 bg-violet-400/5' : 'border-white/15 bg-white/[0.02] hover:bg-white/[0.04]')}
+        >
+          <div className="flex items-center justify-center gap-2 text-xs text-white/50">
+            {uploading ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Uploading…</> : <><Upload className="w-3.5 h-3.5" />Drop files or click to upload</>}
+          </div>
+          <div className="mt-0.5 text-[10px] text-white/30">Images, PDF, docs · up to 25 MB each</div>
+          <input ref={fileRef} type="file" multiple className="hidden"
+            accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv,application/zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+            onChange={onPick} />
+        </div>
+      )}
+
+      {error && (
+        <div className="mb-2 flex items-start gap-1.5 text-[11px] text-rose-300/90">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-px" /><span className="flex-1 break-words">{error}</span>
+          <button onClick={() => setError('')} aria-label="Dismiss" className="text-white/40 hover:text-white/70 shrink-0"><X className="w-3.5 h-3.5" /></button>
+        </div>
+      )}
+
+      {items === null ? (
+        <div className="inline-flex items-center gap-2 text-[11px] text-white/40"><Loader2 className="w-3 h-3 animate-spin" />Loading…</div>
+      ) : count === 0 ? (
+        !canEdit && <div className="text-xs text-white/30 italic">No attachments.</div>
+      ) : (
+        <div className="space-y-1.5">
+          {items.map(a => (
+            <div key={a.id} className="group flex items-center gap-2.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5">
+              <AttachmentThumb attachment={a} />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-white/90 truncate">{a.filename}</div>
+                <div className="text-[10px] text-white/35 truncate">
+                  {a.sizeBytes != null && `${attachHumanSize(a.sizeBytes)} · `}{creatorLabel(a.uploadedBy)} · {new Date(a.createdAt).toLocaleDateString()}
+                </div>
+              </div>
+              <button onClick={() => download(a)} aria-label={`Download ${a.filename}`}
+                className="shrink-0 text-white/40 hover:text-white/80 transition-colors p-1"><Download className="w-4 h-4" /></button>
+              {canDelete(a) && (
+                <button onClick={() => setConfirmDel(a)} aria-label={`Delete ${a.filename}`}
+                  className="shrink-0 text-white/30 hover:text-rose-300 focus:text-rose-300 transition-all p-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"><Trash2 className="w-4 h-4" /></button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <ConfirmModal open={!!confirmDel} title="Delete attachment"
+        message={confirmDel ? `"${confirmDel.filename}" will be permanently removed. This can't be undone.` : ''}
+        onConfirm={() => confirmDel && doDelete(confirmDel)}
+        onClose={() => setConfirmDel(null)} />
+    </div>
+  );
+}
+
 function TaskModal() {
   const { editingTask, setEditingTask, updateTask, deleteTask, duplicateTask, projects, toggleSubtask, addSubtask, removeSubtask, moveSubtask, members, meId, isOwner, isAdmin, resolveAssignee, closeEditing, creatorLabel, requestUpgrade } = useApp();
   const entitlements = useEntitlements();
@@ -1481,6 +1644,8 @@ function TaskModal() {
               )}
             </div>
           </div>
+
+          <Attachments taskId={t.id} canEdit={canEditTask} />
 
           <div className="pt-4 border-t border-white/5 text-[11px] text-white/30 flex flex-wrap gap-x-4 gap-y-1">
             <span>Created {new Date(t.createdAt).toLocaleDateString()}</span>
