@@ -519,16 +519,18 @@ export const comments = {
    the private 'voice-notes' bucket at <uid>/<uuid>.<ext>, played via signed URLs.
 ================================================================================= */
 export const messages = {
-  /** List the channel, oldest first. */
+  /** List the channel: the NEWEST `limit` messages, returned oldest-first. */
   async list(limit = 200, workspaceId) {
+    // Order DESC + limit fetches the most-recent N (ASC + limit would return the OLDEST N and hide
+    // everything newer once a channel exceeds the limit); reverse back to the oldest-first contract.
     let q = supabase
       .from('messages').select('*')
-      .order('created_at', { ascending: true })
+      .order('created_at', { ascending: false })
       .limit(limit);
     if (workspaceId) q = q.eq('workspace_id', workspaceId);
     const { data, error } = await q;
     if (error) throw error;
-    return (data || []).map(fromDbMessage);
+    return (data || []).map(fromDbMessage).reverse();
   },
 
   /** Count messages newer than `since` (ISO) not sent by `exceptSenderId` — for the unread badge. */
@@ -701,14 +703,15 @@ export const directMessages = {
     return (data || []).map(fromDbDmConversation);
   },
 
-  /** Messages in one conversation, oldest first. */
+  /** Messages in one conversation: the NEWEST `limit`, returned oldest-first. */
   async listMessages(conversationId, limit = 200) {
+    // Newest-N (DESC + limit) then reverse — ASC + limit would return the OLDEST N and hide recent ones.
     const { data, error } = await supabase
       .from('dm_messages').select('*')
       .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true }).limit(limit);
+      .order('created_at', { ascending: false }).limit(limit);
     if (error) throw error;
-    return (data || []).map(fromDbDirectMessage);
+    return (data || []).map(fromDbDirectMessage).reverse();
   },
 
   /** Recent messages across all my conversations in a workspace (newest first) — for list previews + unread. */

@@ -3,10 +3,10 @@ import { createPortal } from 'react-dom';
 import {
   LayoutDashboard, KanbanSquare, Grid3x3, FolderKanban, CalendarDays, Lock, UserCog,
   Plus, Search, Command, Settings, Sun, Moon, Download, Upload, RefreshCw, X, Check, CheckCheck,
-  Clock, AlertCircle, Flag, Tag, Link2, Trash2, Copy, Archive, ChevronRight, ChevronDown, ChevronUp,
-  Circle, CheckCircle2, Calendar, Zap, Timer, MoreHorizontal, Edit3, Filter,
+  Clock, AlertCircle, Flag, Link2, Trash2, Copy, ChevronRight, ChevronDown, ChevronUp,
+  CheckCircle2, Calendar, Zap, Timer, MoreHorizontal, Edit3, Filter,
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
-  Brain, Target, Hourglass, GripVertical, Info, Keyboard, LogOut, Wifi, WifiOff, Loader2,
+  Info, LogOut, Loader2,
   KeyRound, Bell, MessageSquare, MessagesSquare, Send, Mic, Square, Play, Pause, Users, Mail, UserPlus, ArrowRight,
   FileText, Shield, Paperclip, FileImage
 } from 'lucide-react';
@@ -98,10 +98,6 @@ const DEFAULT_PROJECTS = [
 const PROJECT_PALETTE = ['#a78bfa','#f472b6','#38bdf8','#34d399','#fb923c','#f43f5e','#facc15','#94a3b8','#64748b','#22d3ee','#c084fc','#4ade80'];
 const PROJECT_ICONS = ['◇','◈','◎','☉','✎','↗','♡','◐','⚙','★','✦','⬢'];
 
-const migrateProjects = (projects) => {
-  if (!Array.isArray(projects) || projects.length === 0) return DEFAULT_PROJECTS;
-  return projects;
-};
 
 const EFFORTS = {
   quick:  { id: 'quick',  label: 'Quick',  mins: 15, hex: '#34d399' },
@@ -127,7 +123,9 @@ const themeStore = {
 /* =================================================================================
    UTILITIES
 ================================================================================= */
-const daysBetween = (a, b) => Math.floor((new Date(b).setHours(0,0,0,0) - new Date(a).setHours(0,0,0,0)) / 86400000);
+// Math.round (not floor): the gap between two LOCAL midnights is 23h/25h across DST, so floor would
+// mis-count a next-day date as "today" once a year. Matches dayLabel's rounding.
+const daysBetween = (a, b) => Math.round((new Date(b).setHours(0,0,0,0) - new Date(a).setHours(0,0,0,0)) / 86400000);
 
 const formatDue = (iso) => {
   if (!iso) return null;
@@ -145,7 +143,7 @@ const isOverdue = (task) => task.dueDate && daysBetween(new Date(), task.dueDate
 const isDueToday = (task) => task.dueDate && daysBetween(new Date(), task.dueDate) === 0 && task.status !== 'done';
 const isDueSoon = (task) => task.dueDate && daysBetween(new Date(), task.dueDate) <= 3 && !isOverdue(task) && task.status !== 'done';
 
-const getNextBestScore = (task, projects) => {
+const getNextBestScore = (task) => {
   if (task.status === 'done') return -999;
   let score = 0;
   score += PRIORITIES[task.priority].rank * 20;
@@ -863,7 +861,7 @@ function Badge({ children, tone = 'neutral', icon: Icon }) {
   </span>;
 }
 
-function IconButton({ icon: Icon, label, active, onClick, tone = 'default' }) {
+function IconButton({ icon: Icon, label, active, onClick }) {
   return (
     <button onClick={onClick} aria-label={label} title={label}
       className={cx(
@@ -3163,7 +3161,7 @@ function Card({ children, className, title, subtitle, action, accent }) {
    DASHBOARD
 ================================================================================= */
 function DashboardView() {
-  const { tasks, projects, setEditingTask, setView, meId } = useApp();
+  const { tasks, setEditingTask, setView, meId } = useApp();
 
   // First run: an empty workspace gets a welcome + a clear "create your first task" path, not a wall
   // of empty cards. (The witty empty states below are kept for steady-state — a bucket clear because
@@ -3178,7 +3176,7 @@ function DashboardView() {
   }
 
   const open = tasks.filter(t => t.status !== 'done');
-  const ranked = [...open].map(t => ({ t, s: getNextBestScore(t, projects) })).sort((a,b) => b.s - a.s);
+  const ranked = [...open].map(t => ({ t, s: getNextBestScore(t) })).sort((a,b) => b.s - a.s);
   const top3 = ranked.slice(0, 3);
   const myUpcoming = open.filter(t => t.assigneeId === meId && t.dueDate).sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 5);
   const othersUpcoming = open.filter(t => t.assigneeId && t.assigneeId !== meId && t.dueDate).sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 5);
@@ -3426,7 +3424,7 @@ function FirstRunPanel() {
    KANBAN
 ================================================================================= */
 function KanbanView() {
-  const { tasks, filters, draggedId, updateTask, setEditingTask, compact, meId } = useApp();
+  const { tasks, filters, meId } = useApp();
 
   const filtered = useMemo(() => {
     const term = (filters.search || '').toLowerCase();
@@ -3528,7 +3526,7 @@ function KanbanColumn({ column, tasks }) {
    PRIVATE VIEW
 ================================================================================= */
 function PrivateView() {
-  const { tasks, setEditingTask, setQuickAddOpen, updateTask } = useApp();
+  const { tasks, setEditingTask, setQuickAddOpen } = useApp();
   const privateTasks = tasks.filter(t => t.privacy === 'private');
 
   const open = privateTasks.filter(t => t.status !== 'done');
@@ -3599,7 +3597,7 @@ function PrivateSection({ title, accent, tasks }) {
    VA DESK
 ================================================================================= */
 function MyTasksView() {
-  const { tasks, setEditingTask, updateTask, setQuickAddOpen, meId } = useApp();
+  const { tasks, setEditingTask, setQuickAddOpen, meId } = useApp();
   const myTasks = tasks.filter(t => t.assigneeId === meId);
   const byStatus = {
     active:   myTasks.filter(t => ['must','should','inbox'].includes(t.status)),
@@ -3770,7 +3768,7 @@ function MatrixView() {
    PROJECTS VIEW
 ================================================================================= */
 function ProjectsView() {
-  const { tasks, projects, setEditingTask, filters, meId, isOwner, isMember, membershipsLoaded, currentWorkspaceId, deleteProject, exitingProjectIds } = useApp();
+  const { tasks, projects, setEditingTask, filters, meId, isOwner, isAdmin, isMember, membershipsLoaded, currentWorkspaceId, deleteProject, exitingProjectIds } = useApp();
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -3787,7 +3785,7 @@ function ProjectsView() {
     return () => { alive = false; };
   }, [deleteTarget, currentWorkspaceId]);
 
-  const canManage = membershipsLoaded && (isOwner || isMember);
+  const canManage = membershipsLoaded && (isOwner || isAdmin || isMember);   // RLS: create/rename = rank>=1 (member/admin/owner)
   const blocked = deleteCount === null || deleteCount !== 0;
   const deleteMessage =
     deleteCount === null ? 'Checking for tasks…'
@@ -3851,7 +3849,7 @@ function ProjectsView() {
                         className="p-1.5 rounded-lg text-white/30 hover:text-white/80 hover:bg-white/5 transition-colors">
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
-                      {isOwner && (
+                      {(isOwner || isAdmin) && (
                         <button onClick={() => { setDeleteCount(null); setDeleteTarget(p); }} aria-label={`Delete ${p.name}`}
                           className="p-1.5 rounded-lg text-white/30 hover:text-rose-300 hover:bg-white/5 transition-colors">
                           <Trash2 className="w-3.5 h-3.5" />

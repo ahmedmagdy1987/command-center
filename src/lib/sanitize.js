@@ -86,8 +86,10 @@ export const toDbTask = (task) => {
     estimated_minutes: task.estimatedMinutes,
     tags: task.tags,
     subtasks: task.subtasks,
-    links: task.links,
     recurring: task.recurring,
+    // Scrub link URL schemes on the WRITE path too (create already runs sanitizeTask; this closes the
+    // update path). Preserve undefined so an unrelated update patch doesn't clobber existing links with [].
+    links: task.links === undefined ? undefined : normalizeLinks(task.links),
     created_by: task.createdBy,
     completed_at: task.completedAt,
     task_order: task.order,
