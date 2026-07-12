@@ -512,7 +512,8 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       console.error('Update task failed:', err);
       // Reconcile within the CURRENT workspace only — a bare list() would pull tasks from every
       // workspace the user belongs to into the active view (RLS-safe, but wrong scope on screen).
-      tasksApi.list(currentWorkspaceId).then(setTasks).catch(() => {});
+      // Also re-sync the open modal so it doesn't keep showing an edit the server rejected.
+      tasksApi.list(currentWorkspaceId).then(fresh => { setTasks(fresh); setEditingTask(et => et ? (fresh.find(t => t.id === et.id) ?? et) : et); }).catch(() => {});
     }
   }, [currentWorkspaceId]);
 
@@ -599,7 +600,8 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       setEditingTask(et => (et && et.id === taskId ? { ...et, subtasks: merged } : et));
     } catch (err) {
       console.error('Subtask update failed:', err);
-      tasksApi.list(currentWorkspaceId).then(setTasks).catch(() => {});   // reconcile to server on failure
+      // Reconcile to server on failure — including the open modal, which otherwise keeps the stale checklist.
+      tasksApi.list(currentWorkspaceId).then(fresh => { setTasks(fresh); setEditingTask(et => et ? (fresh.find(t => t.id === et.id) ?? et) : et); }).catch(() => {});
     }
   }, [currentWorkspaceId]);
 
@@ -1525,7 +1527,7 @@ function TaskModal() {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center p-0 sm:p-6 animate-[fadeIn_.15s_ease]" onClick={closeEditing}>
-      <div onClick={e => e.stopPropagation()} className="w-full sm:max-w-2xl max-h-screen sm:max-h-[85vh] overflow-hidden rounded-t-2xl sm:rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl flex flex-col">
+      <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Edit task" className="w-full sm:max-w-2xl max-h-screen sm:max-h-[85vh] overflow-hidden rounded-t-2xl sm:rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl flex flex-col">
         <div className="px-6 pt-5 pb-3 border-b border-white/5" style={{ background: `linear-gradient(180deg, ${priority.bg}, transparent)` }}>
           <div className="flex items-center gap-2 mb-3">
             <AssigneeChip assigneeId={t.assigneeId} />
@@ -1977,14 +1979,18 @@ function QuickAdd() {
   const [priority, setPriority] = useState('medium');
   const [project, setProject] = useState('other');
   const inputRef = useRef(null);
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     if (quickAddOpen) {
+      submittingRef.current = false;
       setTimeout(() => inputRef.current?.focus(), 50);
-      // New-task defaults: assigned to me, Shared. The Private view defaults to Private (+ personal project).
+      // New-task defaults reset EVERY open (consistent): assigned to me, Shared, medium priority.
+      // Private view -> Private + personal project.
       setAssigneeId(meId ?? null);
+      setPriority('medium');
       if (view === 'private') { setPrivacy('private'); setProject('personal'); }
-      else { setPrivacy('workspace'); }
+      else { setPrivacy('workspace'); setProject('other'); }
     } else {
       setTitle('');
     }
@@ -1993,7 +1999,8 @@ function QuickAdd() {
   if (!quickAddOpen) return null;
 
   const submit = () => {
-    if (!title.trim()) return;
+    if (!title.trim() || submittingRef.current) return;   // guard a fast double-Enter from creating two tasks
+    submittingRef.current = true;
     addTask({ title: title.trim(), assigneeId, privacy, priority, project, status: 'inbox' });
     setQuickAddOpen(false);
   };
@@ -2034,7 +2041,7 @@ function QuickAdd() {
             ))}
           </div>
           <div className="flex flex-wrap gap-2">
-            <select value={project} onChange={e => setProject(e.target.value)}
+            <select value={project} onChange={e => setProject(e.target.value)} aria-label="Project"
               className="bg-white/5 border border-white/10 rounded-full px-3 h-8 text-xs text-white/80 outline-none cursor-pointer">
               {projects.map(p => <option key={p.id} value={p.id} className="bg-[#0f1017]">{p.icon} {p.name}</option>)}
             </select>
@@ -2742,13 +2749,17 @@ function CreateWorkspaceForm({ onCreated, submitLabel = 'Create workspace', auto
  *  Cancel / backdrop / Esc cancel. Esc is stopped from bubbling so it doesn't also close an underlying modal. */
 function ConfirmModal({ open, title, message, confirmLabel = 'Delete', confirmDisabled = false, onConfirm, onClose }) {
   const btnRef = useRef(null);
-  useEffect(() => { if (open && !confirmDisabled) setTimeout(() => btnRef.current?.focus(), 30); }, [open, confirmDisabled]);
+  const panelRef = useRef(null);
+  // Focus the confirm button normally; when it's disabled (e.g. blocked project delete), focus the panel
+  // instead so the Esc handler below still receives the key.
+  useEffect(() => { if (open) setTimeout(() => (confirmDisabled ? panelRef.current : btnRef.current)?.focus(), 30); }, [open, confirmDisabled]);
   if (!open) return null;
   return createPortal(
     <>
       <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
-        <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5"
+        <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title}
+          className="pointer-events-auto w-full max-w-sm rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5 outline-none"
           style={{ animation: 'slideUp .2s ease' }}
           onClick={e => e.stopPropagation()}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}>
@@ -3734,6 +3745,7 @@ function MatrixView() {
     if (t.status === 'done') return false;
     if (!matchesAssignee(t, filters.assignee, meId)) return false;
     if (filters.privacy !== 'all' && t.privacy !== filters.privacy) return false;
+    if (filters.project !== 'all' && t.project !== filters.project) return false;
     return true;
   }), [tasks, filters, meId]);
 
@@ -3912,6 +3924,7 @@ function ScheduleView() {
     if (t.status === 'done') return false;
     if (!matchesAssignee(t, filters.assignee, meId)) return false;
     if (filters.privacy !== 'all' && t.privacy !== filters.privacy) return false;
+    if (filters.project !== 'all' && t.project !== filters.project) return false;
     return true;
   });
 
