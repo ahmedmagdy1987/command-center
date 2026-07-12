@@ -1,13 +1,15 @@
 # Command Center — project guide for Claude
 
 > Orientation file so any future session is instantly up to speed. Last verified against the
-> live DB on **2026-07-06** — current through `20260701161427` (harden_handle_new_user_search_path). The
+> live DB on **2026-07-12** — current through `20260712111044` (voice_note_rate_limit_count_operations). The
 > 9ffaa42 security pass is fully CLOSED OUT: security headers + `.gitignore` verified live, the hardening
 > migration was already applied 2026-07-01, and the repo filename was reconciled to the ledger in `6ec6f95`. Public
 > sign-up is **OPEN** (`SIGNUP_ENABLED = true`). Tenant isolation is proven by rolled-back impersonation
-> tests — **0 cross-tenant leaks** (45 assertions; see *Pre-launch security audit*) — and the
-> **workspace roles** system added since (owner/admin/member/guest) has its own **35/35** rolled-back
-> role-boundary proof (see *Workspace roles, mentions & guest UX*).
+> tests — **0 cross-tenant leaks** (re-run live 2026-07-12: **48/48** isolation + **40/40** role; see *Final
+> comprehensive audit + fixes (2026-07-12)*) — and the **workspace roles** system (owner/admin/member/guest)
+> has its own rolled-back role-boundary proof (see *Workspace roles, mentions & guest UX*). The 2026-07-12
+> audit's three DB findings (V-2 author-pin, V-3 base-RLS/grants re-assert, V-4 op-count voice cap) are all
+> **APPLIED**; the one remaining pre-traffic blocker is operational — confirm Auth → Confirm email = ON (V-1).
 
 ## What this is
 
@@ -506,6 +508,31 @@ For a true behavior-preservation proof, also run a temporary **second-workspace 
   notes are the **Pro** perk; the pricing page leads with Free+Pro (Business de-emphasized into a strip); the
   billing model reads **per-account** (one subscription covers the owner's workspaces). Everything still
   resolves to `founding` (all-access), so this is positioning only. **`SIGNUP_ENABLED` is now `true`.**
+
+## Final comprehensive audit + fixes (2026-07-12) — see [`SECURITY_AUDIT_2026-07-12.md`](SECURITY_AUDIT_2026-07-12.md)
+
+Full-surface re-audit (public sign-up now live). Verdict held: **0 critical/high, 0 confirmed cross-tenant
+reads, 0 privilege escalation**; anon locked out live; strong security headers; no secrets in 111 commits;
+0 XSS. **In-repo relaunch (2026-07-12) with the Supabase MCP** re-ran the blocked live proofs and applied
+the three real (all low) DB findings with full discipline (rolled-back proof → apply-if-green → advisors →
+migration → isolation regression → commit). All DB-only; build/lint held at **31/2**; advisors clean (only
+the accepted `auth_leaked_password_protection` WARN).
+- **V-2** (`20260712082020`, `3bb4460`) — pin `tasks.created_by = auth.uid()` in `tasks_insert_role`'s WITH
+  CHECK (was only pinned in the private branch; a `privacy='workspace'` insert let a member forge authorship
+  + misdirect the completion notification). Now matches `comments`/`messages`. *(Latent, not fixed: the tasks
+  UPDATE policy doesn't pin `created_by`; no caller sends it on update today — flagged for later.)*
+- **V-3** (`20260712110048`, `c67c804`) — idempotent re-assert of `enable row level security` + least-privilege
+  grants for the out-of-band base tables **tasks/projects/members** (tasks/projects = SIUD; members = SIU, no
+  delete; anon/public = none). No-op vs live; makes the repo a replayable source of truth for their RLS+grants
+  (their base CREATE TABLE is still out-of-band).
+- **V-4** (`20260712111044`, `be8dd25`) — voice-note 30/hr cap now counts **upload operations** via an
+  append-only `private.voice_note_upload_log` (AFTER INSERT trigger on `storage.objects`), so delete-then-
+  reupload can't reset it; the 1000-object cap stays a survivor count. Proven: bypass (35/35) → blocked at 30.
+- **Live re-run:** isolation **48/48** (23 cross-table + 6 comments + 16 edit/delete + 3 DM-participant) and
+  role **40/40** (reproduces & exceeds the 35/35 matrix); storage runtime **7/7**; advisors clean.
+- **STILL OPEN — operational, owner action:** **V-1** — confirm Supabase **Auth → Confirm email = ON** with
+  working SMTP (not SQL-readable; invite email-binding depends on it). Entitlements remain client-only
+  (server-enforce before real paid plans). Presence/typing channels remain the accepted metadata residual.
 
 ## Red-team security audit (2026-07-06) — see [`SECURITY_AUDIT_2026-07-06.md`](SECURITY_AUDIT_2026-07-06.md)
 

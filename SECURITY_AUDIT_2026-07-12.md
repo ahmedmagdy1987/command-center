@@ -6,9 +6,32 @@
 > `supabase/migrations/`, the source of truth), storage, realtime, invitations, and full git
 > history — plus **live outsider probes against production** using only the public key.
 >
-> **Apply-nothing-to-the-DB discipline held:** no DB/RLS change was applied. Every DB finding is
-> flagged below with a ready-to-run rolled-back PoC and its fix, for owner approval. The only change
-> applied is one trivial, frontend-safe hardening (§ Applied fix).
+> **Apply-nothing-to-the-DB discipline held (at audit time):** no DB/RLS change was applied during the
+> audit. Every DB finding is flagged below with a ready-to-run rolled-back PoC and its fix, for owner
+> approval. The only change applied during the audit is one trivial, frontend-safe hardening (§ Applied fix).
+
+> ## UPDATE — 2026-07-12 in-repo relaunch (blocked items run; V-2/V-3/V-4 APPLIED)
+>
+> The Supabase MCP was loaded (Claude relaunched inside the repo) and the blocked turnkey items were run
+> against the live DB, then **V-2, V-3, and V-4 were fixed with full discipline** (recon → rolled-back
+> proof → apply-if-green → advisors → migration file → isolation regression → commit + push). Build/lint
+> held at the 31/2 baseline (all changes were DB-only). Advisors clean throughout (only the accepted
+> `auth_leaked_password_protection` WARN).
+>
+> | Fix | Migration | Commit | Result |
+> |---|---|---|---|
+> | **V-2** pin `tasks.created_by=auth.uid()` | `20260712082020_pin_tasks_created_by_to_auth_uid` | `3bb4460` | spoof blocked 42501; owner/admin/member/guest normal insert OK; NULL created_by rejected |
+> | **V-3** reassert base RLS + grants | `20260712110048_reassert_base_rls_and_grants` | `c67c804` | no-op vs live; hazard table (RLS off + anon grant-all) → RLS on + anon revoked |
+> | **V-4** voice-note cap counts operations | `20260712111044_voice_note_rate_limit_count_operations` | `be8dd25` | delete+reupload bypass (35/35) → blocked at 30 (0 survivors, 30 ops logged); normal use 5/5 |
+>
+> **Live re-run of the blocked items (rolled-back service-role impersonation):** isolation **48/48**
+> (23 cross-table + 6 comments-inheritance + 16 edit/soft-delete + 3 DM-participant-isolation) → 0
+> cross-tenant reads, all cross-tenant writes/RPC-IDOR blocked; role regression **40/40** (reproduces &
+> exceeds the documented 35/35 matrix); storage runtime **7/7**; realtime publication + replica-identity
+> facts confirmed (tasks/notifications/dm_reads = DEFAULT, comments/messages/dm_messages = FULL). Live
+> websocket delivery is not drivable from SQL, but `postgres_changes` enforces the RLS proven above.
+> **V-1 remains the one operational blocker** (confirm Supabase Auth → Confirm email = ON — not
+> SQL-readable). See the closing checklist below for the full per-item status.
 
 ## Executive verdict
 
@@ -85,6 +108,11 @@ end if;
 ```
 
 ### V-2 — `tasks.created_by` not pinned to `auth.uid()` for workspace-privacy tasks  *(low; within-tenant authorship spoofing)*
+**STATUS: ✅ APPLIED 2026-07-12** — migration `20260712082020_pin_tasks_created_by_to_auth_uid`, commit `3bb4460`.
+Rolled-back proof confirmed the pre-fix spoof (member stored `created_by=<owner>`) and, after the pin,
+spoof blocked `42501` / normal insert OK for owner·admin·member·guest / NULL `created_by` rejected;
+isolation 48/48 + role 40/40 held. (The parallel note below about the UPDATE policy still applies — no
+caller sends `created_by` on update today, so it was left as flagged, not part of this fix.)
 `tasks_insert_role`'s WITH CHECK only constrains `created_by` in the **private** branch; a
 `privacy='workspace'` insert skips it. `comments.author_id` / `messages.sender_id` are pinned —
 `tasks` is the outlier.
@@ -110,6 +138,12 @@ INSERT trigger and drop it from the client payload. After the PoC confirms the c
 and re-run the same insert → EXPECT `42501`.
 
 ### V-3 — Local migrations don't reproduce base RLS-enable + grants for `tasks`/`projects`/`members`  *(low; repo-rebuild hygiene, not attacker-reachable)*
+**STATUS: ✅ APPLIED 2026-07-12** — migration `20260712110048_reassert_base_rls_and_grants`, commit `c67c804`.
+Rolled-back proof: no-op vs live (RLS+grants signature identical); applied to a simulated rebuild-hazard
+table (RLS disabled + anon grant-all) it yields RLS enabled + anon revoked. NOTE: the base **CREATE TABLE**
+for these three is still out-of-band (not in the repo, per 20260701161427's header), so a from-nothing
+replay still needs the base schema; this migration makes the RLS+grants aspect a self-sufficient,
+replayable source of truth (the specific hazard the finding flagged).
 The three earliest tables were created in the two pre-ledger entries that have **no local file** (the
 documented ledger quirk). The **live DB is correct** (proven live: all three return `42501` to anon),
 but a repo-only rebuild (staging / dev / disaster-recovery) would create them with **RLS DISABLED +
@@ -130,6 +164,10 @@ security` + the least-privilege grants for the three tables, so the migration se
 replayable source of truth. No behavior change on the (correct) live DB.
 
 ### V-4 — Voice-note hourly cap bypassable via delete-then-reupload  *(low; storage op-churn, not cost-DoS)*
+**STATUS: ✅ APPLIED 2026-07-12** — migration `20260712111044_voice_note_rate_limit_count_operations`, commit `be8dd25`.
+Now counts upload OPERATIONS via an append-only `private.voice_note_upload_log` (AFTER INSERT trigger on
+`storage.objects`); the 1000-object cap stays a survivor count. Rolled-back + live proof: delete+reupload
+bypassed the old cap (35/35) → blocked at 30 (0 survivors, 30 ops logged); normal use 5/5.
 `private.voice_note_upload_allowed()` counts **surviving** objects by `created_at`; deleting frees the
 count, so a delete→reupload loop exceeds 30 write-ops/hour. Persistent-storage cost stays bounded by
 the 1000-object / 10 GB cap; only operation/bandwidth churn is unbounded.
@@ -208,16 +246,25 @@ reach a future render. Legitimate links pass through unchanged; other link-objec
 preserved. **No behavior change on current data** (no producer sets a link `url`/`href` today).
 Verified: `npm run build` exit 0; `eslint .` at the **31 errors / 2 warnings** baseline (unchanged).
 
-## Blocked pending an in-repo relaunch (turnkey — run after `/mcp` → supabase → Authenticate)
+## Blocked pending an in-repo relaunch — ✅ COMPLETED 2026-07-12 (except the operational V-1 dashboard check)
 
-Launch Claude from `C:\Users\bdstd\Documents\projects\command-center` so `.mcp.json` loads, then:
-1. **45/45 isolation + 35/35 role regression** — re-run the rolled-back service-role impersonation
-   proofs (as an outsider AND a guest) to reconfirm 0 cross-tenant reads + 0 escalation on live data.
-2. **Security advisor re-list** — expect only the standing accepted `auth_leaked_password_protection`
-   WARN (Free-plan limitation; accepted).
-3. **V-2 / V-3 / V-4 PoCs above** — execute the rolled-back proofs to confirm current behavior, then,
-   on approval, apply the flagged fixes and re-run to confirm the close.
-4. **Live storage + realtime runtime tests** — signed-URL scoping, rate-limit trip, cross-tenant
-   subscription content check.
-5. **Confirm-email dashboard setting (V-1)** — verify **Auth → Confirm email = ON** with working
-   SMTP. *Not SQL-readable — this is a manual dashboard check the owner must confirm.*
+Ran in-repo with the Supabase MCP loaded. Results:
+1. **Isolation + role regression** — ✅ **48/48 isolation** (23 cross-table + 6 comments-inheritance +
+   16 edit/soft-delete + 3 DM-participant-isolation: 0 cross-tenant reads, all cross-tenant writes/RPC-IDOR
+   blocked `42501`, colliding-PK `23505`) and ✅ **40/40 role regression** (reproduces & exceeds the
+   documented 35/35 matrix — guest scoping, member own/assigned-only, admin/owner any, project/chat/invite
+   gating, and every role-management RPC guardrail incl. last-owner protection). Actors: outsider
+   `qassemmenna` (amego-only), guest = a temp CC guest membership, co-member-non-DM-participant = Tony.
+2. **Security advisor re-list** — ✅ only the standing accepted `auth_leaked_password_protection` WARN.
+3. **V-2 / V-3 / V-4** — ✅ rolled-back proofs confirmed current behavior, then all three **APPLIED**
+   (see each finding's STATUS line above) with re-run confirming the close; isolation regression re-run
+   green after each.
+4. **Live storage + realtime runtime tests** — ✅ storage **7/7** (own-folder read, cross-user read via
+   a workspace message reference, cross-tenant read blocked, rate-limit trip, under-cap OK, cross-folder
+   upload blocked `42501`); realtime publication + replica-identity facts confirmed (comments/messages/
+   dm_messages = FULL; tasks/notifications/dm_reads = DEFAULT — the documented R-2 tasks-DELETE bare-PK
+   residual). Live websocket delivery isn't drivable from SQL; `postgres_changes` enforces the RLS proven
+   above. *(Harness note: raw SQL DELETE on `storage.objects` is blocked by a Supabase guard — the
+   Storage-API removal was modelled via `session_replication_role=replica` for the V-4 delete step.)*
+5. **Confirm-email dashboard setting (V-1)** — ⏳ **STILL OPEN**: verify **Auth → Confirm email = ON**
+   with working SMTP. *Not SQL-readable — this is a manual dashboard check the owner must confirm.*
