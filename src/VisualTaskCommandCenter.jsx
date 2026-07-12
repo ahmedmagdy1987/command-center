@@ -249,6 +249,14 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   const [compact, setCompact] = useState(false);
   const [draggedId, setDraggedId] = useState(null);
   const [chatUnread, setChatUnread] = useState(0);
+  // Minimal app-level toast (transient errors that shouldn't use a native alert) + import-confirm state.
+  const [appToasts, setAppToasts] = useState([]);
+  const [importPreview, setImportPreview] = useState(null);
+  const showToast = useCallback((message, tone = 'error') => {
+    const id = uid();
+    setAppToasts(p => [...p, { id, message, tone }]);
+    setTimeout(() => setAppToasts(p => p.filter(x => x.id !== id)), 4500);
+  }, []);
   const chatViewRef = useRef(view);
   useEffect(() => { chatViewRef.current = view; }, [view]);
   const markChatRead = useCallback(() => {
@@ -496,9 +504,9 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     } catch (err) {
       console.error('Add task failed:', err);
       setTasks(prev => prev.filter(t => t.id !== optimistic.id));
-      alert('Failed to add task: ' + err.message);
+      showToast("Couldn't add the task. Please try again.");
     }
-  }, [session, currentWorkspaceId]);
+  }, [session, currentWorkspaceId, showToast]);
 
   const updateTask = useCallback(async (id, patch) => {
     setTasks(prev => prev.map(t => t.id === id ? {
@@ -641,20 +649,23 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
 
   const importJSON = (file) => {
     const reader = new FileReader();
-    reader.onload = async (e) => {
+    reader.onload = (e) => {
       try {
         const d = JSON.parse(e.target.result);
-        if (Array.isArray(d.tasks) && d.tasks.length) {
-          if (!confirm(`Import ${d.tasks.length} tasks? They will be added to existing tasks.`)) return;
-          const created = await tasksApi.bulkInsert(d.tasks, currentWorkspaceId);
-          setTasks(prev => [...created, ...prev]);
-        }
-      } catch (err) {
-        alert('Invalid JSON file: ' + err.message);
+        if (Array.isArray(d.tasks) && d.tasks.length) setImportPreview({ tasks: d.tasks, count: d.tasks.length });   // opens a ConfirmModal
+        else showToast('That file has no tasks to import.', 'info');
+      } catch {
+        showToast("That file isn't valid JSON.");
       }
     };
     reader.readAsText(file);
   };
+  const confirmImport = useCallback(async () => {
+    const pv = importPreview; setImportPreview(null);
+    if (!pv) return;
+    try { const created = await tasksApi.bulkInsert(pv.tasks, currentWorkspaceId); setTasks(prev => [...created, ...prev]); }
+    catch (err) { console.error('Import failed:', err); showToast("Couldn't import those tasks. Please try again."); }
+  }, [importPreview, currentWorkspaceId, showToast]);
 
   const switchWorkspace = useCallback((id) => {
     if (id === currentWorkspaceId || !workspaces.some(w => w.id === id)) return;
@@ -800,12 +811,34 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     createProject, renameProject, deleteProject, exitingProjectIds,
     pendingInvites, acceptInvitation, refreshInvites,
     startDraftTask, closeEditing, exitingIds, creatorLabel,
-    exportJSON, importJSON,
+    exportJSON, importJSON, showToast,
     chatUnread, markChatRead,
     dmConversations, dmUnread, dmActiveConv, setDmActiveConv, markDmRead, startDm, refreshDms,
     entitlements, upgradeFeature, requestUpgrade, dismissUpgrade,
   };
-  return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
+  return (
+    <AppCtx.Provider value={value}>
+      {children}
+      {createPortal(
+        <div className="fixed left-1/2 -translate-x-1/2 bottom-6 z-[200] flex flex-col items-center gap-2 pointer-events-none w-[calc(100vw-2rem)] max-w-sm">
+          {appToasts.map(tt => (
+            <div key={tt.id} style={{ animation: 'slideUp .2s ease' }}
+              className={cx('pointer-events-auto w-full flex items-start gap-2 rounded-xl border px-3.5 py-2.5 text-xs shadow-2xl backdrop-blur',
+                tt.tone === 'error' ? 'border-rose-500/25 bg-rose-500/10 text-rose-200' : 'border-white/10 bg-[#0f1017]/90 text-white/80')}>
+              {tt.tone === 'error' ? <AlertCircle className="w-4 h-4 shrink-0 mt-px" /> : <Info className="w-4 h-4 shrink-0 mt-px" />}
+              <span className="flex-1 break-words">{tt.message}</span>
+              <button onClick={() => setAppToasts(p => p.filter(x => x.id !== tt.id))} aria-label="Dismiss"
+                className="shrink-0 opacity-60 hover:opacity-100 transition-opacity"><X className="w-3.5 h-3.5" /></button>
+            </div>
+          ))}
+        </div>,
+        document.body
+      )}
+      <ConfirmModal open={!!importPreview} icon={Upload} tone="primary" confirmLabel="Import" title="Import tasks"
+        message={importPreview ? `${importPreview.count} task${importPreview.count === 1 ? '' : 's'} will be added to your existing tasks.` : ''}
+        onConfirm={confirmImport} onClose={() => setImportPreview(null)} />
+    </AppCtx.Provider>
+  );
 }
 
 /* =================================================================================
@@ -1107,11 +1140,15 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showAssign
 /** Render text with @mentions shown as styled pills. Matches the FULL display name of any workspace
  *  member (longest-first) so "@Ahmed Magdy" highlights as one pill, not just "@Ahmed". Cosmetic — the
  *  mention payload is the uuid[]. */
-function MentionText({ text }) {
+function MentionText({ text, mentions }) {
   const { members } = useApp();
   const s = String(text || '');
-  if (!s.includes('@')) return s;
-  const names = (members || []).map(m => m.displayName || m.email).filter(Boolean).sort((a, b) => b.length - a.length);
+  // Pill ONLY names that were actually mentioned (the row's mentions uuid[]) — not any @Name that happens
+  // to match a member. So free-typed "@Ahmed" (which fires no notification) and DM bodies (no mentions
+  // array / no picker) don't render a misleading pill.
+  if (!s.includes('@') || !Array.isArray(mentions) || !mentions.length) return s;
+  const mentionSet = new Set(mentions);
+  const names = (members || []).filter(m => mentionSet.has(m.userId)).map(m => m.displayName || m.email).filter(Boolean).sort((a, b) => b.length - a.length);
   if (!names.length) return s;
   const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp('(@(?:' + names.map(esc).join('|') + '))', 'g');
@@ -1316,7 +1353,7 @@ function TaskComments({ taskId }) {
                   </div>
                 </div>
               ) : (
-                <div className="text-xs text-white/70 leading-relaxed whitespace-pre-wrap break-words rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2"><MentionText text={c.body} /></div>
+                <div className="text-xs text-white/70 leading-relaxed whitespace-pre-wrap break-words rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2"><MentionText text={c.body} mentions={c.mentions} /></div>
               )}
             </div>
           );
@@ -1533,15 +1570,17 @@ function TaskModal() {
             <AssigneeChip assigneeId={t.assigneeId} />
             {t.privacy === 'private' && <Badge icon={Lock}>Private</Badge>}
             {isRecurring(t.recurring) && <Badge icon={RefreshCw}>{formatRecurrence(t.recurring) || 'Repeats'}</Badge>}
+            {!canEditTask && <Badge icon={Info}>Read-only</Badge>}
             <div className="flex-1" />
             <IconButton icon={Copy} label="Duplicate" onClick={() => { duplicateTask(t.id); setEditingTask(null); }} />
-            <IconButton icon={Trash2} label="Delete" onClick={() => setConfirmOpen(true)} />
+            {canEditTask && <IconButton icon={Trash2} label="Delete" onClick={() => setConfirmOpen(true)} />}
             <IconButton icon={X} label="Close" onClick={closeEditing} />
           </div>
           <input
             value={t.title}
             onChange={e => set({ title: e.target.value })}
-            className="w-full bg-transparent text-xl sm:text-2xl font-semibold text-white placeholder-white/30 outline-none font-display"
+            readOnly={!canEditTask}
+            className="w-full bg-transparent text-xl sm:text-2xl font-semibold text-white placeholder-white/30 outline-none font-display read-only:cursor-default"
             placeholder="Task title"
           />
           {t.createdBy && <div className="mt-1.5 text-[11px] text-white/35">Added by {creatorLabel(t.createdBy)}</div>}
@@ -1554,23 +1593,23 @@ function TaskModal() {
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
           <div className="flex flex-wrap gap-2">
-            <SelectPill label="Status" value={t.status} options={Object.values(STATUSES).map(s => [s.id, s.label])} onChange={v => set({ status: v })} />
-            <SelectPill label="Priority" value={t.priority} options={Object.values(PRIORITIES).map(p => [p.id, p.label])} onChange={v => set({ priority: v })} color={priority.hex} />
-            <AssigneeSelect label="Assignee" value={t.assigneeId || ''}
+            <SelectPill label="Status" value={t.status} options={Object.values(STATUSES).map(s => [s.id, s.label])} onChange={v => set({ status: v })} disabled={!canEditTask} />
+            <SelectPill label="Priority" value={t.priority} options={Object.values(PRIORITIES).map(p => [p.id, p.label])} onChange={v => set({ priority: v })} color={priority.hex} disabled={!canEditTask} />
+            <AssigneeSelect label="Assignee" value={t.assigneeId || ''} disabled={!canEditTask}
               options={[['', 'Unassigned'], ...(meId ? [[meId, 'Me']] : []), ...(t.assigneeId && t.assigneeId !== meId && !members.some(m => m.userId === t.assigneeId) ? [[t.assigneeId, resolveAssignee(t.assigneeId).label]] : []), ...members.filter(m => m.userId !== meId).map(m => [m.userId, m.displayName || m.email])]}
               onChange={v => set({ assigneeId: v || null })} />
-            <SelectPill label="Visibility" value={t.privacy} options={[['workspace', 'Shared'], ['private', 'Private']]} onChange={v => set({ privacy: v })} />
-            <SelectPill label="Project" value={t.project} options={projects.map(p => [p.id, p.name])} onChange={v => set({ project: v })} />
-            <SelectPill label="Effort" value={t.effort} options={Object.values(EFFORTS).map(e => [e.id, `${e.label} (${e.mins}m)`])} onChange={v => set({ effort: v, estimatedMinutes: EFFORTS[v].mins })} />
+            <SelectPill label="Visibility" value={t.privacy} options={[['workspace', 'Shared'], ['private', 'Private']]} onChange={v => set({ privacy: v })} disabled={!canEditTask} />
+            <SelectPill label="Project" value={t.project} options={projects.map(p => [p.id, p.name])} onChange={v => set({ project: v })} disabled={!canEditTask} />
+            <SelectPill label="Effort" value={t.effort} options={Object.values(EFFORTS).map(e => [e.id, `${e.label} (${e.mins}m)`])} onChange={v => set({ effort: v, estimatedMinutes: EFFORTS[v].mins })} disabled={!canEditTask} />
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <ToggleChip active={t.urgent} onClick={() => set({ urgent: !t.urgent })} icon={Zap} label="Urgent" color="#fb923c" />
-            <ToggleChip active={t.important} onClick={() => set({ important: !t.important })} icon={Flag} label="Important" color="#a78bfa" />
-            <ToggleChip active={t.blocked} onClick={() => set({ blocked: !t.blocked })} icon={PauseCircle} label="Blocked" color="#f43f5e" />
-            <button onClick={() => entitlements.can('recurringTasks') ? setRecurrenceOpen(true) : requestUpgrade('recurringTasks')} type="button"
-              className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
-                isRecurring(t.recurring) ? 'text-white' : 'text-white/50 border-white/10 bg-white/5 hover:bg-white/10')}
+            <ToggleChip active={t.urgent} onClick={() => set({ urgent: !t.urgent })} icon={Zap} label="Urgent" color="#fb923c" disabled={!canEditTask} />
+            <ToggleChip active={t.important} onClick={() => set({ important: !t.important })} icon={Flag} label="Important" color="#a78bfa" disabled={!canEditTask} />
+            <ToggleChip active={t.blocked} onClick={() => set({ blocked: !t.blocked })} icon={PauseCircle} label="Blocked" color="#f43f5e" disabled={!canEditTask} />
+            <button onClick={() => entitlements.can('recurringTasks') ? setRecurrenceOpen(true) : requestUpgrade('recurringTasks')} type="button" disabled={!canEditTask}
+              className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-default',
+                isRecurring(t.recurring) ? 'text-white' : cx('text-white/50 border-white/10 bg-white/5', canEditTask && 'hover:bg-white/10'))}
               style={isRecurring(t.recurring) ? { background: '#34d39922', borderColor: '#34d39955', color: '#34d399' } : {}}>
               <RefreshCw className="w-3.5 h-3.5" />
               {isRecurring(t.recurring) ? formatRecurrence(t.recurring) : 'Repeat'}
@@ -1588,27 +1627,31 @@ function TaskModal() {
             <div>
               <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5">Due date</div>
               <input type="date" value={t.dueDate ? t.dueDate.slice(0,10) : ''} onChange={e => set({ dueDate: e.target.value ? new Date(e.target.value + 'T12:00:00').toISOString() : null })}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/90 outline-none focus:border-white/25" />
+                disabled={!canEditTask}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/90 outline-none focus:border-white/25 disabled:opacity-60 disabled:cursor-default" />
             </div>
             <div>
               <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5">Scheduled for</div>
               <input type="date" value={t.scheduledDate ? t.scheduledDate.slice(0,10) : ''} onChange={e => set({ scheduledDate: e.target.value ? new Date(e.target.value + 'T12:00:00').toISOString() : null })}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/90 outline-none focus:border-white/25" />
+                disabled={!canEditTask}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/90 outline-none focus:border-white/25 disabled:opacity-60 disabled:cursor-default" />
             </div>
           </div>
 
           <div>
             <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5">Notes</div>
             <textarea value={t.description} onChange={e => set({ description: e.target.value })} rows={4}
+              readOnly={!canEditTask}
               placeholder="Context, acceptance criteria, links…"
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white/90 outline-none focus:border-white/25 resize-y" />
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white/90 outline-none focus:border-white/25 resize-y read-only:cursor-default read-only:opacity-80" />
           </div>
 
           {t.blocked && (
             <div>
               <div className="text-[10px] font-medium uppercase tracking-widest text-rose-300/70 mb-1.5">Blocked because</div>
               <input value={t.blockedReason} onChange={e => set({ blockedReason: e.target.value })} placeholder="Waiting on…"
-                className="w-full bg-rose-500/5 border border-rose-500/20 rounded-lg px-3 py-2 text-sm text-white/90 outline-none focus:border-rose-500/40" />
+                readOnly={!canEditTask}
+                className="w-full bg-rose-500/5 border border-rose-500/20 rounded-lg px-3 py-2 text-sm text-white/90 outline-none focus:border-rose-500/40 read-only:cursor-default" />
             </div>
           )}
 
@@ -1671,18 +1714,19 @@ function TaskModal() {
   );
 }
 
-function SelectPill({ label, value, options, onChange, color }) {
+function SelectPill({ label, value, options, onChange, color, disabled = false }) {
   const current = options.find(([v]) => v === value);
   const currentLabel = current ? current[1] : value;
   return (
-    <div className="relative inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 h-8 text-xs text-white/85 hover:bg-white/10 transition-colors cursor-pointer">
+    <div className={cx('relative inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 h-8 text-xs text-white/85 transition-colors',
+      disabled ? 'opacity-60' : 'hover:bg-white/10 cursor-pointer')}>
       {color && <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />}
       <span className="text-white/40">{label}:</span>
       <span className="text-white/95 font-medium">{currentLabel}</span>
-      <ChevronDown className="w-3 h-3 text-white/40" />
-      <select value={value} onChange={e => onChange(e.target.value)}
+      {!disabled && <ChevronDown className="w-3 h-3 text-white/40" />}
+      <select value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
         aria-label={label}
-        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-default">
         {options.map(([v,l]) => <option key={v} value={v} className="bg-[#0f1017] text-white">{l}</option>)}
       </select>
     </div>
@@ -1696,7 +1740,7 @@ function SelectPill({ label, value, options, onChange, color }) {
  *  localized here: it would need the assignee_id data model, all three callers, matchesAssignee and
  *  resolveAssignee to move to arrays — a separate, DB-touching decision.) Avatars are derived from the
  *  value (a user id) where possible; 'all' shows a group icon, '' / 'unassigned' a neutral dot. */
-function AssigneeSelect({ label, value, options, onChange, variant = 'field' }) {
+function AssigneeSelect({ label, value, options, onChange, variant = 'field', disabled = false }) {
   const { meId, theme } = useApp();
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(false);   // drives the gentle enter/exit transition
@@ -1748,7 +1792,7 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field' }) 
 
   return (
     <>
-      <button type="button" ref={btnRef} onClick={() => (open ? close() : openMenu())} aria-haspopup="listbox" aria-expanded={open} className={triggerCls}>
+      <button type="button" ref={btnRef} disabled={disabled} onClick={() => (open ? close() : openMenu())} aria-haspopup="listbox" aria-expanded={open} className={cx(triggerCls, disabled && 'opacity-60 !cursor-default')}>
         {variant === 'filter' && <Filter className="w-3 h-3 text-white/40 shrink-0" />}
         {curAv && !curAv.all && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: curAv.hex }} />}
         <span className="text-white/40 shrink-0">{label}:</span>
@@ -1798,11 +1842,11 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field' }) 
   );
 }
 
-function ToggleChip({ active, onClick, icon: Icon, label, color }) {
+function ToggleChip({ active, onClick, icon: Icon, label, color, disabled = false }) {
   return (
-    <button onClick={onClick}
-      className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
-        active ? 'text-white' : 'text-white/50 border-white/10 bg-white/5 hover:bg-white/10')}
+    <button onClick={onClick} disabled={disabled}
+      className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-default',
+        active ? 'text-white' : cx('text-white/50 border-white/10 bg-white/5', !disabled && 'hover:bg-white/10'))}
       style={active ? { background: `${color}22`, borderColor: `${color}55`, color } : {}}>
       <Icon className="w-3.5 h-3.5" />{label}
     </button>
@@ -2588,15 +2632,18 @@ function NotificationBell() {
     setTimeout(finish, 180);
   };
 
-  // Clear all: fade every row out together (~180ms), then wipe + persist a recipient+workspace-scoped delete.
+  // Clear all: fade every currently-shown row out together (~180ms), then delete exactly those ids.
+  // Scoping to the captured snapshot (not a match-all) means a notification that arrives DURING the fade
+  // survives on screen and server — no race that silently destroys an unseen notification.
   const clearAll = () => {
     setConfirmClear(false);
     if (items.length === 0) return;
     const ids = items.map(x => x.id);
+    const idSet = new Set(ids);
     const finish = () => {
-      setItems([]);
+      setItems(prev => prev.filter(x => !idSet.has(x.id)));   // remove only the snapshot; keep anything that streamed in
       setExitingNotifIds(new Set());
-      notificationsApi.clearAll(currentWorkspaceId).catch(err => {
+      notificationsApi.clearIds(ids, currentWorkspaceId).catch(err => {
         console.error('Clear all notifications failed:', err);
         notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(() => {}); // reconcile with server on failure
       });
@@ -2747,7 +2794,7 @@ function CreateWorkspaceForm({ onCreated, submitLabel = 'Create workspace', auto
 /** Reusable app-styled confirmation modal for destructive actions (same style family as
  *  CreateWorkspaceModal). Renders above other modals (z-[60]); Delete is auto-focused + destructive;
  *  Cancel / backdrop / Esc cancel. Esc is stopped from bubbling so it doesn't also close an underlying modal. */
-function ConfirmModal({ open, title, message, confirmLabel = 'Delete', confirmDisabled = false, onConfirm, onClose }) {
+function ConfirmModal({ open, title, message, confirmLabel = 'Delete', confirmDisabled = false, onConfirm, onClose, icon: Icon = Trash2, tone = 'danger' }) {
   const btnRef = useRef(null);
   const panelRef = useRef(null);
   // Focus the confirm button normally; when it's disabled (e.g. blocked project delete), focus the panel
@@ -2770,8 +2817,9 @@ function ConfirmModal({ open, title, message, confirmLabel = 'Delete', confirmDi
               className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">Cancel</button>
             <button ref={btnRef} onClick={onConfirm} disabled={confirmDisabled}
               className={cx('h-9 px-4 rounded-xl text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
-                confirmDisabled ? 'bg-rose-500/40 text-white/60 cursor-not-allowed' : 'bg-rose-500 hover:bg-rose-400')}>
-              <Trash2 className="w-3.5 h-3.5" />{confirmLabel}
+                confirmDisabled ? 'bg-rose-500/40 text-white/60 cursor-not-allowed'
+                  : tone === 'danger' ? 'bg-rose-500 hover:bg-rose-400' : 'bg-violet-500 hover:bg-violet-400')}>
+              <Icon className="w-3.5 h-3.5" />{confirmLabel}
             </button>
           </div>
         </div>
@@ -4249,7 +4297,7 @@ function MsgBubble({ m, mine, onDelete, onEdit }) {
       mine ? 'bg-violet-500/20 border-violet-500/25 rounded-tr-sm' : 'bg-white/[0.05] border-white/10 rounded-tl-sm')}>
       {m.body && (
         <div className="text-sm text-white/85 leading-relaxed whitespace-pre-wrap break-words" title={absoluteTime(m.createdAt)}>
-          <MentionText text={m.body} />
+          <MentionText text={m.body} mentions={m.mentions} />
           {edited && <span className="ml-1.5 text-[10px] text-white/35 not-italic">(edited)</span>}
         </div>
       )}
@@ -4664,7 +4712,7 @@ function ChatView() {
       <Composer
         placeholder="Message the workspace…  (@ to mention, Enter to send)"
         onSubmitText={sendText}
-        mentionMembers={members}
+        mentionMembers={members.filter(m => m.role !== 'guest')}
         meId={meId}
         onTyping={signalTyping}
         onStopTyping={stopTyping}
@@ -5408,6 +5456,8 @@ function AppShell() {
         [data-theme="light"] .border-white\\/5, [data-theme="light"] .border-white\\/10, [data-theme="light"] .border-white\\/\\[0\\.06\\], [data-theme="light"] .border-white\\/\\[0\\.08\\] { border-color: rgba(0,0,0,0.08) !important; }
         [data-theme="light"] .bg-white\\/\\[0\\.04\\], [data-theme="light"] .bg-white\\/\\[0\\.03\\], [data-theme="light"] .bg-white\\/\\[0\\.02\\], [data-theme="light"] .bg-white\\/\\[0\\.015\\], [data-theme="light"] .bg-white\\/\\[0\\.005\\], [data-theme="light"] .bg-white\\/5 { background: rgba(0,0,0,0.025) !important; }
         [data-theme="light"] .bg-white\\/\\[0\\.08\\], [data-theme="light"] .bg-white\\/10 { background: rgba(0,0,0,0.06) !important; }
+        /* Dropdown active-row + mention-pill accent: a legible violet in light mode (the plain white-alpha wash was near-invisible). */
+        [data-theme="light"] .bg-violet-500\\/25, [data-theme="light"] .bg-violet-500\\/20 { background: rgba(124,58,237,0.16) !important; }
         [data-theme="light"] .search-input { background: #ffffff !important; border-color: rgba(0,0,0,0.12) !important; color: #17181c !important; }
         [data-theme="light"] .search-input::placeholder { color: rgba(0,0,0,0.4) !important; }
         [data-theme="light"] .hover\\:bg-white\\/5:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.04\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.06\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.07\\]:hover, [data-theme="light"] .hover\\:bg-white\\/10:hover { background: rgba(0,0,0,0.04) !important; }

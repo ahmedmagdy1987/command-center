@@ -417,6 +417,19 @@ export const notifications = {
     if (error) throw error;
   },
 
+  /** Delete a SPECIFIC set of the recipient's own notifications (the "clear all" snapshot). Scoping to
+   *  captured ids means a notification that streams in during the clear animation isn't destroyed.
+   *  recipient_id + workspace_id are still asserted (RLS also gates to recipient). */
+  async clearIds(ids, workspaceId) {
+    if (!Array.isArray(ids) || ids.length === 0) return;
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+    let q = supabase.from('notifications').delete().eq('recipient_id', session.user.id).in('id', ids);
+    if (workspaceId) q = q.eq('workspace_id', workspaceId);
+    const { error } = await q;
+    if (error) throw error;
+  },
+
   /**
    * Subscribe to new notifications for a recipient. Returns an unsubscribe function.
    * cb is called with the app-shaped notification for each INSERT.
