@@ -738,6 +738,14 @@ export const directMessages = {
     return (data || []).map(fromDbDirectMessage);
   },
 
+  /** Accurate per-conversation unread counts for me (server-side RPC — correct at any message volume,
+   *  unlike deriving from a newest-N window). Returns [{ conversationId, unread }] for my conversations. */
+  async unreadCounts(workspaceId) {
+    const { data, error } = await supabase.rpc('dm_unread_counts', { p_workspace_id: workspaceId });
+    if (error) throw error;
+    return (data || []).map(r => ({ conversationId: r.conversation_id, unread: Number(r.unread) || 0 }));
+  },
+
   /** My own per-conversation read cursors. */
   async myReads() {
     const session = await auth.getSession();

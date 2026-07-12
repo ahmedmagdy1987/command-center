@@ -282,26 +282,21 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     const me = userId;
     if (!ws || !me) return;
     try {
-      const [convs, msgs, reads] = await Promise.all([
+      const [convs, msgs, unreadRows] = await Promise.all([
         directMessagesApi.listConversations(ws),
-        directMessagesApi.listRecentMessages(ws, 500),
-        directMessagesApi.myReads(),
+        directMessagesApi.listRecentMessages(ws, 500),   // for the last-message PREVIEW per conversation
+        directMessagesApi.unreadCounts(ws),               // accurate per-conversation UNREAD at any volume (server-side)
       ]);
-      const cursor = new Map(reads.map(r => [r.conversationId, r.lastReadAt]));
-      const agg = new Map();   // conversationId -> { last, unread } (msgs are newest-first)
-      for (const m of msgs) {
-        let a = agg.get(m.conversationId);
-        if (!a) { a = { last: m, unread: 0 }; agg.set(m.conversationId, a); }
-        const c = cursor.get(m.conversationId);
-        if (m.senderId !== me && (!c || new Date(m.createdAt).getTime() > new Date(c).getTime())) a.unread++;
-      }
+      const unreadMap = new Map(unreadRows.map(r => [r.conversationId, r.unread]));
+      const lastMsg = new Map();   // conversationId -> newest message (msgs are newest-first, so first-seen wins)
+      for (const m of msgs) if (!lastMsg.has(m.conversationId)) lastMsg.set(m.conversationId, m);
       setDmConversations(convs.map(c => {
         const peerId = c.userLo === me ? c.userHi : c.userLo;
-        const a = agg.get(c.id) || { last: null, unread: 0 };
+        const last = lastMsg.get(c.id) || null;
         // Badge-race fix: while this thread is the one being actively viewed, markDmRead has already
-        // zeroed it optimistically; don't let the lagging server cursor re-inflate the badge here.
+        // zeroed it optimistically; don't let the lagging server value re-inflate the badge here.
         const viewing = chatViewRef.current === 'dms' && c.id === dmActiveConvRef.current;
-        return { id: c.id, peerId, lastAt: a.last?.createdAt || c.createdAt, preview: a.last, unread: viewing ? 0 : a.unread };
+        return { id: c.id, peerId, lastAt: last?.createdAt || c.createdAt, preview: last, unread: viewing ? 0 : (unreadMap.get(c.id) || 0) };
       }).sort((x, y) => new Date(y.lastAt) - new Date(x.lastAt)));
     } catch (e) { console.error('Failed to load direct messages:', e); }
   }, [currentWorkspaceId, userId]);
