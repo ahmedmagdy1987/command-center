@@ -1,7 +1,8 @@
 # Command Center — project guide for Claude
 
 > Orientation file so any future session is instantly up to speed. Last verified against the
-> live DB on **2026-07-12** — current through `20260712111044` (voice_note_rate_limit_count_operations). The
+> live DB on **2026-07-12** — current through `20260712130915` (pin_tasks_created_by_immutable_on_update);
+> **task file attachments** shipped the same day (see *Task attachments*). The
 > 9ffaa42 security pass is fully CLOSED OUT: security headers + `.gitignore` verified live, the hardening
 > migration was already applied 2026-07-01, and the repo filename was reconciled to the ledger in `6ec6f95`. Public
 > sign-up is **OPEN** (`SIGNUP_ENABLED = true`). Tenant isolation is proven by rolled-back impersonation
@@ -67,16 +68,20 @@ Authorization is **per-workspace** via `workspace_members.role` — now a four-r
 people are unchanged (Tony & Ahmed Magdy = `owner`, VA = `member`); admin/guest exist in the model and are
 exercised by the rolled-back proofs. See *Workspace roles, mentions & guest UX*.
 
-## Data model (12 base tables)
+## Data model (13 base tables)
 
 `tasks`, `projects`, `members`, `comments`, `messages`, `notifications`, `workspaces`,
-`workspace_members`, plus `invitations` (workspace invites) and the direct-messages trio
-`dm_conversations` / `dm_messages` / `dm_reads`. Every tenant-scoped table carries a `workspace_id`.
+`workspace_members`, plus `invitations` (workspace invites), the direct-messages trio
+`dm_conversations` / `dm_messages` / `dm_reads`, and `task_attachments` (task file attachments —
+see *Task attachments*). Every tenant-scoped table carries a `workspace_id`.
 
 - `tasks.id` is **TEXT** (client-generated); `comments.task_id` / `notifications.task_id` are TEXT FKs.
 - `members` cols: `id` (=auth user id), `email`, `display_name`, `role`, `created_at`. **No `name` col.**
 - Storage: private bucket **`voice-notes`** (10 MB cap, audio mime allowlist); objects at
   `<uid>/<uuid>.<ext>`, served via signed URLs; path-based delete ownership.
+- Storage: private bucket **`task-attachments`** (25 MB cap, image+pdf+text/csv+zip+office allowlist,
+  no svg/executables); objects at `<workspace_id>/<task_id>/<uuid>.<ext>`, signed-URL download;
+  2 GB/workspace byte quota + 2000-object cap + 60/hr/user op-rate limit (see *Task attachments*).
 
 ### Private helper functions (the RLS engine)
 SECURITY DEFINER, `search_path=''`, EXECUTE granted to `authenticated` only (revoked from
@@ -509,6 +514,36 @@ For a true behavior-preservation proof, also run a temporary **second-workspace 
   billing model reads **per-account** (one subscription covers the owner's workspaces). Everything still
   resolves to `founding` (all-access), so this is positioning only. **`SIGNUP_ENABLED` is now `true`.**
 
+## Task attachments (2026-07-12) — see [`TASK_ATTACHMENTS_DESIGN.md`](TASK_ATTACHMENTS_DESIGN.md)
+
+Files on a task (briefs, deliverables, images, docs). Three DB migrations + a client pass.
+- **`20260712124036_task_attachments_core`** — the private **`task-attachments`** bucket (25 MB/file, MIME
+  allowlist images+pdf+text/csv+zip+office, **no svg/executables**); **`public.task_attachments`** metadata
+  table (immutable — SELECT/INSERT/DELETE grants, no UPDATE), `workspace_id` stamped from the parent task by
+  the `set_attachment_workspace_id` BEFORE INSERT trigger (client can't spoof it). **RLS DELEGATES to the task
+  predicates, never reimplements guest-scoping:** SELECT via `private.can_view_task` (= `can_see_task(auth.uid(),
+  …)`, inherits privacy + guest own/assigned), INSERT via `private.can_edit_task` (mirrors `tasks_update_role`:
+  member/guest own-assigned, admin+ any) + `<20`/task, DELETE = uploader-own or admin+ (`workspace_role_rank>=2`).
+  Storage-object policies mirror it (download needs a metadata row + `can_view_task`; upload gates the path on
+  ws-membership + `can_edit_task`). Helpers `can_view_task` / `can_edit_task` / `task_attachment_count` /
+  `workspace_attachment_bytes` / `workspace_attachment_object_count` (DEFINER, `search_path=''`, EXECUTE to
+  `authenticated`). Quotas: **2 GB/workspace** byte quota (live storage bytes) + **2000-object/ws** cap.
+- **`20260712124336_task_attachment_upload_rate_limit`** — **60 uploads/hour/user** counted on OPERATIONS via
+  append-only `private.task_attachment_upload_log` + AFTER INSERT trigger `log_task_attachment_upload` (delete-
+  resistant, mirrors the hardened voice-note pattern), wired into the storage INSERT policy.
+- **`20260712124726_task_attachment_orphan_sweep`** — hourly **pg_cron** job (the project's **2nd** scheduler,
+  after `due-date-reminders`) `private._sweep_orphan_task_attachments()` GCs `task-attachments` objects whose
+  metadata row was cascaded away by a task delete (uses `session_replication_role=replica` to bypass the storage
+  direct-delete guard). The client also removes attachment objects via the Storage API on task delete (blobs);
+  the sweep is the row-reconciliation backstop.
+- **Client** (`api.js attachments.{list,upload,signedUrl,remove,removeAllForTask}` + `fromDbAttachment`; TaskModal
+  Attachments section): drag-drop/click upload w/ progress + errors, list (name/size/uploader/date), image
+  thumbnails via signed URL, download, delete (uploader/admin+), **read-only when `!canEditTask`** (same gate as
+  the checklist). `remove()` deletes the OBJECT first (the storage-delete policy needs the metadata row to
+  authorize it) then the row. Client MIME/size/count checks are UX only — the server RLS/bucket is authoritative.
+- **Proven:** feasibility A-E 14/14 (delegation matrix + happy path + outsider blocks); quotas (size, per-task
+  20, rate 60 delete-resistant); orphan sweep 5/5; regression isolation 36/36 + role 40/40 + storage 14/14.
+
 ## Final comprehensive audit + fixes (2026-07-12) — see [`SECURITY_AUDIT_2026-07-12.md`](SECURITY_AUDIT_2026-07-12.md)
 
 Full-surface re-audit (public sign-up now live). Verdict held: **0 critical/high, 0 confirmed cross-tenant
@@ -519,8 +554,10 @@ migration → isolation regression → commit). All DB-only; build/lint held at 
 the accepted `auth_leaked_password_protection` WARN).
 - **V-2** (`20260712082020`, `3bb4460`) — pin `tasks.created_by = auth.uid()` in `tasks_insert_role`'s WITH
   CHECK (was only pinned in the private branch; a `privacy='workspace'` insert let a member forge authorship
-  + misdirect the completion notification). Now matches `comments`/`messages`. *(Latent, not fixed: the tasks
-  UPDATE policy doesn't pin `created_by`; no caller sends it on update today — flagged for later.)*
+  + misdirect the completion notification). Now matches `comments`/`messages`. *(The UPDATE path was closed
+  the same day by `20260712130915` — an `enforce_task_author_immutable` BEFORE UPDATE trigger raising 42501 on
+  any `created_by` change; a WITH CHECK pin can't be used on UPDATE without rejecting legitimate non-creator
+  edits. Proven 7/7 rolled-back.)*
 - **V-3** (`20260712110048`, `c67c804`) — idempotent re-assert of `enable row level security` + least-privilege
   grants for the out-of-band base tables **tasks/projects/members** (tasks/projects = SIUD; members = SIU, no
   delete; anon/public = none). No-op vs live; makes the repo a replayable source of truth for their RLS+grants
