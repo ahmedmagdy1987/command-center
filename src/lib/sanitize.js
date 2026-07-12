@@ -12,6 +12,26 @@ export const migrateProjectId = (id) => LEGACY_PROJECT_MAP[id] || id;
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 export const nowISO = () => new Date().toISOString();
 
+// URL-scheme allowlist for user-supplied task links. task.links has no clickable render site
+// today, so this is defense-in-depth: it guarantees a javascript:/data:/vbscript: URL can never
+// be stored on a link and reach a future render. Legitimate http(s)/mailto links pass through
+// unchanged; any other property on a link object is preserved.
+const SAFE_LINK_SCHEMES = new Set(['http:', 'https:', 'mailto:']);
+export const safeLinkUrl = (u) => {
+  if (typeof u !== 'string' || !u) return '';
+  try { return SAFE_LINK_SCHEMES.has(new URL(u, 'https://x.invalid').protocol) ? u.trim() : ''; }
+  catch { return ''; }
+};
+const normalizeLinks = (arr) =>
+  Array.isArray(arr)
+    ? arr.filter(l => l && typeof l === 'object').map(l => {
+        const out = { ...l };
+        if ('url' in out) out.url = safeLinkUrl(out.url);
+        if ('href' in out) out.href = safeLinkUrl(out.href);
+        return out;
+      })
+    : [];
+
 /** Convert a DB-shaped task (snake_case columns) to app shape (camelCase) */
 export const fromDbTask = (row) => {
   if (!row || typeof row !== 'object') return null;
@@ -35,7 +55,7 @@ export const fromDbTask = (row) => {
     estimatedMinutes: row.estimated_minutes,
     tags: Array.isArray(row.tags) ? row.tags : [],
     subtasks: Array.isArray(row.subtasks) ? row.subtasks : [],
-    links: Array.isArray(row.links) ? row.links : [],
+    links: normalizeLinks(row.links),
     recurring: row.recurring,
     createdBy: row.created_by,
     createdAt: row.created_at,
@@ -105,7 +125,7 @@ export const sanitizeTask = (raw) => {
       title: typeof s.title === 'string' ? s.title : '',
       done: !!s.done,
     })) : [],
-    links: Array.isArray(t.links) ? t.links.filter(l => l && typeof l === 'object') : [],
+    links: normalizeLinks(t.links),
     recurring: t.recurring && (typeof t.recurring === 'string' || typeof t.recurring === 'object') ? t.recurring : null,
     createdBy: t.createdBy || null,
     createdAt: typeof t.createdAt === 'string' ? t.createdAt : nowISO(),
