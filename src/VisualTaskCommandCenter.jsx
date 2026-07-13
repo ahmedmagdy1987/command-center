@@ -365,6 +365,10 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     return () => { mounted = false; };
   }, [userId, navigate]);
 
+  // 5b: server-computed workspace task aggregates (RLS-scoped) for headline numbers that shouldn't need the
+  // whole task array. Kept fresh by a debounced effect below; cleared on switch.
+  const [workspaceStats, setWorkspaceStats] = useState(null);
+
   // Load the current workspace's data once it's resolved; re-runs (clear + refetch) on switch.
   useEffect(() => {
     if (!currentWorkspaceId) return;
@@ -373,11 +377,13 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       setLoading(true);
       setTasks([]);                  // clear so a switch doesn't flash the previous workspace's data
       setProjects(DEFAULT_PROJECTS);
+      setWorkspaceStats(null);
       try {
-        const [t, p] = await Promise.all([tasksApi.list(currentWorkspaceId), projectsApi.list(currentWorkspaceId)]);
+        const [t, p, s] = await Promise.all([tasksApi.list(currentWorkspaceId), projectsApi.list(currentWorkspaceId), tasksApi.stats(currentWorkspaceId).catch(() => null)]);
         if (!mounted) return;
         setTasks(t);
         setProjects(p.length ? p : DEFAULT_PROJECTS);
+        setWorkspaceStats(s);
       } catch (err) {
         console.error('Failed to load:', err);
         setSyncStatus('offline');
@@ -387,6 +393,14 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     })();
     return () => { mounted = false; };
   }, [currentWorkspaceId]);
+
+  // 5b: refresh the server task stats after any task change (own edit or realtime), debounced so a burst
+  // collapses into one aggregate query. The initial load fetches them above; this keeps them current.
+  useEffect(() => {
+    if (!currentWorkspaceId) return undefined;
+    const t = setTimeout(() => { tasksApi.stats(currentWorkspaceId).then(setWorkspaceStats).catch(() => {}); }, 500);
+    return () => clearTimeout(t);
+  }, [currentWorkspaceId, tasks]);
 
   // Load the current workspace's members for the assignee picker + member-aware views/labels.
   useEffect(() => {
@@ -849,7 +863,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   // produces a new value when a state/derived field actually changes. Deps list every member; the
   // stable ones are harmless to include, but omitting a state field would ship a stale closure.
   const value = useMemo(() => ({
-    tasks, projects, theme, view, filters, compact, draggedId,
+    tasks, projects, workspaceStats, theme, view, filters, compact, draggedId,
     paletteOpen, quickAddOpen, editingTask,
     loading, membershipsLoaded, syncStatus, session, currentMember, isMember, isOwner, isAdmin, isGuest, canManageMembers, myRole, onSignOut,
     workspaces, currentWorkspaceId, switchWorkspace, createWorkspace,
@@ -865,7 +879,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     dmConversations, dmUnread, dmActiveConv, setDmActiveConv, markDmRead, startDm, refreshDms,
     entitlements, upgradeFeature, requestUpgrade, dismissUpgrade,
   }), [
-    tasks, projects, theme, view, filters, compact, draggedId,
+    tasks, projects, workspaceStats, theme, view, filters, compact, draggedId,
     paletteOpen, quickAddOpen, editingTask,
     loading, membershipsLoaded, syncStatus, session, currentMember, isMember, isOwner, isAdmin, isGuest, canManageMembers, myRole, onSignOut,
     workspaces, currentWorkspaceId, switchWorkspace, createWorkspace,
@@ -2193,11 +2207,12 @@ function CommandPalette() {
   const [q, setQ] = useState('');
   const inputRef = useRef(null);
   const [idx, setIdx] = useState(0);
-  // Messages aren't held in a global store, so load the workspace's team-chat + DM bodies on open
-  // and search them client-side. Both calls are RLS-scoped (team chat gates on non-guest membership,
-  // DMs on participation), so results can only ever include messages the user is already allowed to
-  // see — the same by-construction isolation as the task search (which filters the RLS-loaded tasks).
-  const [msgIndex, setMsgIndex] = useState([]);
+  // 5d: team-chat search now runs server-side via the search_messages RPC (full history + RLS-safe: a guest
+  // still gets 0 team-chat hits, enforced by messages_select_member — not a client role check). We only load
+  // DM bodies here for the client-side DM grep (a DM search RPC is a separate follow-up); DMs stay
+  // participant-scoped by RLS. This also drops the old 200-row chat prefetch on every palette open.
+  const [msgIndex, setMsgIndex] = useState([]);          // DM bodies only
+  const [serverChatMsgs, setServerChatMsgs] = useState([]);   // team-chat matches from the RPC
 
   useEffect(() => { if (paletteOpen) { setQ(''); setIdx(0); setTimeout(() => inputRef.current?.focus(), 50); } }, [paletteOpen]);
 
@@ -2205,20 +2220,28 @@ function CommandPalette() {
     if (!paletteOpen) return;
     let on = true;
     const load = currentWorkspaceId
-      ? Promise.all([
-          messagesApi.list(200, currentWorkspaceId).catch(() => []),
-          directMessagesApi.listRecentMessages(currentWorkspaceId, 500).catch(() => []),
-        ])
-      : Promise.resolve([[], []]);   // no workspace → empty index (set async so this effect never setState-s synchronously)
-    load.then(([chat, dm]) => {
+      ? directMessagesApi.listRecentMessages(currentWorkspaceId, 500).catch(() => [])
+      : Promise.resolve([]);   // no workspace → empty index (set async so this effect never setState-s synchronously)
+    load.then(dm => {
       if (!on) return;
-      setMsgIndex([
-        ...chat.filter(m => m.body && !m.deletedAt).map(m => ({ kind: 'chat', id: m.id, body: m.body, senderId: m.senderId })),
-        ...dm.filter(m => m.body && !m.deletedAt).map(m => ({ kind: 'dm', id: m.id, body: m.body, senderId: m.senderId, conversationId: m.conversationId })),
-      ]);
+      setMsgIndex(dm.filter(m => m.body && !m.deletedAt).map(m => ({ kind: 'dm', id: m.id, body: m.body, senderId: m.senderId, conversationId: m.conversationId })));
     });
     return () => { on = false; };
   }, [paletteOpen, currentWorkspaceId]);
+
+  // Debounced server search over team chat (RLS-respecting). Guest -> 0 hits, by construction.
+  useEffect(() => {
+    const term = q.trim();
+    let on = true;
+    const t = setTimeout(() => {
+      if (!on) return;
+      if (!paletteOpen || !term || !currentWorkspaceId) { setServerChatMsgs([]); return; }
+      messagesApi.search(term, currentWorkspaceId, 6)
+        .then(rows => { if (on) setServerChatMsgs(rows.filter(m => m.body && !m.deletedAt).map(m => ({ kind: 'chat', id: m.id, body: m.body, senderId: m.senderId }))); })
+        .catch(() => { if (on) setServerChatMsgs([]); });
+    }, 200);
+    return () => { on = false; clearTimeout(t); };
+  }, [q, paletteOpen, currentWorkspaceId]);
 
   // No per-message URL anchor exists (see recon) — deep-link to the channel / conversation, like notifications do.
   const openMessage = (m) => {
@@ -2255,9 +2278,11 @@ function CommandPalette() {
       const desc  = (t.description || '').toLowerCase();
       return title.includes(term) || desc.includes(term);
     }).slice(0, 6);
-    const msgs = msgIndex.filter(m => m.body.toLowerCase().includes(term)).slice(0, 6);
+    // team-chat matches from the server RPC (full history, guest-safe) + DM matches from the loaded window
+    const dmMsgs = msgIndex.filter(m => m.body.toLowerCase().includes(term)).slice(0, 6);
+    const msgs = [...serverChatMsgs, ...dmMsgs].slice(0, 6);
     return { cmds, tasks: tList, msgs };
-  }, [q, tasks, commands, msgIndex]);
+  }, [q, tasks, commands, msgIndex, serverChatMsgs]);
 
   const flat = [
     ...results.cmds.map(c => ({ type: 'cmd', item: c })),
@@ -2586,9 +2611,12 @@ function NotificationBell() {
   const [toasts, setToasts] = useState([]);
   const [exitingNotifIds, setExitingNotifIds] = useState(() => new Set());
   const [confirmClear, setConfirmClear] = useState(false);
+  const [serverUnread, setServerUnread] = useState(null);   // 5b: accurate unread from the RPC (past the 50-row window)
   const removeToast = useCallback((id) => setToasts(prev => prev.filter(t => t.id !== id)), []);
 
-  const unreadCount = items.reduce((n, x) => n + (x.read ? 0 : 1), 0);
+  const localUnread = items.reduce((n, x) => n + (x.read ? 0 : 1), 0);
+  // Prefer the server count (correct even when unread > the 50 rows the bell loads); fall back to local.
+  const unreadCount = serverUnread != null ? serverUnread : localUnread;
 
   // Initial load of the current user's notifications (RLS scopes to recipient).
   useEffect(() => {
@@ -2615,6 +2643,14 @@ function NotificationBell() {
       .finally(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
   }, [userId, currentWorkspaceId]);
+
+  // 5b: keep the accurate server unread count fresh — on load, on switch, and after any bell change
+  // (new notification, mark-read, clear), debounced so a burst collapses into one count query.
+  useEffect(() => {
+    if (!userId || !currentWorkspaceId) return undefined;
+    const t = setTimeout(() => { notificationsApi.unreadCount(currentWorkspaceId).then(setServerUnread).catch(() => {}); }, 300);
+    return () => clearTimeout(t);
+  }, [userId, currentWorkspaceId, items]);
 
   // Realtime: a new notification for this recipient bumps the badge + raises an in-app toast.
   useEffect(() => {
@@ -3339,7 +3375,7 @@ function Card({ children, className, title, subtitle, action, accent }) {
    DASHBOARD
 ================================================================================= */
 function DashboardView() {
-  const { tasks, setEditingTask, setView, meId } = useApp();
+  const { tasks, setEditingTask, setView, meId, workspaceStats } = useApp();
 
   // First run: an empty workspace gets a welcome + a clear "create your first task" path, not a wall
   // of empty cards. (The witty empty states below are kept for steady-state — a bucket clear because
@@ -3375,7 +3411,11 @@ function DashboardView() {
     doneWeek: tasks.filter(t => t.status === 'done' && t.completedAt && daysBetween(new Date(), t.completedAt) >= -6).length,
   };
 
-  const progress = tasks.length ? Math.round((tasks.filter(t => t.status === 'done').length / tasks.length) * 100) : 0;
+  // 5b: overall completion from the server aggregate (correct even once the task list is paginated);
+  // fall back to the in-memory array while the stats are still loading.
+  const progress = (workspaceStats && workspaceStats.total)
+    ? Math.round((workspaceStats.done / workspaceStats.total) * 100)
+    : (tasks.length ? Math.round((tasks.filter(t => t.status === 'done').length / tasks.length) * 100) : 0);
 
   return (
     <div className="space-y-6">

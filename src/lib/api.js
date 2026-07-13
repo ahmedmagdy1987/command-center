@@ -256,6 +256,14 @@ export const tasks = {
     return (data || []).map(fromDbTask);
   },
 
+  /** 5b: server-side headline aggregates (counts by status/priority/quadrant, overdue, unassigned, progress)
+   *  computed under the caller's RLS — the dashboard/matrix/schedule tiles no longer need the whole array. */
+  async stats(workspaceId) {
+    const { data, error } = await supabase.rpc('workspace_task_stats', { p_ws: workspaceId });
+    if (error) throw error;
+    return data || null;
+  },
+
   /** Fetch a single task by id (text PK), mapped to app shape. Null if not found. */
   async getById(id) {
     const { data, error } = await supabase.from('tasks').select('*').eq('id', id).maybeSingle();
@@ -352,6 +360,14 @@ export const tasks = {
    delete their own rows (enforced by RLS: recipient_id = auth.uid()).
 ================================================================================= */
 export const notifications = {
+  /** 5b: accurate unread count for the current user in a workspace (server RPC — correct past the 50-row
+   *  list window that the bell renders). Drives the bell badge + "N new" header. */
+  async unreadCount(workspaceId) {
+    const { data, error } = await supabase.rpc('notifications_unread_count', { p_ws: workspaceId });
+    if (error) throw error;
+    return Number(data) || 0;
+  },
+
   /** List the current user's notifications, newest first. RLS scopes to the recipient. */
   async list(limit = 50, workspaceId) {
     let q = supabase
@@ -534,6 +550,16 @@ export const comments = {
    the private 'voice-notes' bucket at <uid>/<uuid>.<ext>, played via signed URLs.
 ================================================================================= */
 export const messages = {
+  /** 5d: full-text search over team-chat messages via the RLS-respecting search_messages RPC (replaces the
+   *  old client-side grep over the loaded window). A guest still gets 0 team-chat hits (server-enforced). */
+  async search(query, workspaceId, limit = 50) {
+    const q = (query || '').trim();
+    if (!q) return [];
+    const { data, error } = await supabase.rpc('search_messages', { p_ws: workspaceId, p_q: q, p_limit: limit });
+    if (error) throw error;
+    return (data || []).map(fromDbMessage);
+  },
+
   /** List the channel: the NEWEST `limit` messages, returned oldest-first. */
   async list(limit = 200, workspaceId) {
     // Order DESC + limit fetches the most-recent N (ASC + limit would return the OLDEST N and hide
