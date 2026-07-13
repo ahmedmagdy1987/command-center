@@ -111,20 +111,22 @@ export const sanitizeTask = (raw) => {
   const project = (typeof migratedProject === 'string' && migratedProject) ? migratedProject : 'other';
   return {
     id: typeof t.id === 'string' && t.id ? t.id : uid(),
-    title: typeof t.title === 'string' ? t.title : 'Untitled task',
-    description: typeof t.description === 'string' ? t.description : '',
+    // Clamp to the server-side length CHECKs (migration 20260713180216) so the bulk-import path — which
+    // bypasses the UI's maxLength — degrades gracefully instead of hitting a raw DB constraint error.
+    title: typeof t.title === 'string' ? t.title.slice(0, 500) : 'Untitled task',
+    description: typeof t.description === 'string' ? t.description.slice(0, 20000) : '',
     assigneeId, privacy, project, status, priority, effort,
     urgent: !!t.urgent,
     important: !!t.important,
     blocked: !!t.blocked,
-    blockedReason: typeof t.blockedReason === 'string' ? t.blockedReason : '',
+    blockedReason: typeof t.blockedReason === 'string' ? t.blockedReason.slice(0, 1000) : '',
     dueDate: typeof t.dueDate === 'string' ? t.dueDate : null,
     scheduledDate: typeof t.scheduledDate === 'string' ? t.scheduledDate : null,
     estimatedMinutes: typeof t.estimatedMinutes === 'number' && isFinite(t.estimatedMinutes) ? t.estimatedMinutes : 30,
     tags: Array.isArray(t.tags) ? t.tags.filter(x => typeof x === 'string') : [],
     subtasks: Array.isArray(t.subtasks) ? t.subtasks.filter(s => s && typeof s === 'object').map(s => ({
       id: typeof s.id === 'string' && s.id ? s.id : uid(),
-      title: typeof s.title === 'string' ? s.title : '',
+      title: typeof s.title === 'string' ? s.title.slice(0, 500) : '',
       done: !!s.done,
     })) : [],
     links: normalizeLinks(t.links),
