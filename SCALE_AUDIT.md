@@ -10,6 +10,24 @@
 > require the Supabase MCP, which was NOT connected when this was written** — those items are pre-designed
 > with exact SQL/EXPLAIN and flagged `needs-live-DB`. Nothing here fabricates measured numbers.
 
+## Applied since authoring (2026-07-13, live DB via MCP)
+
+The Phase-1 **load test ran for real** on a rolled-back throwaway workspace (500 tasks / 30 projects /
+5,000 messages / 1,000 DM messages / 50 attachments / 20 members across all 4 roles / 500 notifications);
+every surface was measured with `EXPLAIN (ANALYZE, BUFFERS)`, then all throwaway data was deleted and the
+**17 per-table row counts restored byte-for-byte** to the pre-test baseline (no real workspace touched).
+
+- **A3 — composite hot-path indexes: APPLIED + PROVEN** (`20260713175541`). Before→after at volume: tasks &
+  dm_messages drop their `Sort` node (Index Scan on the new composite); messages moves off the global
+  cross-tenant `messages_created_at_idx` onto tenant-scoped `messages_ws_created_idx`. Advisors clean;
+  isolation/role regression 11/11.
+- **A5 — 5a server-side length CHECKs: APPLIED** (`20260713180216`) + `sanitizeTask` clamps for the import path.
+- **A9 — 5b `notifications_unread_count` RPC: APPLIED + PROVEN 3/3** (`20260713180526`); frontend wiring pending.
+
+**Still open / needs decision:** 5b dashboard-stats RPC (A10), 5c load-older pagination (A7/A8), 5d tsvector
+search (A6), team-chat unread server cursor (needs a new `chat_reads` table), and the frontend render fixes
+(A4/A14/A15/A16) — plus the frontend wiring for the 5b RPC. See *Run order* at the bottom.
+
 ## Thesis — the whole-workspace-array-in-memory model is the ceiling
 
 `AppProvider` loads the workspace's **entire** task/message/DM/notification/member set into React state and
