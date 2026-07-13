@@ -24,9 +24,27 @@ every surface was measured with `EXPLAIN (ANALYZE, BUFFERS)`, then all throwaway
 - **A5 — 5a server-side length CHECKs: APPLIED** (`20260713180216`) + `sanitizeTask` clamps for the import path.
 - **A9 — 5b `notifications_unread_count` RPC: APPLIED + PROVEN 3/3** (`20260713180526`); frontend wiring pending.
 
-**Still open / needs decision:** 5b dashboard-stats RPC (A10), 5c load-older pagination (A7/A8), 5d tsvector
-search (A6), team-chat unread server cursor (needs a new `chat_reads` table), and the frontend render fixes
-(A4/A14/A15/A16) — plus the frontend wiring for the 5b RPC. See *Run order* at the bottom.
+Frontend (branch `perf/scale-part2`, off the verification branch):
+- **A11 — workspace switch leaked notifications into the new bell: FIXED** (clear-on-switch + ws-scoped merge).
+- **A17 — comment composer double-submit: FIXED** (sendingRef guard).
+- **A7/A8 — 5c load-older pagination for chat + DMs: BUILT** (keyset `listBefore` riding the composites +
+  a "Load older" control with scroll-anchor preservation). Build clean; lint 12/2.
+
+Designed + PROVEN rolled-back, **awaiting approval to apply** (proof fixtures created → tested → dropped;
+DB restored byte-for-byte):
+- **A10 — 5b `workspace_task_stats(ws)` aggregation RPC** — SECURITY INVOKER; proof: member total 11==11,
+  guest 4==4 (own/assigned only), outsider 0.
+- **A6 — 5d `search_messages(ws,q)` tsvector RPC** — SECURITY INVOKER; proof: member gets all hits, GUEST 0,
+  outsider 0 (no leak). Apply version adds a stored `body_tsv` generated column + GIN index for speed.
+
+**Regression after the applied DB changes: 42/42** isolation+role assertions (cross-tenant both directions,
+privacy/guest visibility, team-chat gate, role/rank/capability matrix); storage + RLS surface verified
+intact (RLS on all 13 tenant tables + storage.objects; both buckets' policies present); no applied migration
+touched any policy/grant, so isolation/roles/storage are unchanged by construction.
+
+**Still open / needs decision:** the two proven RPCs above (approval to apply), team-chat unread server cursor
+(needs a new `chat_reads` table), the frontend render-perf memoization (A4/A14/A15/A16), and wiring the 5b/5d
+RPCs into the UI.
 
 ## Thesis — the whole-workspace-array-in-memory model is the ceiling
 
