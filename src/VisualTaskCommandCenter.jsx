@@ -319,6 +319,11 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   useEffect(() => { themeStore.set(THEME_KEY, theme); }, [theme]);
   useLayoutEffect(() => { document.documentElement.setAttribute('data-theme', theme); }, [theme]);
 
+  // Ref mirror of the active workspace (alongside chatViewRef / dmActiveConvRef) so a reconcile
+  // refetch that was in flight across a workspace switch can bail instead of applying stale data.
+  const currentWorkspaceIdRef = useRef(null);
+  useEffect(() => { currentWorkspaceIdRef.current = currentWorkspaceId; }, [currentWorkspaceId]);
+
   // Resolve the current workspace BEFORE any data query/subscription. Precedence:
   // ?ws= (only if the user is a member) -> localStorage (only if still valid) -> first workspace.
   // An invalid/stale choice silently falls back to the first valid one and corrects URL + storage,
@@ -437,25 +442,64 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   useEffect(() => {
     if (!currentWorkspaceId || !userId) return;   // clearing is handled by the prior run's cleanup
     let on = true;
-    Promise.resolve().then(() => { if (on) refreshDms(currentWorkspaceId); });   // defer off the sync effect path
+    let timer = null;
+    // Coalesce bursts: refreshDms runs THREE queries (listConversations + listRecentMessages(500) +
+    // unreadCounts). Firing that per incoming DM event is a thundering herd once a busy workspace has
+    // several active threads. A trailing debounce collapses a burst into one re-summarize; the open
+    // thread itself stays instant (it's driven by the separate per-conversation subscribeThread).
+    const scheduleRefresh = () => {
+      if (timer) return;                                    // one refresh already queued; this event is covered
+      timer = setTimeout(() => { timer = null; if (on) refreshDms(currentWorkspaceId); }, 400);
+    };
+    Promise.resolve().then(() => { if (on) refreshDms(currentWorkspaceId); });   // initial load: immediate
     const unsub = directMessagesApi.subscribe(({ message }) => {
       if (!on || !message) return;
-      refreshDms(currentWorkspaceId);
+      scheduleRefresh();
     }, currentWorkspaceId);
-    return () => { on = false; unsub(); setDmConversations([]); setDmActiveConv(null); };
+    return () => { on = false; if (timer) clearTimeout(timer); unsub(); setDmConversations([]); setDmActiveConv(null); };
+  }, [currentWorkspaceId, userId, refreshDms]);
+
+  // Reconcile global state after a reconnect / tab-refocus. Realtime auto-reconnects, but any events
+  // that fired while the socket or network was down are gone for good — without this, the board and DM
+  // list can show stale data indefinitely. Unlike the workspace-switch effect this does NOT clear-and-
+  // flash; it refetches in place. Throttled so an online/focus flap can't stampede the queries, and
+  // guarded by the workspace ref so a refetch that raced a switch is discarded.
+  const lastReconcileRef = useRef(0);
+  const reconcile = useCallback(async (reason) => {
+    const ws = currentWorkspaceId;
+    if (!ws || !userId) return;
+    const now = Date.now();
+    if (now - lastReconcileRef.current < 8000) return;   // at most one reconcile per 8s
+    lastReconcileRef.current = now;
+    try {
+      const [t, p] = await Promise.all([tasksApi.list(ws), projectsApi.list(ws)]);
+      if (currentWorkspaceIdRef.current !== ws) return;   // a switch raced us — drop the stale result
+      setTasks(t);
+      setProjects(p.length ? p : DEFAULT_PROJECTS);
+      setSyncStatus('live');
+    } catch (e) {
+      console.error(`Reconcile (${reason}) failed:`, e);
+      setSyncStatus('offline');
+    }
+    refreshDms(ws);
   }, [currentWorkspaceId, userId, refreshDms]);
 
   useEffect(() => {
-    const onOnline = () => setSyncStatus('live');
+    const onOnline = () => { setSyncStatus('live'); reconcile('online'); };
     const onOffline = () => setSyncStatus('offline');
+    // A dropped websocket often does NOT fire a window offline/online event (the network is fine, the
+    // socket just died); catching the tab regaining visibility reconciles that common case too.
+    const onVisible = () => { if (document.visibilityState === 'visible' && navigator.onLine !== false) reconcile('visible'); };
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
+    document.addEventListener('visibilitychange', onVisible);
     if (typeof navigator !== 'undefined' && navigator.onLine === false) setSyncStatus('offline');
     return () => {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
+      document.removeEventListener('visibilitychange', onVisible);
     };
-  }, []);
+  }, [reconcile]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -517,8 +561,9 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       // workspace the user belongs to into the active view (RLS-safe, but wrong scope on screen).
       // Also re-sync the open modal so it doesn't keep showing an edit the server rejected.
       tasksApi.list(currentWorkspaceId).then(fresh => { setTasks(fresh); setEditingTask(et => et ? (fresh.find(t => t.id === et.id) ?? et) : et); }).catch(() => {});
+      showToast("Couldn't save that change — reverted to the last saved version.");
     }
-  }, [currentWorkspaceId]);
+  }, [currentWorkspaceId, showToast]);
 
   // Two-phase delete: fade/slide the card out (~180ms), then remove + persist. Reduced-motion -> immediate.
   const deleteTask = useCallback((id) => {
@@ -532,13 +577,14 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
         tasksApi.delete(id).catch(err => {
           console.error('Delete failed:', err);
           tasksApi.list(currentWorkspaceId).then(setTasks).catch(() => {});   // reconcile with server on failure
+          showToast("Couldn't delete the task — it's back in the list.");
         });
       });
     };
     if (prefersReducedMotion()) { finish(); return; }
     setExitingIds(p => new Set(p).add(id));
     setTimeout(finish, 180);
-  }, [currentWorkspaceId]);
+  }, [currentWorkspaceId, showToast]);
 
   // ---- Projects: create (member), rename/recolor (member), delete (owner; all RLS-enforced) ----
   const createProject = useCallback(async ({ name, color, icon }) => {
@@ -554,8 +600,9 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     } catch (err) {
       console.error('Update project failed:', err);
       projectsApi.list(currentWorkspaceId).then(p => setProjects(p.length ? p : DEFAULT_PROJECTS)).catch(() => {});
+      showToast("Couldn't save the project change — reverted.");
     }
-  }, [currentWorkspaceId]);
+  }, [currentWorkspaceId, showToast]);
 
   // Two-phase delete: fade the card out (~180ms), then remove + persist. Reduced-motion -> immediate.
   const deleteProject = useCallback((id) => {
@@ -565,12 +612,13 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       projectsApi.delete(id).catch(err => {
         console.error('Delete project failed:', err);
         projectsApi.list(currentWorkspaceId).then(p => setProjects(p.length ? p : DEFAULT_PROJECTS)).catch(() => {});
+        showToast("Couldn't delete the project — it's back in the list.");
       });
     };
     if (prefersReducedMotion()) { finish(); return; }
     setExitingProjectIds(p => new Set(p).add(id));
     setTimeout(finish, 180);
-  }, [currentWorkspaceId]);
+  }, [currentWorkspaceId, showToast]);
 
   const duplicateTask = useCallback(async (id) => {
     const original = tasks.find(t => t.id === id);
@@ -605,8 +653,9 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       console.error('Subtask update failed:', err);
       // Reconcile to server on failure — including the open modal, which otherwise keeps the stale checklist.
       tasksApi.list(currentWorkspaceId).then(fresh => { setTasks(fresh); setEditingTask(et => et ? (fresh.find(t => t.id === et.id) ?? et) : et); }).catch(() => {});
+      showToast("Couldn't save the checklist change — reverted to the server copy.");
     }
-  }, [currentWorkspaceId]);
+  }, [currentWorkspaceId, showToast]);
 
   const toggleSubtask = useCallback((taskId, subId) =>
     mutateSubtasks(taskId, subs => subs.map(s => s.id === subId ? { ...s, done: !s.done } : s)),
@@ -636,13 +685,13 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     }),
   [mutateSubtasks]);
 
-  const exportJSON = () => {
+  const exportJSON = useCallback(() => {
     const blob = new Blob([JSON.stringify({ tasks, projects, exportedAt: nowISO() }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `command-center-${Date.now()}.json`; a.click(); URL.revokeObjectURL(url);
-  };
+  }, [tasks, projects]);
 
-  const importJSON = (file) => {
+  const importJSON = useCallback((file) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
@@ -654,7 +703,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       }
     };
     reader.readAsText(file);
-  };
+  }, [showToast]);
   const confirmImport = useCallback(async () => {
     const pv = importPreview; setImportPreview(null);
     if (!pv) return;
@@ -771,13 +820,13 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   }, [addTask]);
 
   // Close the task modal; if the open task is an abandoned "+ Add task" draft with an empty title, delete it.
-  const closeEditing = () => {
+  const closeEditing = useCallback(() => {
     if (editingTask && editingTask.id === draftIdRef.current && !(editingTask.title || '').trim()) {
       deleteTask(editingTask.id);
     }
     draftIdRef.current = null;
     setEditingTask(null);
-  };
+  }, [editingTask, deleteTask]);
   useEffect(() => { closeEditingRef.current = closeEditing; });   // keep the Esc-time closer current (ref write off-render)
 
   // ── Monetization: resolve this workspace's plan + entitlements, plus a small
@@ -794,7 +843,12 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     isPreview: !!getPreviewPlanId(),
   }), [members.length, memberships, currentWorkspaceId]);
 
-  const value = {
+  // Memoize the context value so a re-render of AppProvider that DIDN'T change any of these members
+  // (e.g. a parent/App re-render) doesn't hand every useApp() consumer a fresh object and reconcile
+  // the whole tree. All setters/useCallback handlers are already stable, so in practice this only
+  // produces a new value when a state/derived field actually changes. Deps list every member; the
+  // stable ones are harmless to include, but omitting a state field would ship a stale closure.
+  const value = useMemo(() => ({
     tasks, projects, theme, view, filters, compact, draggedId,
     paletteOpen, quickAddOpen, editingTask,
     loading, membershipsLoaded, syncStatus, session, currentMember, isMember, isOwner, isAdmin, isGuest, canManageMembers, myRole, onSignOut,
@@ -810,7 +864,23 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     chatUnread, markChatRead,
     dmConversations, dmUnread, dmActiveConv, setDmActiveConv, markDmRead, startDm, refreshDms,
     entitlements, upgradeFeature, requestUpgrade, dismissUpgrade,
-  };
+  }), [
+    tasks, projects, theme, view, filters, compact, draggedId,
+    paletteOpen, quickAddOpen, editingTask,
+    loading, membershipsLoaded, syncStatus, session, currentMember, isMember, isOwner, isAdmin, isGuest, canManageMembers, myRole, onSignOut,
+    workspaces, currentWorkspaceId, switchWorkspace, createWorkspace,
+    members, userId, resolveAssignee, refreshMembers,
+    setTheme, setView, setFilters, setCompact, setDraggedId,
+    setPaletteOpen, setQuickAddOpen, setEditingTask,
+    addTask, updateTask, deleteTask, duplicateTask, toggleSubtask, addSubtask, removeSubtask, moveSubtask,
+    createProject, renameProject, deleteProject, exitingProjectIds,
+    pendingInvites, acceptInvitation, refreshInvites,
+    startDraftTask, closeEditing, exitingIds, creatorLabel,
+    exportJSON, importJSON, showToast,
+    chatUnread, markChatRead,
+    dmConversations, dmUnread, dmActiveConv, setDmActiveConv, markDmRead, startDm, refreshDms,
+    entitlements, upgradeFeature, requestUpgrade, dismissUpgrade,
+  ]);
   return (
     <AppCtx.Provider value={value}>
       {children}
@@ -1158,7 +1228,7 @@ function MentionText({ text, mentions }) {
  *  The dropdown is PORTALED to <body> and anchored above the field, so it's never clipped by a modal /
  *  chat container's overflow. onMentionsChange reports the ids whose `@name` is still in the text. The
  *  server trigger is the real gate — it only notifies a mentioned user who can actually see the surface. */
-function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onEnter, onTyping, onBlur, rows = 2, placeholder, className, autoFocus, textareaRef }) {
+function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onEnter, onTyping, onBlur, rows = 2, placeholder, className, autoFocus, textareaRef, maxLength = 10000 }) {
   const innerRef = useRef(null);
   const taRef = textareaRef || innerRef;
   const pickedRef = useRef(new Map());   // userId -> displayName for everyone picked from the dropdown
@@ -1208,7 +1278,7 @@ function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onE
   };
   return (
     <div className="relative flex-1 min-w-0">
-      <textarea ref={taRef} value={value} onChange={handleChange} onKeyDown={onKeyDown}
+      <textarea ref={taRef} value={value} onChange={handleChange} onKeyDown={onKeyDown} maxLength={maxLength}
         onClick={(e) => openMenuFor(e.target.value, e.target.selectionStart ?? 0)}
         onBlur={onBlur} rows={rows} placeholder={placeholder} autoFocus={autoFocus} className={cx(className, 'w-full')} />
       {menu && pos && filtered.length > 0 && createPortal(
@@ -1431,20 +1501,27 @@ function Attachments({ taskId, canEdit }) {
     setError('');
     let count = items.length;
     setUploading(true);
-    for (const file of files) {
-      // Client-side pre-checks for friendly messages; the server RLS + bucket config are authoritative.
-      if (!attachmentsApi.ALLOWED_MIME.has(file.type)) { setError(`"${file.name}" — that file type isn't allowed. Images, PDF, text, CSV, ZIP, and Office documents only.`); continue; }
-      if (file.size > attachmentsApi.MAX_BYTES) { setError(`"${file.name}" is too large — files must be under 25 MB.`); continue; }
-      if (count >= attachmentsApi.MAX_PER_TASK) { setError(`A task can have at most ${attachmentsApi.MAX_PER_TASK} attachments.`); break; }
-      try {
-        const created = await attachmentsApi.upload(taskId, file, currentWorkspaceId);
-        setItems(prev => [...(prev || []), created]);
-        count += 1;
-      } catch {
-        setError(`Couldn't upload "${file.name}". You may have hit the 25 MB file, ${attachmentsApi.MAX_PER_TASK}-per-task, or workspace storage limit — or you don't have permission.`);
+    // finally guarantees the "Uploading…" state clears even if an unexpected error escapes the
+    // per-file try below — the dropzone can never wedge on a stuck spinner. (A truly HUNG upload on a
+    // half-open socket still needs an AbortController timeout in api.js; that's flagged separately so
+    // the timeout can be tuned against a real slow 25 MB upload rather than guessed here.)
+    try {
+      for (const file of files) {
+        // Client-side pre-checks for friendly messages; the server RLS + bucket config are authoritative.
+        if (!attachmentsApi.ALLOWED_MIME.has(file.type)) { setError(`"${file.name}" — that file type isn't allowed. Images, PDF, text, CSV, ZIP, and Office documents only.`); continue; }
+        if (file.size > attachmentsApi.MAX_BYTES) { setError(`"${file.name}" is too large — files must be under 25 MB.`); continue; }
+        if (count >= attachmentsApi.MAX_PER_TASK) { setError(`A task can have at most ${attachmentsApi.MAX_PER_TASK} attachments.`); break; }
+        try {
+          const created = await attachmentsApi.upload(taskId, file, currentWorkspaceId);
+          setItems(prev => [...(prev || []), created]);
+          count += 1;
+        } catch {
+          setError(`Couldn't upload "${file.name}". You may have hit the 25 MB file, ${attachmentsApi.MAX_PER_TASK}-per-task, or workspace storage limit — or you don't have permission.`);
+        }
       }
+    } finally {
+      setUploading(false);
     }
-    setUploading(false);
   };
 
   const onPick = (e) => { if (e.target.files?.length) runUpload(e.target.files); e.target.value = ''; };
@@ -1575,7 +1652,8 @@ function TaskModal() {
             value={t.title}
             onChange={e => set({ title: e.target.value })}
             readOnly={!canEditTask}
-            className="w-full bg-transparent text-xl sm:text-2xl font-semibold text-white placeholder-white/30 outline-none font-display read-only:cursor-default"
+            maxLength={500}
+            className="w-full bg-transparent text-xl sm:text-2xl font-semibold text-white placeholder-white/30 outline-none font-display read-only:cursor-default break-words"
             placeholder="Task title"
           />
           {t.createdBy && <div className="mt-1.5 text-[11px] text-white/35">Added by {creatorLabel(t.createdBy)}</div>}
@@ -1637,6 +1715,7 @@ function TaskModal() {
             <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5">Notes</div>
             <textarea value={t.description} onChange={e => set({ description: e.target.value })} rows={4}
               readOnly={!canEditTask}
+              maxLength={20000}
               placeholder="Context, acceptance criteria, links…"
               className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white/90 outline-none focus:border-white/25 resize-y read-only:cursor-default read-only:opacity-80" />
           </div>
@@ -1646,6 +1725,7 @@ function TaskModal() {
               <div className="text-[10px] font-medium uppercase tracking-widest text-rose-300/70 mb-1.5">Blocked because</div>
               <input value={t.blockedReason} onChange={e => set({ blockedReason: e.target.value })} placeholder="Waiting on…"
                 readOnly={!canEditTask}
+                maxLength={1000}
                 className="w-full bg-rose-500/5 border border-rose-500/20 rounded-lg px-3 py-2 text-sm text-white/90 outline-none focus:border-rose-500/40 read-only:cursor-default" />
             </div>
           )}
@@ -1684,7 +1764,7 @@ function TaskModal() {
               {canEditTask ? (
                 <div className="flex gap-2 pt-1">
                   <input value={newSub} onChange={e => setNewSub(e.target.value)} onKeyDown={e => e.key === 'Enter' && submitSub()}
-                    placeholder="Add checklist item…"
+                    placeholder="Add checklist item…" maxLength={500}
                     className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white/90 outline-none focus:border-violet-400/50" />
                   <button onClick={submitSub} className="px-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white/70 text-sm">Add</button>
                 </div>
@@ -2051,7 +2131,7 @@ function QuickAdd() {
           <Sparkles className="w-4 h-4 text-violet-400" />
           <input ref={inputRef} value={title} onChange={e => setTitle(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') submit(); }}
-            placeholder="What needs to get done?"
+            placeholder="What needs to get done?" maxLength={500}
             className="flex-1 bg-transparent text-lg text-white outline-none placeholder-white/30 font-display" />
           <kbd className="text-[10px] text-white/30 bg-white/5 border border-white/10 rounded px-1.5 py-0.5">Enter</kbd>
         </div>
@@ -2927,7 +3007,17 @@ function ProjectModal({ open, onClose, project }) {
     if (trimmed.length > 80) { setErr('Name must be 80 characters or fewer.'); return; }
     setBusy(true); setErr('');
     try {
-      if (editing) await renameProject(project.id, { name: trimmed, color, icon: icon || '◇' });
+      if (editing) {
+        // Send ONLY the fields that actually changed (not the whole {name,color,icon} object), so a
+        // concurrent edit to a field this user didn't touch isn't clobbered by a last-write-wins
+        // full-object rewrite — the same minimal-patch discipline the task-field edits already use.
+        const iconVal = icon || '◇';
+        const patch = {};
+        if (trimmed !== (project.name || '')) patch.name = trimmed;
+        if (color !== (project.color || PROJECT_PALETTE[0])) patch.color = color;
+        if (iconVal !== (project.icon || '◇')) patch.icon = iconVal;
+        if (Object.keys(patch).length) await renameProject(project.id, patch);
+      }
       else await createProject({ name: trimmed, color, icon: icon || '◇' });
       onClose();
     } catch (e2) {
@@ -3871,11 +3961,19 @@ function ProjectsView() {
     : deleteCount > 0 ? `"${deleteTarget?.name}" still has ${deleteCount} task${deleteCount === 1 ? '' : 's'}. Move or delete them before deleting the project.`
     : `Delete "${deleteTarget?.name}"? This can't be undone.`;
 
-  const filtered = tasks.filter(t => {
+  const filtered = useMemo(() => tasks.filter(t => {
     if (!matchesAssignee(t, filters.assignee, meId)) return false;
     if (filters.privacy !== 'all' && t.privacy !== filters.privacy) return false;
     return true;
-  });
+  }), [tasks, filters.assignee, filters.privacy, meId]);
+
+  // Bucket the filtered tasks by project id ONCE (O(n)) instead of re-scanning the whole list inside
+  // every project card (O(projects x tasks) — 150k comparisons/render at 30 projects x 5,000 tasks).
+  const tasksByProject = useMemo(() => {
+    const m = new Map();
+    for (const t of filtered) { const a = m.get(t.project); if (a) a.push(t); else m.set(t.project, [t]); }
+    return m;
+  }, [filtered]);
 
   return (
     <div className="space-y-6">
@@ -3902,7 +4000,7 @@ function ProjectsView() {
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {projects.map(p => {
-          const pTasks = filtered.filter(t => t.project === p.id);
+          const pTasks = tasksByProject.get(p.id) || [];
           const open = pTasks.filter(t => t.status !== 'done');
           const done = pTasks.filter(t => t.status === 'done');
           const pct = pTasks.length ? Math.round((done.length / pTasks.length) * 100) : 0;
