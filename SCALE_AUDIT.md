@@ -30,12 +30,16 @@ Frontend (branch `perf/scale-part2`, off the verification branch):
 - **A7/A8 — 5c load-older pagination for chat + DMs: BUILT** (keyset `listBefore` riding the composites +
   a "Load older" control with scroll-anchor preservation). Build clean; lint 12/2.
 
-Designed + PROVEN rolled-back, **awaiting approval to apply** (proof fixtures created → tested → dropped;
-DB restored byte-for-byte):
-- **A10 — 5b `workspace_task_stats(ws)` aggregation RPC** — SECURITY INVOKER; proof: member total 11==11,
-  guest 4==4 (own/assigned only), outsider 0.
-- **A6 — 5d `search_messages(ws,q)` tsvector RPC** — SECURITY INVOKER; proof: member gets all hits, GUEST 0,
-  outsider 0 (no leak). Apply version adds a stored `body_tsv` generated column + GIN index for speed.
+Approved + APPLIED + WIRED (2026-07-13):
+- **A10 — 5b `workspace_task_stats(ws)` RPC: APPLIED** (`20260713205355`). SECURITY INVOKER; proof: member
+  11==11, guest 4==4, outsider 0. Wired: Dashboard completion % + `AppProvider.workspaceStats`. (The
+  open/user-scoped Dashboard counts + filter-scoped Matrix quadrants are NOT wired — the workspace-wide RPC
+  would change those numbers; a **filter-aware stats RPC** is flagged for approval.)
+- **A6 — 5d `search_messages(ws,q)` tsvector RPC: APPLIED** (`20260713205334`, stored `body_tsv` generated
+  column + GIN). RE-PROVEN on the SHIPPING shape: member exact hits, GUEST 0, outsider 0, soft-deleted
+  excluded. Wired: CommandPalette team-chat search (guest-0 preserved; DM grep still client-side — a DM
+  search RPC is a follow-up).
+- **A9 — `notifications_unread_count` wired** into the NotificationBell badge/header (accurate past 50).
 
 **Regression after the applied DB changes: 42/42** isolation+role assertions (cross-tenant both directions,
 privacy/guest visibility, team-chat gate, role/rank/capability matrix); storage + RLS surface verified
