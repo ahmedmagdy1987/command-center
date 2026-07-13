@@ -548,6 +548,19 @@ export const messages = {
     return (data || []).map(fromDbMessage).reverse();
   },
 
+  /** 5c: the OLDER page — messages strictly before `beforeCreatedAt` (ISO), newest-first fetch, returned
+   *  oldest-first for prepending. Keyset on created_at; rides the messages_ws_created_idx composite. */
+  async listBefore(beforeCreatedAt, limit = 200, workspaceId) {
+    let q = supabase
+      .from('messages').select('*')
+      .lt('created_at', beforeCreatedAt)
+      .order('created_at', { ascending: false }).limit(limit);
+    if (workspaceId) q = q.eq('workspace_id', workspaceId);
+    const { data, error } = await q;
+    if (error) throw error;
+    return (data || []).map(fromDbMessage).reverse();
+  },
+
   /** Count messages newer than `since` (ISO) not sent by `exceptSenderId` — for the unread badge. */
   async unreadCount(since, exceptSenderId, workspaceId) {
     let q = supabase.from('messages').select('*', { count: 'exact', head: true });
@@ -724,6 +737,18 @@ export const directMessages = {
     const { data, error } = await supabase
       .from('dm_messages').select('*')
       .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: false }).limit(limit);
+    if (error) throw error;
+    return (data || []).map(fromDbDirectMessage).reverse();
+  },
+
+  /** 5c: the OLDER page for a thread — messages strictly before `beforeCreatedAt`, oldest-first for
+   *  prepending. Rides dm_messages_conv_idx (conversation_id, created_at). */
+  async listMessagesBefore(conversationId, beforeCreatedAt, limit = 200) {
+    const { data, error } = await supabase
+      .from('dm_messages').select('*')
+      .eq('conversation_id', conversationId)
+      .lt('created_at', beforeCreatedAt)
       .order('created_at', { ascending: false }).limit(limit);
     if (error) throw error;
     return (data || []).map(fromDbDirectMessage).reverse();

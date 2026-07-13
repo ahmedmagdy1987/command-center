@@ -1349,9 +1349,14 @@ function TaskComments({ taskId }) {
 
   const nameOf = (id) => people[id]?.display_name || people[id]?.email || 'Someone';
 
+  // A17: in-flight guard — a fast double-Enter fires two keydown handlers closing over the same render's
+  // `text` (state hasn't re-rendered yet), so both would post the same comment (and double its notification).
+  // Matches the chat Composer / QuickAdd pattern.
+  const sendingRef = useRef(false);
   const send = async () => {
     const body = text.trim();
-    if (!body) return;
+    if (!body || sendingRef.current) return;
+    sendingRef.current = true;
     const mns = mentions;
     setText(''); setMentions([]);
     try {
@@ -1360,6 +1365,8 @@ function TaskComments({ taskId }) {
     } catch (err) {
       console.error('Failed to add comment:', err);
       setText(body); // restore on failure
+    } finally {
+      sendingRef.current = false;
     }
   };
 
@@ -2585,18 +2592,22 @@ function NotificationBell() {
 
   // Initial load of the current user's notifications (RLS scopes to recipient).
   useEffect(() => {
-    if (!userId || !currentWorkspaceId) { setLoading(false); return; }
+    if (!userId || !currentWorkspaceId) { setItems([]); setLoading(false); return; }
     let mounted = true;
+    // A11: clear the PREVIOUS workspace's notifications on switch — like tasks/projects/members/DMs already
+    // do — so they can't survive as merge "extras" and inflate the new workspace's unread badge.
+    setItems([]);
     setLoading(true);
     notificationsApi.list(50, currentWorkspaceId)
       .then(list => {
         if (!mounted) return;
-        // Merge with any realtime items that arrived during the fetch (dedupe by id, newest-first)
-        // so a notification streamed in mid-load is not clobbered by the list replacement.
+        // Merge with any realtime items that arrived during THIS fetch (dedupe by id, newest-first) so a
+        // notification streamed in mid-load isn't clobbered — but ONLY current-workspace items, never a
+        // stale cross-workspace carryover.
         setItems(prev => {
           if (prev.length === 0) return list;
           const seen = new Set(list.map(x => x.id));
-          const extras = prev.filter(x => !seen.has(x.id));
+          const extras = prev.filter(x => !seen.has(x.id) && x.workspaceId === currentWorkspaceId);
           return [...extras, ...list].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
         });
       })
@@ -4441,9 +4452,10 @@ function MsgBubble({ m, mine, onDelete, onEdit }) {
 /** The scrollable message timeline — sticky day dividers, sender grouping, avatars (both
  *  surfaces), per-message receipts (DM), skeleton loading, empty state, sticky-bottom
  *  autoscroll, and a jump-to-latest button. Shared by the team channel and DM threads. */
-function MessageList({ items, userId, nameOf, loading, empty, onDelete, onEdit, receiptFor }) {
+function MessageList({ items, userId, nameOf, loading, empty, onDelete, onEdit, receiptFor, hasMore, onLoadOlder, loadingOlder }) {
   const scrollRef = useRef(null);
   const atBottomRef = useRef(true);
+  const prependAnchorRef = useRef(null);   // 5c: distance-from-bottom captured before an older page prepends
   const [showJump, setShowJump] = useState(false);
   const jump = () => { const el = scrollRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); };
   const onScroll = () => {
@@ -4451,10 +4463,23 @@ function MessageList({ items, userId, nameOf, loading, empty, onDelete, onEdit, 
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     atBottomRef.current = near; setShowJump(!near);
   };
-  // Stick to the bottom on new messages only when already near it (or it's my own send),
-  // so reading older history isn't yanked away.
+  // 5c: capture the scroll anchor synchronously (before the fetch resolves + items grow) so the viewport
+  // can be restored to the same message after older history is prepended above.
+  const handleLoadOlder = () => {
+    const el = scrollRef.current;
+    if (el) prependAnchorRef.current = el.scrollHeight - el.scrollTop;   // invariant under a top-prepend
+    onLoadOlder?.();
+  };
   useLayoutEffect(() => {
     const el = scrollRef.current; if (!el) return;
+    // Just prepended older history -> keep the same message in view (don't jump), and don't bottom-stick.
+    if (prependAnchorRef.current != null) {
+      el.scrollTop = el.scrollHeight - prependAnchorRef.current;
+      prependAnchorRef.current = null;
+      return;
+    }
+    // Otherwise stick to the bottom on new messages only when already near it (or it's my own send),
+    // so reading older history isn't yanked away.
     const last = items[items.length - 1];
     if (atBottomRef.current || last?.senderId === userId) { el.scrollTop = el.scrollHeight; setShowJump(false); }
   }, [items, userId]);
@@ -4478,7 +4503,16 @@ function MessageList({ items, userId, nameOf, loading, empty, onDelete, onEdit, 
   return (
     <div className="relative flex-1 min-h-0">
       <div ref={scrollRef} onScroll={onScroll} className="absolute inset-0 overflow-y-auto px-4 py-4">
-        {loading ? <ChatSkeleton /> : items.length === 0 ? empty : days.map(day => (
+        {loading ? <ChatSkeleton /> : items.length === 0 ? empty : (<>
+        {hasMore && (
+          <div className="flex justify-center pb-2">
+            <button onClick={handleLoadOlder} disabled={loadingOlder}
+              className="text-[11px] px-3 h-7 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 text-white/60 disabled:opacity-50 transition-colors">
+              {loadingOlder ? 'Loading…' : 'Load older messages'}
+            </button>
+          </div>
+        )}
+        {days.map(day => (
           <section key={day.key}>
             <DayDivider label={day.label} />
             {day.rows.map(({ m, firstOfGroup }) => {
@@ -4501,6 +4535,7 @@ function MessageList({ items, userId, nameOf, loading, empty, onDelete, onEdit, 
             })}
           </section>
         ))}
+        </>)}
       </div>
       {showJump && (
         <button onClick={jump} aria-label="Jump to latest"
@@ -4630,6 +4665,9 @@ function ChatView() {
   const [items, setItems] = useState([]);
   const [people, setPeople] = useState({});
   const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);          // 5c: an older page may exist
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const loadingOlderRef = useRef(false);
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [micError, setMicError] = useState('');
@@ -4673,7 +4711,7 @@ function ChatView() {
   useEffect(() => {
     if (!currentWorkspaceId) return;
     let on = true;
-    messagesApi.list(200, currentWorkspaceId).then(list => { if (on) setItems(list); }).catch(e => console.error('Failed to load messages:', e)).finally(() => { if (on) setLoading(false); });
+    messagesApi.list(200, currentWorkspaceId).then(list => { if (on) { setItems(list); setHasMore(list.length >= 200); } }).catch(e => console.error('Failed to load messages:', e)).finally(() => { if (on) setLoading(false); });
     markChatRead();
     const unsub = messagesApi.subscribe(({ type, message }) => {
       if (!message || !on) return;
@@ -4688,6 +4726,20 @@ function ChatView() {
     }, 'messages-thread', currentWorkspaceId);
     return () => { on = false; unsub(); };
   }, [markChatRead, currentWorkspaceId, userId]);
+
+  // 5c: fetch the previous page of history and prepend it (dedupe by id). Guarded against concurrent runs.
+  const loadOlder = useCallback(async () => {
+    if (loadingOlderRef.current) return;
+    const oldest = items[0];
+    if (!oldest) return;
+    loadingOlderRef.current = true; setLoadingOlder(true);
+    try {
+      const page = await messagesApi.listBefore(oldest.createdAt, 200, currentWorkspaceId);
+      if (page.length) setItems(prev => { const seen = new Set(prev.map(m => m.id)); return [...page.filter(m => !seen.has(m.id)), ...prev]; });
+      setHasMore(page.length >= 200);
+    } catch (e) { console.error('Load older messages failed:', e); }
+    finally { loadingOlderRef.current = false; setLoadingOlder(false); }
+  }, [items, currentWorkspaceId]);
 
   // Stop any in-flight recording on unmount.
   useEffect(() => () => {
@@ -4795,6 +4847,9 @@ function ChatView() {
         userId={userId}
         nameOf={nameOf}
         loading={loading}
+        hasMore={hasMore}
+        onLoadOlder={loadOlder}
+        loadingOlder={loadingOlder}
         onDelete={remove}
         onEdit={edit}
         empty={(
@@ -4964,6 +5019,9 @@ function DmThread({ conversationId, peerId, onBack }) {
   const [shownTyping, setShownTyping] = useState('');   // peer typing label (safety expiry + clear-on-message)
   const typingExpiryRef = useRef(null);
   const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);          // 5c: an older page may exist
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const loadingOlderRef = useRef(false);
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [micError, setMicError] = useState('');
@@ -5005,7 +5063,7 @@ function DmThread({ conversationId, peerId, onBack }) {
   useEffect(() => {
     let on = true;
     directMessagesApi.listMessages(conversationId, 200)
-      .then(list => { if (on) setItems(list); })
+      .then(list => { if (on) { setItems(list); setHasMore(list.length >= 200); } })
       .catch(e => console.error('Failed to load DM thread:', e))
       .finally(() => { if (on) setLoading(false); });
     refreshReads();
@@ -5161,6 +5219,20 @@ function DmThread({ conversationId, peerId, onBack }) {
     catch (e) { console.error('DM edit failed:', e); directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(() => {}); }
   };
 
+  // 5c: fetch the previous page of this thread and prepend it (dedupe by id). Guarded against concurrent runs.
+  const loadOlder = useCallback(async () => {
+    if (loadingOlderRef.current) return;
+    const oldest = items[0];
+    if (!oldest) return;
+    loadingOlderRef.current = true; setLoadingOlder(true);
+    try {
+      const page = await directMessagesApi.listMessagesBefore(conversationId, oldest.createdAt, 200);
+      if (page.length) setItems(prev => { const seen = new Set(prev.map(m => m.id)); return [...page.filter(m => !seen.has(m.id)), ...prev]; });
+      setHasMore(page.length >= 200);
+    } catch (e) { console.error('Load older DMs failed:', e); }
+    finally { loadingOlderRef.current = false; setLoadingOlder(false); }
+  }, [items, conversationId]);
+
   return (
     <div className="flex flex-col h-full">
       <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2.5 shrink-0">
@@ -5177,6 +5249,9 @@ function DmThread({ conversationId, peerId, onBack }) {
         userId={userId}
         nameOf={nameOf}
         loading={loading}
+        hasMore={hasMore}
+        onLoadOlder={loadOlder}
+        loadingOlder={loadingOlder}
         onDelete={remove}
         onEdit={edit}
         receiptFor={receiptFor}
