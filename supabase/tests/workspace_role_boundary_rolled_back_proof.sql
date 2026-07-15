@@ -337,7 +337,12 @@ select pg_temp.rec('C03','admin CAN create a workspace task assigned to a member
 reset role;
 set local request.jwt.claims = '{"sub":"0e5aa5e0-0000-4000-8000-0000000000a4","role":"authenticated","email":"rp-guest@roleproof.test"}';
 set local role authenticated;
-select pg_temp.rec('C04','guest CAN create a SELF-assigned task','ok:1',
+-- C04 USED TO ASSERT 'guest CAN create a SELF-assigned task' = ok:1 -- on a privacy='workspace' row.
+-- That assertion is how the guest-injection hole hid inside a "35/35 green" proof for weeks: its NAME
+-- talked about the assignee while its DATA quietly blessed workspace visibility. A guest could put
+-- unlimited tasks on the whole workspace's board (via Import JSON, which had no guest gate at all).
+-- Closed by migration 20260715_guest_task_visibility_pin_and_length_checks. C04 now asserts the rule.
+select pg_temp.rec('C04','guest CANNOT create a WORKSPACE-visible task, even self-assigned','err:42501',
   pg_temp.probe($p$insert into public.tasks (id,title,privacy,project,status,created_by,assignee_id,workspace_id)
    values ('rp-c04','guest self task','workspace','rp-proj-1','inbox',
    '0e5aa5e0-0000-4000-8000-0000000000a4','0e5aa5e0-0000-4000-8000-0000000000a4','0e5aa5e0-0000-4000-8000-000000000000')$p$));
@@ -349,6 +354,25 @@ select pg_temp.rec('C06','guest CAN create a self-assigned PRIVATE task','ok:1',
   pg_temp.probe($p$insert into public.tasks (id,title,privacy,project,status,created_by,assignee_id,workspace_id)
    values ('rp-c06','guest private','private','rp-proj-1','inbox',
    '0e5aa5e0-0000-4000-8000-0000000000a4','0e5aa5e0-0000-4000-8000-0000000000a4','0e5aa5e0-0000-4000-8000-000000000000')$p$));
+
+-- C04b/C04c: the TWO-STEP BYPASS. Pinning only the INSERT would have been false assurance --
+-- tasks_update_role has no guest clause, so a guest could insert a legitimately-private task (C06)
+-- and then simply UPDATE it to privacy='workspace'. Proven live before the fix. WITH CHECK cannot
+-- express "privacy didn't change" (it never sees OLD), so the enforce_guest_task_pin BEFORE UPDATE
+-- trigger is what closes these two.
+select pg_temp.rec('C04b','guest CANNOT flip their own private task to workspace (2-step bypass)','err:42501',
+  pg_temp.probe($p$update public.tasks set privacy='workspace' where id='rp-c06'$p$));
+select pg_temp.rec('C04c','guest CANNOT reassign their own task away','err:42501',
+  pg_temp.probe($p$update public.tasks set assignee_id='0e5aa5e0-0000-4000-8000-0000000000a3' where id='rp-c06'$p$));
+select pg_temp.rec('C04d','NO REGRESSION: guest CAN still edit their own private task','ok:1',
+  pg_temp.probe($p$update public.tasks set title='guest renamed' where id='rp-c06'$p$));
+-- C04e: the no-regression that rules OUT the naive "pin privacy='private' in WITH CHECK" fix. A guest
+-- must still be able to work a workspace task legitimately assigned to them (fixture rp-t-guest-asgn,
+-- created by the owner and assigned to the guest). A WITH CHECK pin would have broken exactly this.
+select pg_temp.rec('C04e','NO REGRESSION: guest CAN mark done a workspace task assigned to them','ok:1',
+  pg_temp.probe($p$update public.tasks set status='done' where id='rp-t-guest-asgn'$p$));
+select pg_temp.rec('C04f','guest CANNOT hide an assigned workspace task (workspace -> private)','err:42501',
+  pg_temp.probe($p$update public.tasks set privacy='private' where id='rp-t-guest-asgn'$p$));
 
 reset role;
 set local request.jwt.claims = '{"sub":"0e5aa5e0-0000-4000-8000-0000000000a6","role":"authenticated","email":"rp-outsider@roleproof.test"}';

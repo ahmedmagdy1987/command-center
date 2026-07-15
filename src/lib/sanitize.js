@@ -12,25 +12,50 @@ export const migrateProjectId = (id) => LEGACY_PROJECT_MAP[id] || id;
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 export const nowISO = () => new Date().toISOString();
 
+// Caps on user-supplied fields. Two different jobs here:
+//  - ID_MAX_LEN mirrors the server-side CHECKs (tasks_id_len_chk / tasks_project_len_chk /
+//    projects_id_len_chk, all 1..64) so a bad value degrades gracefully instead of hitting a raw
+//    23514 that aborts the whole bulk-insert statement.
+//  - The collection caps have NO server-side counterpart: tags/subtasks/links/recurring are jsonb
+//    with no CHECK, so these are the only limit on a crafted import (a 5000-subtask, 50k-char-tag
+//    row was accepted before). Flagged for a future DB-side jsonb cap.
+export const ID_MAX_LEN = 64;
+const MAX_TAGS = 50;
+const MAX_TAG_LEN = 100;
+const MAX_SUBTASKS = 200;
+const MAX_LINKS = 50;
+const MAX_LINK_TEXT_LEN = 500;
+const MAX_RECURRING_CHARS = 2000;
+
 // URL-scheme allowlist for user-supplied task links. task.links has no clickable render site
 // today, so this is defense-in-depth: it guarantees a javascript:/data:/vbscript: URL can never
-// be stored on a link and reach a future render. Legitimate http(s)/mailto links pass through
-// unchanged; any other property on a link object is preserved.
+// be stored on a link and reach a future render. Legitimate http(s)/mailto links pass through.
 const SAFE_LINK_SCHEMES = new Set(['http:', 'https:', 'mailto:']);
 export const safeLinkUrl = (u) => {
   if (typeof u !== 'string' || !u) return '';
   try { return SAFE_LINK_SCHEMES.has(new URL(u, 'https://x.invalid').protocol) ? u.trim() : ''; }
   catch { return ''; }
 };
+const linkText = (v) => (typeof v === 'string' ? v.slice(0, MAX_LINK_TEXT_LEN) : '');
+// Whitelist the known link properties rather than spreading. The old `{...l}` preserved ANY property,
+// so a crafted import could park an arbitrarily large blob on a link and it went straight into the
+// links jsonb unbounded. No live rows carry links, so nothing is lost by narrowing this.
 const normalizeLinks = (arr) =>
   Array.isArray(arr)
-    ? arr.filter(l => l && typeof l === 'object').map(l => {
-        const out = { ...l };
-        if ('url' in out) out.url = safeLinkUrl(out.url);
-        if ('href' in out) out.href = safeLinkUrl(out.href);
-        return out;
-      })
+    ? arr.filter(l => l && typeof l === 'object').slice(0, MAX_LINKS).map(l => ({
+        url: safeLinkUrl(l.url),
+        label: linkText(l.label ?? l.title ?? l.text),
+      }))
     : [];
+
+// A recurring rule is a short string or a small object; anything bigger is not a rule.
+const normalizeRecurring = (r) => {
+  if (typeof r === 'string') return r.length <= MAX_RECURRING_CHARS ? r : null;
+  if (r && typeof r === 'object') {
+    try { return JSON.stringify(r).length <= MAX_RECURRING_CHARS ? r : null; } catch { return null; }
+  }
+  return null;
+};
 
 /** Convert a DB-shaped task (snake_case columns) to app shape (camelCase) */
 export const fromDbTask = (row) => {
@@ -108,9 +133,14 @@ export const sanitizeTask = (raw) => {
   // Accept any non-empty project id (projects are user-creatable now); keep the legacy id remap.
   // Default to 'other' only when missing/blank — no longer clamp to a hardcoded whitelist.
   const migratedProject = migrateProjectId(t.project);
-  const project = (typeof migratedProject === 'string' && migratedProject) ? migratedProject : 'other';
+  // Fall back to 'other' when missing/blank OR over the server-side CHECK (an over-long slug would
+  // otherwise 23514 and abort the whole bulk-insert statement).
+  const project = (typeof migratedProject === 'string' && migratedProject && migratedProject.length <= ID_MAX_LEN)
+    ? migratedProject : 'other';
   return {
-    id: typeof t.id === 'string' && t.id ? t.id : uid(),
+    // Mint a fresh id rather than TRUNCATING an over-long one — truncation could collide with a real
+    // task's id (tasks.id is a global PK) and a collision aborts the entire batch.
+    id: (typeof t.id === 'string' && t.id && t.id.length <= ID_MAX_LEN) ? t.id : uid(),
     // Clamp to the server-side length CHECKs (migration 20260713180216) so the bulk-import path — which
     // bypasses the UI's maxLength — degrades gracefully instead of hitting a raw DB constraint error.
     title: typeof t.title === 'string' ? t.title.slice(0, 500) : 'Untitled task',
@@ -123,14 +153,16 @@ export const sanitizeTask = (raw) => {
     dueDate: typeof t.dueDate === 'string' ? t.dueDate : null,
     scheduledDate: typeof t.scheduledDate === 'string' ? t.scheduledDate : null,
     estimatedMinutes: typeof t.estimatedMinutes === 'number' && isFinite(t.estimatedMinutes) ? t.estimatedMinutes : 30,
-    tags: Array.isArray(t.tags) ? t.tags.filter(x => typeof x === 'string') : [],
-    subtasks: Array.isArray(t.subtasks) ? t.subtasks.filter(s => s && typeof s === 'object').map(s => ({
-      id: typeof s.id === 'string' && s.id ? s.id : uid(),
+    tags: Array.isArray(t.tags)
+      ? t.tags.filter(x => typeof x === 'string').slice(0, MAX_TAGS).map(x => x.slice(0, MAX_TAG_LEN))
+      : [],
+    subtasks: Array.isArray(t.subtasks) ? t.subtasks.filter(s => s && typeof s === 'object').slice(0, MAX_SUBTASKS).map(s => ({
+      id: (typeof s.id === 'string' && s.id && s.id.length <= ID_MAX_LEN) ? s.id : uid(),
       title: typeof s.title === 'string' ? s.title.slice(0, 500) : '',
       done: !!s.done,
     })) : [],
     links: normalizeLinks(t.links),
-    recurring: t.recurring && (typeof t.recurring === 'string' || typeof t.recurring === 'object') ? t.recurring : null,
+    recurring: normalizeRecurring(t.recurring),
     createdBy: t.createdBy || null,
     createdAt: typeof t.createdAt === 'string' ? t.createdAt : nowISO(),
     updatedAt: typeof t.updatedAt === 'string' ? t.updatedAt : nowISO(),

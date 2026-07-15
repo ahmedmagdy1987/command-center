@@ -73,13 +73,15 @@ Workspace **"Command Center"** — id `11111111-1111-1111-1111-111111111111`, **
 Two other workspaces exist: **"ahmed"** (`f1d15518-…`; VA = `owner`, Ahmed Magdy = `member`) and **"amego"**
 (`016db12d-…`; qassemmenna14 = `owner`) — the outsider tenant the isolation proofs impersonate.
 
-**What the VA's `admin` actually grants (proven live under impersonation, rolled back):** edit **and delete
-ANY task in the workspace** — including tasks they neither created nor are assigned to (the documented
-`member` rule is own/assigned only, so the docs understated the VA's power) — plus delete projects, invite
-people, and manage members below admin. **The ladder itself is intact and correctly bounded:** the VA still
-cannot promote themselves to `owner` and cannot remove Tony (both `42501`). Nothing is broken — but if
-`member` was the intent for the VA, that's a live role to change via `set_member_role`, not a doc edit.
-**Tony's call.**
+**RATIFIED 2026-07-15: both Ahmeds KEEP `admin`. This is intentional — not drift to be "corrected".** Do
+not "fix" these roles back to `member`/`owner`; the docs were wrong, the DB was right.
+
+**What `admin` grants them (proven live under impersonation, rolled back):** edit **and delete ANY task in
+the workspace** — including tasks they neither created nor are assigned to — plus delete projects, invite
+people, and manage members below admin. So **the VA has full workspace power**, which the old docs
+(`member` = own/assigned only) badly understated. **The ladder is intact and correctly bounded:** an admin
+still cannot promote themselves to `owner`, cannot remove Tony, and cannot touch owners or other admins
+(all `42501`). Only Tony (`owner`) can create admins or delete the workspace.
 
 Authorization is **per-workspace** via `workspace_members.role` — a four-rung ladder
 **owner > admin > member > guest** (the global `members.role` is vestigial, profile-only — never read it for

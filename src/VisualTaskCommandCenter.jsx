@@ -32,7 +32,13 @@ const VIEW_TO_PATH = {
   members: '/members',
 };
 const PATH_TO_VIEW = Object.fromEntries(Object.entries(VIEW_TO_PATH).map(([v, p]) => [p, v]));
-const GUEST_VIEWS = new Set(['mine', 'dms']);   // a Guest's only relevant destinations: own/assigned tasks + DMs
+const GUEST_VIEWS = new Set(['mine', 'dms']);
+
+// Bulk import used to accept any file of any size with any number of rows: the ONLY check was
+// "is .tasks a non-empty array". These caps are UX guardrails — the DB is the authority (the
+// tasks_id_len_chk/tasks_project_len_chk CHECKs, tasks_insert_role, enforce_guest_task_pin).
+const IMPORT_MAX_BYTES = 5 * 1024 * 1024;   // 5 MB — thousands of realistic tasks, well under the PostgREST body limit
+const IMPORT_MAX_ROWS = 1000;   // a Guest's only relevant destinations: own/assigned tasks + DMs
 
 // OS-aware keyboard modifier label. The keydown handler already accepts Ctrl OR Cmd, so only
 // the *displayed* hint needs to differ: ⌘ on macOS, Ctrl elsewhere (Windows/Linux).
@@ -720,24 +726,52 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   }, [tasks, projects]);
 
   const importJSON = useCallback((file) => {
+    // Derived from memberships here rather than the isGuest binding: isGuest is declared further down,
+    // so naming it in this dep array would be a TDZ ReferenceError on every render. Same source of
+    // truth as the myRole memo. (UI half only — the DB is authoritative.)
+    const role = memberships.find(m => m.workspaceId === currentWorkspaceId)?.role ?? null;
+    if (role === 'guest') { showToast("Guests can't import tasks.", 'info'); return; }
+    if (file.size > IMPORT_MAX_BYTES) {
+      showToast(`That file is too large (max ${Math.round(IMPORT_MAX_BYTES / 1024 / 1024)} MB).`);
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const d = JSON.parse(e.target.result);
-        if (Array.isArray(d.tasks) && d.tasks.length) setImportPreview({ tasks: d.tasks, count: d.tasks.length });   // opens a ConfirmModal
-        else showToast('That file has no tasks to import.', 'info');
+        if (!Array.isArray(d.tasks) || !d.tasks.length) { showToast('That file has no tasks to import.', 'info'); return; }
+        if (d.tasks.length > IMPORT_MAX_ROWS) {
+          showToast(`That file has ${d.tasks.length} tasks — the limit is ${IMPORT_MAX_ROWS} per import.`);
+          return;
+        }
+        setImportPreview({ tasks: d.tasks, count: d.tasks.length });   // opens a ConfirmModal
       } catch {
         showToast("That file isn't valid JSON.");
       }
     };
+    reader.onerror = () => showToast("Couldn't read that file.");
     reader.readAsText(file);
-  }, [showToast]);
+  }, [showToast, memberships, currentWorkspaceId]);
+
   const confirmImport = useCallback(async () => {
     const pv = importPreview; setImportPreview(null);
     if (!pv) return;
-    try { const created = await tasksApi.bulkInsert(pv.tasks, currentWorkspaceId); setTasks(prev => [...created, ...prev]); }
+    // Never trust ids from a file. Minting fresh ones kills two problems at once: a colliding id
+    // aborts the WHOLE batch (bulkInsert is one statement), and 23505-vs-success would otherwise be a
+    // cross-tenant probe for whether a task id exists (ids are a global TEXT PK).
+    // Also pin assignee to a real member of THIS workspace — an unknown id is only FK-checked against
+    // auth.users, so it would fire notify_on_task_assigned and write a notification row in a stranger's
+    // name that nobody can read.
+    const memberIds = new Set(members.map(m => m.id));
+    const rows = pv.tasks.map(t => {
+      const row = { ...(t && typeof t === 'object' ? t : {}) };
+      delete row.id;                                                              // mint a fresh id (see above)
+      if (!memberIds.has(row.assigneeId)) row.assigneeId = null;                  // pin to a real member of this workspace
+      return row;
+    });
+    try { const created = await tasksApi.bulkInsert(rows, currentWorkspaceId); setTasks(prev => [...created, ...prev]); }
     catch (err) { console.error('Import failed:', err); showToast("Couldn't import those tasks. Please try again."); }
-  }, [importPreview, currentWorkspaceId, showToast]);
+  }, [importPreview, currentWorkspaceId, showToast, members]);
 
   const switchWorkspace = useCallback((id) => {
     if (id === currentWorkspaceId || !workspaces.some(w => w.id === id)) return;
@@ -3227,7 +3261,7 @@ function WorkspaceSwitcher() {
 }
 
 function TopBar() {
-  const { theme, setTheme, setPaletteOpen, setQuickAddOpen, filters, setFilters, view, compact, setCompact, exportJSON, importJSON, projects, syncStatus, currentMember, myRole, onSignOut, members, meId, requestUpgrade } = useApp();
+  const { theme, setTheme, setPaletteOpen, setQuickAddOpen, filters, setFilters, view, compact, setCompact, exportJSON, importJSON, projects, syncStatus, currentMember, myRole, onSignOut, members, meId, isGuest, membershipsLoaded } = useApp();
   const entitlements = useEntitlements();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -3307,7 +3341,15 @@ function TopBar() {
                   )}
                   <MenuItem icon={theme === 'dark' ? Sun : Moon} onClick={() => { setTheme(theme === 'dark' ? 'light' : 'dark'); setMenuOpen(false); }}>Switch to {theme === 'dark' ? 'light' : 'dark'}</MenuItem>
                   <MenuItem icon={Download} onClick={() => { exportJSON(); setMenuOpen(false); }}>Export JSON</MenuItem>
-                  <MenuItem icon={Upload} onClick={() => { setMenuOpen(false); if (entitlements.can('bulkImport')) fileRef.current?.click(); else requestUpgrade('bulkImport'); }}>Import JSON</MenuItem>
+                  {/* Import is free on every plan (plans.js FEATURE_TABLE: type 'always'), so the old
+                      entitlements.can('bulkImport') gate here was DEAD CODE — every plan sets it true, so
+                      the requestUpgrade branch was unreachable. Replaced with the gate that is actually
+                      real: guests must not bulk-import. Guests are bounced to /my-tasks, but TopBar renders
+                      on that route too, so GUEST_VIEWS did not cover this. The DB is the authority
+                      (tasks_insert_role + enforce_guest_task_pin, migration 20260715…); this is the UI half. */}
+                  {membershipsLoaded && !isGuest && (
+                    <MenuItem icon={Upload} onClick={() => { setMenuOpen(false); fileRef.current?.click(); }}>Import JSON</MenuItem>
+                  )}
                   <div className="h-px bg-white/5 my-1" />
                   <MenuItem icon={Sparkles} onClick={() => { setMenuOpen(false); navigate('/pricing'); }}>Plans &amp; pricing</MenuItem>
                   <MenuItem icon={FileText} onClick={() => { setMenuOpen(false); navigate('/terms'); }}>Terms of Service</MenuItem>
