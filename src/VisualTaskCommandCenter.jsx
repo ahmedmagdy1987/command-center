@@ -8,7 +8,7 @@ import {
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
   Info, LogOut, Loader2,
   KeyRound, Bell, MessageSquare, MessagesSquare, Send, Mic, Square, Play, Pause, Users, Mail, UserPlus, ArrowRight,
-  FileText, Shield, Paperclip, FileImage
+  FileText, Shield, Paperclip, FileImage, User
 } from 'lucide-react';
 import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, directMessages as directMessagesApi, workspaces as workspacesApi, workspaceMembers as workspaceMembersApi, invitations as invitationsApi, attachments as attachmentsApi, auth } from './lib/api';
 import { supabase } from './lib/supabase';
@@ -58,6 +58,20 @@ const UNASSIGNED_STYLE = { hex: '#8b92a8', soft: 'rgba(139,146,168,0.14)' };
 const hashStr = (s) => { let h = 0; for (let i = 0; i < (s || '').length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); };
 const assigneeColor = (userId) => (userId ? ASSIGNEE_PALETTE[hashStr(userId) % ASSIGNEE_PALETTE.length] : UNASSIGNED_STYLE);
 const initialsOf = (s) => (s || '?').trim().slice(0, 1).toUpperCase();
+// Two-letter initials for avatars: "Ahmed Magdy" -> AM, "ahmed@x.com" -> AH (the local part only —
+// the domain is the same for everyone and carries no identity). Returns '' when there is no name to
+// work with, which is the signal for <Avatar> to fall back to the silhouette instead of rendering
+// a lone "?" in a circle. Distinct from initialsOf, which stays single-letter for the compact
+// assignee chips where a second glyph doesn't fit.
+const initialsFor = (s) => {
+  const t = (s || '').trim();
+  if (!t) return '';
+  const base = t.includes('@') ? t.split('@')[0] : t;
+  const words = base.split(/[\s._-]+/).filter(Boolean);
+  if (!words.length) return '';
+  if (words.length >= 2) return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+  return words[0].slice(0, 2).toUpperCase();
+};
 
 // Assignee-filter match: 'all' | 'me' | 'unassigned' | <userId>.
 const matchesAssignee = (task, filterVal, meId) =>
@@ -1302,8 +1316,7 @@ function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onE
           {filtered.map((m, i) => (
             <button key={m.userId} type="button" onMouseDown={(ev) => { ev.preventDefault(); pick(m); }} onMouseEnter={() => setActive(i)}
               className={cx('w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left', i === active ? 'bg-violet-500/25 text-white' : 'text-white/85')}>
-              <span className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-semibold shrink-0"
-                style={{ background: assigneeColor(m.userId).soft, color: assigneeColor(m.userId).hex }}>{initialsOf(m.displayName || m.email)}</span>
+              <Avatar name={m.displayName || m.email} userId={m.userId} photoUrl={m.avatarUrl} size={20} />
               <span className="truncate">{m.displayName || m.email}</span>
             </button>
           ))}
@@ -4207,6 +4220,30 @@ export default function App({ session, currentMember, onSignOut }) {
 ================================================================================= */
 const fmtDur = (s) => { s = Number(s); if (!isFinite(s) || s < 0) s = 0; s = Math.round(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
+// Playback source for a voice note the CURRENT tab just recorded, keyed by its storage path. Lets the
+// sender play their own note straight from the blob they still hold instead of re-downloading it
+// (a signed-URL call + an audio fetch). Sender-only and tab-local; everyone else takes the signed URL.
+const localAudioUrls = new Map();
+const rememberLocalAudio = (path, url) => { if (path && url) localAudioUrls.set(path, url); };
+
+const WAVEFORM_BARS = 32;
+// Deterministic bar heights for the waveform. These are a VISUAL APPROXIMATION, not real amplitudes:
+// real peaks would mean decoding every note (AudioContext) or a new peaks column, and at 32 bars the
+// difference isn't perceivable. Seeding off the message id keeps a given note's shape stable across
+// re-renders and identical for both participants, which is what makes it read as "the note's shape".
+const waveformPeaks = (seed) => {
+  let h = hashStr(String(seed || 'voice')) || 1;
+  const out = [];
+  for (let i = 0; i < WAVEFORM_BARS; i++) {
+    h = (h * 1103515245 + 12345) & 0x7fffffff;
+    const r = (h % 1000) / 1000;
+    // Taper the ends so it reads like speech rather than a noise block.
+    const envelope = 0.62 + 0.38 * Math.sin((i / (WAVEFORM_BARS - 1)) * Math.PI);
+    out.push(Math.max(0.16, Math.min(1, (0.3 + r * 0.7) * envelope)));
+  }
+  return out;
+};
+
 /** Build the subtle "X is typing… / recording…" line from presence state. */
 const presenceLabel = (others) => {
   if (!others || !others.length) return '';
@@ -4226,20 +4263,36 @@ const pickAudioMime = () => {
   return '';
 };
 
-// Custom, theme-aware audio player (play/pause, seekable bar, elapsed / total).
-function AudioPlayer({ url, duration }) {
+// The <audio> element currently playing, so starting one note pauses any other (WhatsApp-style —
+// without this, tapping play on a second note leaves both talking over each other).
+let nowPlayingAudio = null;
+
+// Custom, theme-aware voice-note player: play/pause, seekable waveform, elapsed / total.
+// Colors are INLINE rather than Tailwind classes on purpose — light mode here is retrofitted via
+// `[data-theme="light"]` rules that live inside per-view <style> blocks, so a class-based fill only
+// gets themed while the view that declares the rule is mounted (which is why the old bar washed out
+// in a cold-loaded DM). Inline styles read `theme` straight from context and are correct everywhere.
+function AudioPlayer({ url, duration, seed, pending }) {
+  const { theme } = useApp();
+  const light = theme === 'light';
   const audioRef = useRef(null);
   const barRef = useRef(null);
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
   const [total, setTotal] = useState(() => (isFinite(duration) && duration > 0 ? duration : 0));
   const [failed, setFailed] = useState(false);
+  const peaks = useMemo(() => waveformPeaks(seed), [seed]);
+
+  useEffect(() => () => { if (nowPlayingAudio === audioRef.current) nowPlayingAudio = null; }, []);
 
   const toggle = () => {
     const a = audioRef.current;
     if (!a) return;
-    if (a.paused) a.play().catch(() => setPlaying(false));  // onPlay/onPause keep state in sync
-    else a.pause();
+    if (a.paused) {
+      if (nowPlayingAudio && nowPlayingAudio !== a) nowPlayingAudio.pause();
+      nowPlayingAudio = a;
+      a.play().catch(() => setPlaying(false));  // onPlay/onPause keep state in sync
+    } else a.pause();
   };
   const seekTo = (ratio) => {
     const a = audioRef.current;
@@ -4259,12 +4312,17 @@ function AudioPlayer({ url, duration }) {
     else if (e.key === 'Home') { e.preventDefault(); seekTo(0); }
     else if (e.key === 'End') { e.preventDefault(); seekTo(1); }
   };
-  const pct = total ? Math.min(100, (current / total) * 100) : 0;
+  const ratio = total ? Math.min(1, current / total) : 0;
 
   if (failed) return <div className="mt-1 text-[11px] text-rose-300/70">Voice note unavailable</div>;
 
+  const playedHex = light ? '#7c3aed' : '#a78bfa';
+  const unplayedHex = light ? 'rgba(15,17,23,0.24)' : 'rgba(255,255,255,0.24)';
+
   return (
-    <div className="mt-1 flex items-center gap-2 w-[240px] max-w-full rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5">
+    // No nested border/background: the bubble already provides one, and boxing the player inside it
+    // was the "ugly" part. The waveform sits directly on the bubble, like WhatsApp.
+    <div className={cx('mt-1 flex items-center gap-2.5 w-[240px] max-w-full', pending && 'opacity-60')}>
       <audio ref={audioRef} src={url} preload="metadata"
         onLoadedMetadata={e => { const d = e.currentTarget.duration; if (isFinite(d) && d > 0) setTotal(d); }}
         onTimeUpdate={e => setCurrent(e.currentTarget.currentTime)}
@@ -4272,35 +4330,46 @@ function AudioPlayer({ url, duration }) {
         onPause={() => setPlaying(false)}
         onEnded={() => { setPlaying(false); setCurrent(0); }}
         onError={() => setFailed(true)} />
-      <button onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}
-        className="shrink-0 w-7 h-7 rounded-full bg-violet-500/25 hover:bg-violet-500/35 border border-violet-400/30 flex items-center justify-center text-white">
-        {playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 translate-x-px" />}
+      <button onClick={toggle} disabled={pending} aria-label={playing ? 'Pause' : 'Play'}
+        className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors disabled:cursor-default"
+        style={{ background: light ? 'rgba(124,58,237,0.14)' : 'rgba(139,92,246,0.25)', border: `1px solid ${playedHex}4d`, color: playedHex }}>
+        {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          : playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 translate-x-px" />}
       </button>
-      <div ref={barRef} onClick={onBarClick} onKeyDown={onBarKey} role="slider" tabIndex={0}
+      <div ref={barRef} onClick={onBarClick} onKeyDown={onBarKey} role="slider" tabIndex={pending ? -1 : 0}
         aria-label="Seek" aria-valuemin={0} aria-valuemax={Math.round(total)} aria-valuenow={Math.round(current)}
-        className="flex-1 h-1.5 rounded-full bg-white/10 cursor-pointer relative overflow-hidden focus:outline-none focus:ring-2 focus:ring-violet-400/40">
-        <div className="absolute inset-y-0 left-0 rounded-full bg-violet-400" style={{ width: `${pct}%` }} />
+        className="flex-1 h-7 flex items-center gap-[2px] cursor-pointer rounded focus:outline-none focus:ring-2 focus:ring-violet-400/40">
+        {peaks.map((p, i) => (
+          <span key={i} aria-hidden="true"
+            className="flex-1 rounded-full transition-colors duration-75"
+            style={{ height: `${Math.round(p * 100)}%`, minWidth: 2, background: (i / WAVEFORM_BARS) < ratio ? playedHex : unplayedHex }} />
+        ))}
       </div>
-      <span className="shrink-0 text-[10px] tabular-nums text-white/45">{fmtDur(current)}/{fmtDur(total)}</span>
+      <span className="shrink-0 text-[10px] tabular-nums" style={{ color: light ? 'rgba(15,17,23,0.5)' : 'rgba(255,255,255,0.45)' }}>
+        {fmtDur(playing || current ? current : total)}
+      </span>
     </div>
   );
 }
 
-function VoiceNote({ path, duration }) {
-  const [url, setUrl] = useState(null);
+function VoiceNote({ path, localUrl, duration, pending }) {
+  // A note this tab just recorded already has its audio in memory, so it plays with no network at
+  // all. Everyone else (and this tab after a reload) falls back to a signed URL.
+  const [url, setUrl] = useState(() => localUrl || localAudioUrls.get(path) || null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
+    if (url || !path) return;
     let on = true;
     messagesApi.signedUrl(path).then(u => { if (on) setUrl(u); }).catch(() => { if (on) setFailed(true); });
     return () => { on = false; };
-  }, [path]);
+  }, [path, url]);
   if (failed) return <div className="mt-1 text-[11px] text-rose-300/70">Voice note unavailable</div>;
   if (!url) return (
-    <div className="mt-1 inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-[11px] text-white/40">
+    <div className="mt-1 inline-flex items-center gap-2 px-1 py-1.5 text-[11px] text-white/40">
       <Loader2 className="w-3 h-3 animate-spin" />Loading…
     </div>
   );
-  return <AudioPlayer url={url} duration={duration} />;
+  return <AudioPlayer url={url} duration={duration} seed={path || 'pending'} pending={pending} />;
 }
 
 /* ── Messaging time helpers ─────────────────────────────────────────────────── */
@@ -4357,15 +4426,41 @@ function DayDivider({ label }) {
   );
 }
 
-/** Round sender avatar (deterministic color + initial). */
-function MsgAvatar({ name, userId, size = 28 }) {
+/** The one avatar in the app. Photo if the user has one, else their initials, else a silhouette —
+ *  never an empty circle. The deterministic per-user color still tints the fallback, so a person
+ *  stays recognisable at a glance whether or not they've uploaded a photo.
+ *  `photoUrl` is inert until the profile-photo work lands; every call site is already wired for it. */
+function Avatar({ name, userId, photoUrl, size = 28, className }) {
   const c = assigneeColor(userId);
+  const [broken, setBroken] = useState(false);
+  const initials = initialsFor(name);
+  const showPhoto = !!photoUrl && !broken;
+
   return (
-    <span className="rounded-full flex items-center justify-center font-semibold shrink-0 select-none"
-      style={{ width: size, height: size, background: c.soft, color: c.hex, border: `1px solid ${c.hex}33`, fontSize: Math.round(size * 0.4) }}>
-      {initialsOf(name)}
+    <span className={cx('rounded-full flex items-center justify-center font-semibold shrink-0 select-none overflow-hidden', className)}
+      style={{
+        width: size, height: size,
+        background: showPhoto ? 'transparent' : c.soft,
+        color: c.hex,
+        border: `1px solid ${c.hex}33`,
+        fontSize: Math.round(size * 0.36),
+      }}>
+      {showPhoto ? (
+        // Fixed box + lazy/async decode: an avatar renders in every roster row and chat line, so it
+        // must never drive layout off an image whose real dimensions we don't control.
+        <img src={photoUrl} alt="" width={size} height={size} loading="lazy" decoding="async"
+          onError={() => setBroken(true)}
+          style={{ width: size, height: size, objectFit: 'cover', display: 'block' }} />
+      ) : initials ? initials : (
+        <User aria-hidden="true" style={{ width: Math.round(size * 0.5), height: Math.round(size * 0.5) }} />
+      )}
     </span>
   );
+}
+
+/** Round sender avatar for chat/DM bubbles. Thin alias kept so the messaging call sites read clearly. */
+function MsgAvatar({ name, userId, photoUrl, size = 28 }) {
+  return <Avatar name={name} userId={userId} photoUrl={photoUrl} size={size} />;
 }
 
 // Edit/delete are allowed for 10 minutes after sending — the SAME window the DB trigger enforces.
@@ -4389,7 +4484,8 @@ function MsgBubble({ m, mine, onDelete, onEdit }) {
   const canCopy = hasBody && !deleted;
   // Trigger visibility (pure): the precise 10-min window is computed in openMenu, not at render
   // (Date.now() is impure for render), and gates Edit/Delete inside the menu via `actable`.
-  const menuBtn = !deleted && (canCopy || mine);
+  // A pending bubble has no server row yet, so there is nothing to edit, copy or delete on it.
+  const menuBtn = !deleted && !m.pending && (canCopy || mine);
   const MENU_W = 144;
   // Anchor the menu to the trigger's viewport rect, then render it via a PORTAL to document.body so
   // it escapes the scroll/overflow clipping of the message list (the old absolute menu was clipped
@@ -4453,7 +4549,9 @@ function MsgBubble({ m, mine, onDelete, onEdit }) {
           {edited && <span className="ml-1.5 text-[10px] text-white/35 not-italic">(edited)</span>}
         </div>
       )}
-      {m.audioPath && <VoiceNote path={m.audioPath} duration={m.audioDuration} />}
+      {(m.audioPath || m.localUrl) && (
+        <VoiceNote path={m.audioPath} localUrl={m.localUrl} duration={m.audioDuration} pending={m.pending} />
+      )}
       {menuBtn && (
         <button ref={btnRef} onClick={() => (menu ? setMenu(false) : openMenu())} aria-label="Message actions"
           className={cx('absolute -top-2 w-6 h-6 rounded-full bg-[#0f1017] border border-white/10 flex items-center justify-center text-white/45 hover:text-white/80 transition-opacity',
@@ -4818,10 +4916,32 @@ function ChatView() {
         chunksRef.current = [];
         if (cancelRef.current || blob.size === 0) return;
         if (dur < 0.4) { setMicError('Too short. Hold to record a little longer.'); return; }
+        // Paint the bubble NOW from the local blob. sendVoice is three serial round-trips
+        // (getSession -> upload the whole blob -> insert), and until this it rendered nothing at all
+        // for that entire window.
+        const tempId = `pending-${uid()}`;
+        const localUrl = URL.createObjectURL(blob);
+        setItems(prev => [...prev, {
+          id: tempId, senderId: userId, body: null, audioPath: null, audioDuration: dur,
+          createdAt: nowISO(), pending: true, localUrl,
+        }]);
         try {
           const created = await messagesApi.sendVoice(blob, dur, ct, currentWorkspaceId);
-          setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
-        } catch (e) { console.error('Voice send failed:', e); setMicError('Failed to send voice note.'); }
+          // Keep the blob as this note's playback source so the sender never re-downloads what they
+          // just uploaded; it outlives the placeholder, so don't revoke it here.
+          rememberLocalAudio(created.audioPath, localUrl);
+          // Swap the placeholder for the server row. Insert-if-absent because the realtime echo can
+          // land the same row while the upload is still in flight.
+          setItems(prev => {
+            const rest = prev.filter(m => m.id !== tempId);
+            return rest.some(m => m.id === created.id) ? rest : [...rest, created];
+          });
+        } catch (e) {
+          console.error('Voice send failed:', e);
+          URL.revokeObjectURL(localUrl);
+          setItems(prev => prev.filter(m => m.id !== tempId));
+          setMicError('Failed to send voice note.');
+        }
       };
       mrRef.current = mr;
       startRef.current = Date.now();
@@ -4994,8 +5114,7 @@ function DirectMessagesView() {
             <button key={c.id} onClick={() => setDmActiveConv(c.id)}
               className={cx('w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors',
                 selected ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]')}>
-              <span className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-semibold shrink-0"
-                style={{ background: a.soft, color: a.hex, border: `1px solid ${a.hex}33` }}>{a.initials}</span>
+              <Avatar name={a.label === 'Me' ? 'You' : a.label} userId={c.peerId} photoUrl={a.avatarUrl} size={32} />
               <span className="flex-1 min-w-0">
                 <span className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium text-white/85 truncate">{a.label === 'Me' ? 'You' : a.label}</span>
@@ -5217,10 +5336,26 @@ function DmThread({ conversationId, peerId, onBack }) {
         chunksRef.current = [];
         if (cancelRef.current || blob.size === 0) return;
         if (dur < 0.4) { setMicError('Too short. Hold to record a little longer.'); return; }
+        // Same instant-render path as team chat — see the comment there.
+        const tempId = `pending-${uid()}`;
+        const localUrl = URL.createObjectURL(blob);
+        setItems(prev => [...prev, {
+          id: tempId, senderId: userId, body: null, audioPath: null, audioDuration: dur,
+          createdAt: nowISO(), pending: true, localUrl,
+        }]);
         try {
           const created = await directMessagesApi.sendVoice(conversationId, blob, dur, ct);
-          setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
-        } catch (e) { console.error('DM voice send failed:', e); setMicError('Failed to send voice note.'); }
+          rememberLocalAudio(created.audioPath, localUrl);
+          setItems(prev => {
+            const rest = prev.filter(m => m.id !== tempId);
+            return rest.some(m => m.id === created.id) ? rest : [...rest, created];
+          });
+        } catch (e) {
+          console.error('DM voice send failed:', e);
+          URL.revokeObjectURL(localUrl);
+          setItems(prev => prev.filter(m => m.id !== tempId));
+          setMicError('Failed to send voice note.');
+        }
       };
       mrRef.current = mr;
       startRef.current = Date.now();
@@ -5516,9 +5651,12 @@ function MembersView() {
             const canModify = !isSelf && !isLastOwner && (myRank >= 3 ? true : (myRank >= 2 ? targetRank < 2 : false));
             return (
               <div key={m.userId} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/[0.02]">
-                <div className="min-w-0">
-                  <div className="text-sm text-white/90 truncate">{m.displayName || m.email}{isSelf && <span className="text-white/40"> (you)</span>}</div>
-                  <div className="text-[11px] text-white/40 truncate">{m.email}</div>
+                <div className="min-w-0 flex items-center gap-2.5">
+                  <Avatar name={m.displayName || m.email} userId={m.userId} photoUrl={m.avatarUrl} size={32} />
+                  <div className="min-w-0">
+                    <div className="text-sm text-white/90 truncate">{m.displayName || m.email}{isSelf && <span className="text-white/40"> (you)</span>}</div>
+                    <div className="text-[11px] text-white/40 truncate">{m.email}</div>
+                  </div>
                 </div>
                 <div className="shrink-0 flex items-center gap-2">
                   {!isSelf && (
