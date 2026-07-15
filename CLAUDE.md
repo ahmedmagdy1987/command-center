@@ -1,8 +1,10 @@
 # Command Center — project guide for Claude
 
 > Orientation file so any future session is instantly up to speed. Last verified against the
-> live DB on **2026-07-12** — current through `20260712130915` (pin_tasks_created_by_immutable_on_update);
-> **task file attachments** shipped the same day (see *Task attachments*). The
+> live DB on **2026-07-15** — current through `20260715142424` (task_attachment_sweep_age_guard);
+> **task file attachments** shipped 2026-07-12 (see *Task attachments*). Two production bugs were found
+> and fixed on 2026-07-15 — a live self-service **impersonation** hole and an orphan sweep that could
+> **delete live uploads**; see *Bug-fix pass (2026-07-15)*. The
 > 9ffaa42 security pass is fully CLOSED OUT: security headers + `.gitignore` verified live, the hardening
 > migration was already applied 2026-07-01, and the repo filename was reconciled to the ledger in `6ec6f95`. Public
 > sign-up is **OPEN** (`SIGNUP_ENABLED = true`). Tenant isolation is proven by rolled-back impersonation
@@ -53,20 +55,35 @@
   derived from the legacy `owner` (the app dropped `owner` entirely in 2B-2; DB column dropped in 2C).
 - `src/lib/supabase.js` — the client (persistSession, autoRefreshToken, realtime 10 eps).
 
-## People (the one workspace today)
+## People (3 workspaces live)
 
-Workspace **"Command Center"** — id `11111111-1111-1111-1111-111111111111`, **3 members**, all in it:
+> **CORRECTED 2026-07-15 — this table used to be WRONG, and it mattered.** It listed the **vestigial
+> `members.role`** column (which reads owner/owner/member) as if it were the authority. The real authority is
+> **`workspace_members.role`**, and it says something different: **the VA is an `admin`, not a `member`, and
+> Ahmed Magdy is an `admin`, not an `owner`.** Read back from the live DB and re-proven under impersonation.
 
-| Who | Email | `members.role` | Notes |
-|-----|-------|----------------|-------|
-| **Tony** | ciorciaritony@gmail.com | `owner` | The real human owner; `workspaces.owner_id`. id `1745dca1-…d22c5`. |
-| **Ahmed Magdy** | ahmedkassim157@gmail.com | `owner` | **Test owner account.** id `cdbcc2e5-…b98f909`. |
-| **VA** | ahmedkassim17777@gmail.com (display_name "Ahmed") | `member` | The VA. id `0598a0bc-…d42a12d`. |
+Workspace **"Command Center"** — id `11111111-1111-1111-1111-111111111111`, **3 members**:
 
-Authorization is **per-workspace** via `workspace_members.role` — now a four-rung ladder
-**owner > admin > member > guest** (the global `members.role` is vestigial, profile-only). The three live
-people are unchanged (Tony & Ahmed Magdy = `owner`, VA = `member`); admin/guest exist in the model and are
-exercised by the rolled-back proofs. See *Workspace roles, mentions & guest UX*.
+| Who | Email | **`workspace_members.role`** (authority) | `members.role` (vestigial) | Notes |
+|-----|-------|------------------------------------------|-----------------------------|-------|
+| **Tony** | ciorciaritony@gmail.com | **`owner`** | `owner` | The real human owner; `workspaces.owner_id`. id `1745dca1-…d22c5`. |
+| **Ahmed Magdy** | ahmedkassim157@gmail.com | **`admin`** | `owner` | Test account. **NOT an owner of this workspace.** id `cdbcc2e5-…b98f909`. |
+| **VA** | ahmedkassim17777@gmail.com (display_name "Ahmed") | **`admin`** | `member` | The VA. id `0598a0bc-…d42a12d`. |
+
+Two other workspaces exist: **"ahmed"** (`f1d15518-…`; VA = `owner`, Ahmed Magdy = `member`) and **"amego"**
+(`016db12d-…`; qassemmenna14 = `owner`) — the outsider tenant the isolation proofs impersonate.
+
+**What the VA's `admin` actually grants (proven live under impersonation, rolled back):** edit **and delete
+ANY task in the workspace** — including tasks they neither created nor are assigned to (the documented
+`member` rule is own/assigned only, so the docs understated the VA's power) — plus delete projects, invite
+people, and manage members below admin. **The ladder itself is intact and correctly bounded:** the VA still
+cannot promote themselves to `owner` and cannot remove Tony (both `42501`). Nothing is broken — but if
+`member` was the intent for the VA, that's a live role to change via `set_member_role`, not a doc edit.
+**Tony's call.**
+
+Authorization is **per-workspace** via `workspace_members.role` — a four-rung ladder
+**owner > admin > member > guest** (the global `members.role` is vestigial, profile-only — never read it for
+authz, and never write this table from it again). See *Workspace roles, mentions & guest UX*.
 
 ## Data model (13 base tables)
 
@@ -92,9 +109,11 @@ public/anon). Live in the **`private`** (non-PostgREST/non-API) schema so they d
 - `private.shares_workspace(target_user uuid) → bool` — caller shares a workspace with target. Powers
   members' co-worker visibility.
 - `private.is_workspace_owner(ws_id uuid) → bool` — caller is an **owner** of that workspace
-  (`workspace_members.role='owner'`). The per-workspace owner gate (Phase 3B-2, migration `…100320`);
-  used by `projects_delete_owner`. Implies membership, so it stands alone — replaced the old global
-  `members.role` check.
+  (`workspace_members.role='owner'`). Introduced as the per-workspace owner gate (Phase 3B-2, migration
+  `…100320`) to replace the old global `members.role` check. **Now VESTIGIAL — verified live 2026-07-15:
+  it gates NOTHING.** Zero policies and zero functions reference it; the roles migration (`…103433`) moved
+  every gate to `private.workspace_role_rank`. It still exists and still works; just don't reach for it —
+  new gates use rank (owner 3 · admin 2 · member 1 · guest 0).
 - `private._create_workspace(p_name text) → public.workspaces` (Phase 3B-3, migration `…143755`) — the
   privileged body of the workspace-creation RPC. Same hardening, but it WRITES: creates one workspace
   owned by `auth.uid()` + one `workspace_members` row making the caller its `'owner'` (owner/member are
@@ -102,7 +121,8 @@ public/anon). Live in the **`private`** (non-PostgREST/non-API) schema so they d
   the thin SECURITY INVOKER passthrough `public.create_workspace(p_name)` — the DEFINER body stays in
   `private` (so it doesn't trip the advisor) and the public wrapper is invoker (so it doesn't either).
 - `private._project_task_count(p_project_id text, p_workspace_id uuid) → int` (Bundle 3, migration
-  `…024124`) — owner-gated (`is_workspace_owner`, else raises `42501`) RELIABLE count of a project's tasks,
+  `…024124`) — **owner+admin**-gated (`workspace_role_rank >= 2`, else raises `42501`; re-pointed off
+  `is_workspace_owner` by the roles migration so it still matches the delete policy it guards) RELIABLE count of a project's tasks,
   bypassing the caller's RLS blind spots so the app can **block** deleting a project that still holds tasks
   (incl. other members' private tasks the deleter can't see). Exposed as the SECURITY INVOKER passthrough
   `public.project_task_count(p_project_id, p_workspace_id)` — same Option-B advisor-clean shape as
@@ -134,8 +154,13 @@ or grant). Direct inserts are denied (verified); all creation goes through the R
   stamps `workspace_id` from the inserter's membership when NULL.
 - ~~`tasks_align_privacy`~~ — **trigger DROPPED in Phase 2A**: privacy is no longer derived from `owner`
   (the two dimensions are now independent). The function is orphaned (dropped in 2C).
-- `members_lock_role` (BEFORE UPDATE on members) → blocks ANY `role` change via UPDATE (closes
-  self-promotion to owner). Owner-managed role changes are a later phase.
+- `members_lock_identity` (BEFORE UPDATE on members; **replaced `members_lock_role` on 2026-07-15**,
+  migration `…142400`) → makes `id` / `email` / `created_at` / `role` **immutable** (raises `42501`).
+  `members_update_self` is column-agnostic (it pins the ROW, not the COLUMNS), and RLS structurally
+  cannot express "email unchanged" because a `WITH CHECK` only ever sees the NEW row — so this trigger
+  is the authoritative control, backed by a least-privilege `UPDATE (display_name)` column grant as an
+  independent second layer. **`display_name` is the only column a user may ever write on their own
+  profile row**; a profile UI adding fields must extend that grant deliberately. See *Bug-fix pass*.
 - `notify_on_task_assigned` (AFTER INSERT OR UPDATE OF assignee_id on tasks; **replaced
   `notify_on_task_created` in Phase 2B-1**) → on create, or when `assignee_id` changes, notify the
   **assignee** — unless the assignee is the acting user (`auth.uid()`).
@@ -175,6 +200,9 @@ clear the advisor. No app change; identical behavior for the single-workspace te
 (backfill + NOT NULL + auto-stamp trigger) and membership-gated policies (owner-only delete preserved).
 Added `private.shares_workspace`; gave `members` self-or-shared SELECT, self-only INSERT/UPDATE, and
 the `members_lock_role` trigger. DB-only; no app change.
+*(Both details are now SUPERSEDED — this paragraph is the historical record, not current state: project
+delete is **owner+admin** since the roles migration, and `members_lock_role` became
+`members_lock_identity` on 2026-07-15. See* Project delete is owner+admin *and* Bug-fix pass.*)
 
 **Phase 3B-1 — make the app workspace-aware** (`880fc8a`). First app-code change for tenancy:
 - `AppProvider` resolves the active workspace **before any query/sub**. Precedence: `?ws=` (if a
@@ -201,6 +229,8 @@ for letting a new signup create a workspace and be its owner.
   `projects_delete_owner` from the global-`members.role` EXISTS check to
   `private.is_workspace_owner(workspace_id)`. Nothing else changed; `members.role` + `members_lock_role`
   left as-is (now vestigial for authz).
+  *(Historical: BOTH names are gone today — `projects_delete_owner` → `projects_delete_admin` (rank ≥ 2)
+  and `members_lock_role` → `members_lock_identity`. `is_workspace_owner` itself is now vestigial too.)*
 - **App:** `workspaceMembers.listMine()` reads the caller's `{workspaceId, role}` rows (RLS
   `workspace_members_select_self` self-scopes); `AppProvider` derives `myRole` / `isOwner` / `isMember`
   from the membership row for the **current** workspace, recomputed on switch. Role-aware UI is gated
@@ -354,22 +384,26 @@ now passes `currentWorkspaceId` to `list()`. (Notifications realtime stays INSER
 cross-device; left as a separate realtime task.)
 
 **Projects add / delete / rename — Bundle 3** (`ef5b1c8` DB + `223155f` app). Projects were list-only; now
-**members create + rename/recolor** and **owners delete**, all RLS-enforced by the Phase-3A policies
-(`projects_insert_member` / `projects_update_member` / `projects_delete_owner` — the last re-pointed to
-`is_workspace_owner` in 3B-2). No new CRUD migration; the only DB change is the deletion-gate RPC.
+**members create + rename/recolor** and **owners+admins delete**, all RLS-enforced by the projects policies
+(`projects_insert_member` / `projects_update_member` / **`projects_delete_admin`**). No new CRUD migration;
+the only DB change is the deletion-gate RPC. **Delete is owner OR admin** (`workspace_role_rank >= 2`) since
+the roles migration — Bundle 3 shipped it as `projects_delete_owner`/`is_workspace_owner`, and both that
+policy name and that gate are gone. Verified live 2026-07-15.
 - **`tasks.project` is FREE-TEXT** (`text NOT NULL`, holds the project **id** slug, e.g. `personal`/`other`)
   with **NO FK** to `projects`. So deleting a project strands nothing at the DB layer; the UI resolves a task's
   project via `projects.find(p => p.id === task.project)` and degrades gracefully (the chip just disappears,
   no crash) when the id no longer resolves.
 - **Deletion model = BLOCK-if-has-tasks**, counted reliably via the **`project_task_count` RPC** (see Private
-  helper fns). A frontend/owner-RLS count would be UNRELIABLE — an owner can't see another member's private
+  helper fns). A frontend/RLS count would be UNRELIABLE — a deleter can't see another member's private
   tasks in a project, so a naive count could delete-and-strand them; the DEFINER RPC counts ALL workspace
-  tasks. The delete `ConfirmModal` fetches the count on open and **disables confirm** ("move N tasks first")
+  tasks. The RPC's gate (`rank >= 2`) deliberately **matches** the delete policy's, so the count never throws
+  for someone who is allowed to delete. The delete `ConfirmModal` fetches the count on open and **disables confirm** ("move N tasks first")
   when >0; only an empty project deletes (two-phase `fadeSlideOut`, local `exitingProjectIds`).
 - **api.js `projects`** gained `create({name,color,icon}, ws)`, `update(id, patch)`, `delete(id)`,
   `taskCount(id, ws)`. New `ProjectModal` (name / color swatch / icon) drives create + edit; `ProjectsView`
-  has a "+ New project" (member), per-card owner-only delete + member inline edit. `ConfirmModal` gained a
-  backward-compatible `confirmDisabled` prop.
+  has a "+ New project" (member), per-card **owner/admin** delete + member inline edit. `ConfirmModal` gained a
+  backward-compatible `confirmDisabled` prop. (The UI gate at `ProjectsView` is `(isOwner || isAdmin)` and
+  correctly matches `projects_delete_admin`; it was only ever the docs that said owner-only.)
 - **sanitize.js clamp relaxed (REQUIRED):** `sanitizeTask` no longer clamps `task.project` to a hardcoded
   9-id whitelist — it accepts any non-empty id, keeps `migrateProjectId` for legacy, and defaults `'other'`
   only when blank. Without this, a task filed under a newly-created project id was silently coerced to
@@ -448,17 +482,19 @@ For a true behavior-preservation proof, also run a temporary **second-workspace 
   `tasks.bulkDelete()` reachable by ANY member via the command palette, deleting across every workspace the
   caller could under RLS) was removed after it wiped live data. Only id-scoped per-task delete remains. Don't
   reintroduce a bulk delete without: **workspace-scoping** (`.eq('workspace_id', …)`, never match-all),
-  **owner-only + DB enforcement** (a `SECURITY DEFINER` RPC gated on `is_workspace_owner`), and a
+  **owner-only + DB enforcement** (a `SECURITY DEFINER` RPC gated on `private.workspace_role_rank(ws) = 3`), and a
   **typed-confirmation modal** (never one-click / native `confirm()` / an always-on palette command).
 - **Policy naming:** `<table>_<verb>_<qualifier>` (e.g. `tasks_select_workspace_or_own_private`,
-  `projects_delete_owner`). `to authenticated`. Keep advisor-clean: wrap auth calls as
+  `projects_delete_admin`). `to authenticated`. Keep advisor-clean: wrap auth calls as
   `(select auth.uid())` so they're evaluated once (avoids the `auth_rls_initplan` perf advisor).
 - **SECURITY DEFINER helpers** live in the **`private`** schema, `search_path=''`, EXECUTE to
   `authenticated` only (revoked from public/anon) — keeps them off the API and advisor-clean.
-- **Authorization is per-workspace, not global.** Owner-gated logic keys off
-  `private.is_workspace_owner(workspace_id)` (DB) and the current workspace's `workspace_members.role`
-  (app) — **never** the global `members.role` (vestigial since 3B-2). The app reads global `members`
-  only for profile (email/display_name).
+- **Authorization is per-workspace, not global.** Role-gated logic keys off
+  **`private.workspace_role_rank(workspace_id)`** (DB — owner 3 · admin 2 · member 1 · guest 0) and the
+  current workspace's `workspace_members.role` (app) — **never** the global `members.role` (vestigial
+  since 3B-2), and no longer `is_workspace_owner` (itself vestigial since the roles migration; it gates
+  nothing live). The app reads global `members` only for profile (email/display_name), and since
+  2026-07-15 may only ever WRITE `members.display_name` (see *Bug-fix pass*).
 - **Trigger functions hardened:** `search_path=''` + EXECUTE revoked from public/anon/authenticated —
   now uniform across all DEFINER trigger fns (the former outliers are gone: `tasks_align_privacy`'s
   trigger was dropped in 2A, and `notify_on_task_created`'s `search_path=public` quirk was retired in
@@ -543,6 +579,55 @@ Files on a task (briefs, deliverables, images, docs). Three DB migrations + a cl
   authorize it) then the row. Client MIME/size/count checks are UX only — the server RLS/bucket is authoritative.
 - **Proven:** feasibility A-E 14/14 (delegation matrix + happy path + outsider blocks); quotas (size, per-task
   20, rate 60 delete-resistant); orphan sweep 5/5; regression isolation 36/36 + role 40/40 + storage 14/14.
+
+## Bug-fix pass (2026-07-15) — two production bugs
+
+Found while scoping a UX batch; fixed ahead of it, with the full discipline (recon → rolled-back proof →
+apply-if-green → advisors → baseline → migration file). Both DB-only. Advisors clean; per-user baseline
+unchanged (Tony 24/6/11/2 · Ahmed Magdy 0/6/11/6 · VA 0/6/11/7 · outsider 0/0/0/0).
+
+- **BUG A — live impersonation** (`20260715142400`, `2684b6e`). `members_update_self` is **column-agnostic**:
+  `USING`/`WITH CHECK` are both just `id = (select auth.uid())`, which pins WHICH ROW you may update but not
+  WHICH COLUMNS — and `authenticated` also held a **table-wide UPDATE grant**. So any signed-in user could
+  rewrite their own `members.email`, which is **the identity display fallback throughout the UI**. Reproduced
+  live (rolled back): the VA set their own email to `ciorciaritony@gmail.com.evil.test` and it stored.
+  **RLS structurally cannot fix this** — a `WITH CHECK` only ever sees the NEW row, so it cannot compare
+  `new.email` to `old.email`. Fix = two independent layers: the `members_lock_identity` BEFORE UPDATE trigger
+  (id/email/created_at/role immutable, `42501`; supersedes and drops `members_lock_role`) **+** a
+  least-privilege `revoke update … / grant update (display_name)` column grant. **Proven 25/25 rolled-back +
+  14/14 live**, including a phase that deliberately re-grants the wide UPDATE to show the trigger still holds.
+  Zero-regression: the app has **no write path to `members` at all** (`api.js` only SELECTs, `:51`/`:58`);
+  signup is an INSERT via `handle_new_user`, untouched.
+  **→ Consequence for any future profile UI: `display_name` is the ONLY writable column.** Adding e.g.
+  `avatar_url` requires deliberately extending that grant. A future backend email-sync would need
+  `session_replication_role='replica'` to bypass the trigger (the trick the sweep already uses).
+- **BUG B — the orphan sweep could delete LIVE uploads** (`20260715142424`, `2684b6e`). The client uploads the
+  blob **first** and inserts the `task_attachments` row **second** (`api.js:977-981`, because the
+  storage-delete policy needs the metadata row to authorize a later delete), so an in-flight upload
+  legitimately has no metadata row. `_sweep_orphan_task_attachments` tested *only* "no metadata row" and
+  deleted it — and the metadata INSERT would then still succeed, leaving a **dangling row pointing at a
+  missing blob** (a permanently broken attachment, worse than the orphan the sweep exists to collect). The
+  window widens with large files (25 MB cap) and slow connections. Fix: `and o.created_at < now() - interval
+  '1 hour'`. **Proven 17/17 rolled-back** (age-0s upload destroyed before / survives after; 59-vs-61-minute
+  boundary; 61-minute orphan still collected; linked objects never touched; DEFINER/`search_path` hardening
+  and the pg_cron schedule survive `CREATE OR REPLACE`).
+
+**Proof-methodology note (reusable).** `postgres` on this project has **`rolbypassrls = true`**, so any proof
+that forgets `set local role authenticated` silently bypasses RLS and proves nothing. Every proof here opens
+with self-validating controls — `current_user='authenticated'`, `auth.uid()` wired, and a known-denied write
+returning `rows=0` — before asserting anything else. `begin; … select …; rollback;` in one `execute_sql` call
+returns the result set *and* rolls back cleanly.
+
+## Project delete is owner+admin (doc correction, 2026-07-15)
+
+CLAUDE.md, `ROLES_AND_PERMISSIONS.md` §1.2 and two `api.js` comments claimed project delete was **owner-only**
+via `projects_delete_owner` / `is_workspace_owner`. **Both names are gone.** Live truth (re-read from
+`pg_policy`): **`projects_delete_admin` → `private.workspace_role_rank(workspace_id) >= 2` = owner OR admin**,
+and `private._project_task_count` (the delete gate) matches at `rank >= 2`, so the count never throws for
+someone allowed to delete. The **frontend was already correct** (`ProjectsView` gates on `(isOwner || isAdmin)`,
+and the delete modal fails **closed** — `blocked = deleteCount === null || deleteCount !== 0`, so a failed count
+blocks). Only the docs were stale. **`private.is_workspace_owner` is now fully vestigial — verified live: zero
+policies and zero functions reference it.** Gate on rank.
 
 ## Final comprehensive audit + fixes (2026-07-12) — see [`SECURITY_AUDIT_2026-07-12.md`](SECURITY_AUDIT_2026-07-12.md)
 

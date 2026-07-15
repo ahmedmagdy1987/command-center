@@ -226,16 +226,17 @@ export const projects = {
     return data;
   },
 
-  /** Delete a project. RLS projects_delete_owner gates to the workspace owner. */
+  /** Delete a project. RLS projects_delete_admin gates to workspace_role_rank >= 2 (owner or admin). */
   async delete(id) {
     const { error } = await supabase.from('projects').delete().eq('id', id);
     if (error) throw error;
   },
 
   /**
-   * Owner-only reliable count of a project's tasks via the project_task_count RPC (a SECURITY
+   * Owner/admin-only reliable count of a project's tasks via the project_task_count RPC (a SECURITY
    * DEFINER count that bypasses the caller's RLS blind spots, so a project with another member's
-   * private tasks can't be deleted-and-stranded). Throws for non-owners.
+   * private tasks can't be deleted-and-stranded). Gated on workspace_role_rank >= 2 to match the
+   * projects_delete_admin policy it guards; throws 42501 below that rank.
    */
   async taskCount(projectId, workspaceId) {
     const { data, error } = await supabase.rpc('project_task_count', { p_project_id: projectId, p_workspace_id: workspaceId });

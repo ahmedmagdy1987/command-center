@@ -4006,7 +4006,7 @@ function ProjectsView() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteCount, setDeleteCount] = useState(null); // null = checking, -1 = error, >=0 = count
 
-  // On a delete request, fetch the reliable (owner-only, RLS-blind-spot-free) task count.
+  // On a delete request, fetch the reliable (owner/admin-gated, RLS-blind-spot-free) task count.
   // deleteCount is reset to null by the open/close handlers (not here), to avoid sync setState in an effect.
   useEffect(() => {
     if (!deleteTarget) return;
