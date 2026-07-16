@@ -1,6 +1,9 @@
 -- ============================================================================
 -- WORKSPACE-ROLE BOUNDARY PROOF — CORRECTED  (owner > admin > member > guest)
--- 138 assertions. Rolled back. Verified green against nqlzjuxqgajeoypyzlnv.
+-- 143 assertions. Rolled back. Verified green against nqlzjuxqgajeoypyzlnv.
+-- (138 + the 5 added on 2026-07-15 when C04 was inverted: C04b..C04f, covering the guest
+--  privacy/assignee pin and the two-step UPDATE bypass. Keep this count in sync — the run's own
+--  completeness guard is what actually enforces it.)
 --
 -- Corrections vs the reviewed 125-assertion version (all verified live):
 --   FIX 1  Harness impersonation guard. probe/probe_val/probe_msg refuse to run unless

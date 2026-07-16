@@ -102,17 +102,14 @@ const STATUSES = {
   done:      { id: 'done',      label: 'Done',      hint: 'Completed' },
 };
 
-const DEFAULT_PROJECTS = [
-  { id: 'social',   name: 'Social Media', color: '#a78bfa', icon: '☉' },
-  { id: 'blogs',    name: 'Blogs',        color: '#f472b6', icon: '✎' },
-  { id: 'seo',      name: 'SEO',          color: '#38bdf8', icon: '◎' },
-  { id: 'outreach', name: 'Outreach',     color: '#34d399', icon: '↗' },
-  { id: 'assets',   name: 'Assets',       color: '#fb923c', icon: '◈' },
-  { id: 'personal', name: 'Personal',     color: '#f43f5e', icon: '♡' },
-  { id: 'website',  name: 'Website',      color: '#facc15', icon: '◐' },
-  { id: 'tools',    name: 'Tools',        color: '#94a3b8', icon: '⚙' },
-  { id: 'other',    name: 'Other',        color: '#64748b', icon: '◇' },
-];
+// DEFAULT_PROJECTS used to be substituted whenever a workspace had ZERO projects
+// (`setProjects(p.length ? p : DEFAULT_PROJECTS)`), which meant an empty workspace rendered NINE
+// phantom projects backed by no DB row: ProjectsView listed them, task chips resolved against them,
+// and clicking delete on one raised 42704 with no UI path out. It also made the real "No projects
+// yet" empty state below unreachable dead code. Removed 2026-07-16 — the client now shows exactly
+// what the DB holds. Note `tasks.project` still DEFAULTs to 'other' and sanitizeTask still coerces
+// blank -> 'other', and no 'other' project row exists in any workspace, so such a task simply
+// renders no chip (`projects.find(...)` -> undefined). That is the intended graceful degradation.
 
 // Palette + glyphs offered when creating/editing a project.
 const PROJECT_PALETTE = ['#a78bfa','#f472b6','#38bdf8','#34d399','#fb923c','#f43f5e','#facc15','#94a3b8','#64748b','#22d3ee','#c084fc','#4ade80'];
@@ -217,7 +214,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   const navigate = useNavigate();
   const userId = session?.user?.id;
   const [tasks, setTasks] = useState([]);
-  const [projects, setProjects] = useState(DEFAULT_PROJECTS);
+  const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState('connecting');
 
@@ -396,13 +393,13 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     (async () => {
       setLoading(true);
       setTasks([]);                  // clear so a switch doesn't flash the previous workspace's data
-      setProjects(DEFAULT_PROJECTS);
+      setProjects([]);
       setWorkspaceStats(null);
       try {
         const [t, p, s] = await Promise.all([tasksApi.list(currentWorkspaceId), projectsApi.list(currentWorkspaceId), tasksApi.stats(currentWorkspaceId).catch(() => null)]);
         if (!mounted) return;
         setTasks(t);
-        setProjects(p.length ? p : DEFAULT_PROJECTS);
+        setProjects(p);
         setWorkspaceStats(s);
       } catch (err) {
         console.error('Failed to load:', err);
@@ -509,7 +506,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       const [t, p] = await Promise.all([tasksApi.list(ws), projectsApi.list(ws)]);
       if (currentWorkspaceIdRef.current !== ws) return;   // a switch raced us — drop the stale result
       setTasks(t);
-      setProjects(p.length ? p : DEFAULT_PROJECTS);
+      setProjects(p);
       setSyncStatus('live');
     } catch (e) {
       console.error(`Reconcile (${reason}) failed:`, e);
@@ -633,7 +630,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       await projectsApi.update(id, patch);
     } catch (err) {
       console.error('Update project failed:', err);
-      projectsApi.list(currentWorkspaceId).then(p => setProjects(p.length ? p : DEFAULT_PROJECTS)).catch(() => {});
+      projectsApi.list(currentWorkspaceId).then(p => setProjects(p)).catch(() => {});
       showToast("Couldn't save the project change — reverted.");
     }
   }, [currentWorkspaceId, showToast]);
@@ -645,7 +642,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       setExitingProjectIds(p => { const n = new Set(p); n.delete(id); return n; });
       projectsApi.delete(id).catch(err => {
         console.error('Delete project failed:', err);
-        projectsApi.list(currentWorkspaceId).then(p => setProjects(p.length ? p : DEFAULT_PROJECTS)).catch(() => {});
+        projectsApi.list(currentWorkspaceId).then(p => setProjects(p)).catch(() => {});
         showToast("Couldn't delete the project — it's back in the list.");
       });
     };
