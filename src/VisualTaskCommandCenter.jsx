@@ -3473,6 +3473,12 @@ function TopBar() {
  * avatar) so a rejection surfaces inline. Avatar uploads to the caller's own folder in the public avatars
  * bucket and stores the resulting public URL. refreshCurrentMember() re-syncs the top bar after saving.
  */
+/** Status emojis offered by the profile picker. Every entry is verified against the server's emoji-only
+ *  rule (members_validate_profile: no letters/digits, no letter-like symbols — checked live, 32/32 accept),
+ *  and the picker is the ONLY way to set status_emoji, so the client can never submit a value the DB rejects. */
+const STATUS_EMOJIS = ['🟢','🟡','🔴','🔵','⚪','🔥','☕','🎯','✅','🚀','💡','📌','🛠️','💻','📞','🎧',
+  '🧠','⏳','🌴','🏖️','🤒','🚗','🍕','🌙','⚡','✨','🎉','👀','💬','📚','🏃','😴'];
+
 function ProfileModal({ onClose }) {
   const { currentMember, refreshCurrentMember } = useApp();
   const [displayName, setDisplayName] = useState(() => currentMember?.display_name || '');
@@ -3482,6 +3488,7 @@ function ProfileModal({ onClose }) {
   const [avatarUrl, setAvatarUrl] = useState(() => currentMember?.avatar_url || null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const fileRef = useRef(null);
   const panelRef = useRef(null);
   useEffect(() => { setTimeout(() => panelRef.current?.focus(), 30); }, []);
@@ -3535,12 +3542,33 @@ function ProfileModal({ onClose }) {
             className="w-full h-9 px-3 mb-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-violet-400/50" />
 
           <label className="block text-[11px] text-white/50 mb-1">Status</label>
-          <div className="flex gap-2 mb-3">
-            <input value={statusEmoji} onChange={e => setStatusEmoji(e.target.value)} maxLength={16} placeholder="🟢" aria-label="Status emoji"
-              className="w-14 h-9 px-2 rounded-xl bg-white/5 border border-white/10 text-sm text-white text-center outline-none focus:border-violet-400/50" />
+          <div className="flex gap-2 mb-2">
+            <button type="button" onClick={() => setEmojiOpen(o => !o)} aria-expanded={emojiOpen} aria-label="Pick a status emoji"
+              className={cx('w-14 h-9 rounded-xl border flex items-center justify-center text-base transition-colors',
+                emojiOpen ? 'border-violet-400/50 bg-violet-500/10' : 'border-white/10 bg-white/5 hover:bg-white/10')}>
+              {statusEmoji || <Plus className="w-3.5 h-3.5 text-white/40" />}
+            </button>
             <input value={statusText} onChange={e => setStatusText(e.target.value)} maxLength={80} placeholder="What are you up to?" aria-label="Status text"
               className="flex-1 h-9 px-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-violet-400/50" />
           </div>
+          {/* An INLINE grid, not a floating popover: the modal panel is overflow-y-auto, which would clip an
+              absolutely-positioned one. Picking is the only input path — the server accepts emoji only, so a
+              free-text field was never a valid way to set this. */}
+          {emojiOpen && (
+            <div className="mb-3 p-2 rounded-xl border border-white/10 bg-black/30">
+              <div className="grid grid-cols-8 gap-1">
+                {STATUS_EMOJIS.map(em => (
+                  <button key={em} type="button" onClick={() => { setStatusEmoji(em); setEmojiOpen(false); }} aria-label={`Status emoji ${em}`}
+                    className={cx('h-8 rounded-lg text-base hover:bg-white/10 transition-colors',
+                      statusEmoji === em && 'bg-violet-500/20 ring-1 ring-violet-400/50')}>{em}</button>
+                ))}
+              </div>
+              {statusEmoji && (
+                <button type="button" onClick={() => { setStatusEmoji(''); setEmojiOpen(false); }}
+                  className="mt-1.5 w-full h-7 rounded-lg text-[11px] text-white/50 hover:text-rose-300 hover:bg-white/5 transition-colors">Clear emoji</button>
+              )}
+            </div>
+          )}
 
           <label className="block text-[11px] text-white/50 mb-1">Bio</label>
           <textarea value={bio} onChange={e => setBio(e.target.value)} maxLength={280} rows={3}
