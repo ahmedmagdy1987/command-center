@@ -1,70 +1,84 @@
-# HANDOFF — scale/perf pass (as of 2026-07-14)
+# HANDOFF — UX batch (part 3) — as of 2026-07-16
 
-> Written right before a Deep Freeze wipe. Everything below is pushed to GitHub (safe). The Supabase DB is
-> in the cloud (safe). **Local code / `.env` / tools are wiped — follow [`RESTORE.md`](RESTORE.md) first.**
-> Read this + [`SCALE_AUDIT.md`](SCALE_AUDIT.md) to resume instantly.
+> Orientation for resuming the UX batch. Everything is on **`feat/ux-batch-part3`** — **nothing is merged
+> to `main`** and (as of this handoff) the batch's DB migrations are **designed + proven but NOT yet applied**.
+> The Supabase DB is safe in the cloud; local code is not (Deep Freeze) — after a wipe follow
+> [`RESTORE.md`](RESTORE.md) first, then read this.
 
-## Branch topology (nothing is merged to `main`)
+## Branch topology (nothing merged to `main`)
 
-| Branch | Tip | What's on it | Status |
-|--------|-----|--------------|--------|
-| **`main`** | `6a6e608` | production (Vercel auto-deploys from it). **Untouched — no scale work merged.** | live |
-| **`perf/scale-robustness-pass`** | `c28d047` | The **6 frontend fixes** (`356bd95`: context memo, ProjectsView O(n), reconnect reconcile, DM debounce, write-failure toasts, ProjectModal minimal-patch) + the applied DB migration **files** (composite indexes, 5a CHECKs, 5b notif-unread RPC) + `SCALE_AUDIT.md`. | **verify → merge FIRST** |
-| **`perf/scale-part2`** | `805cffd` | Branched from robustness-pass. Adds **A11** (notif clear-on-switch), **A17** (comment double-submit guard), **5c** (chat/DM load-older pagination), the **5b `workspace_task_stats` + 5d `search_messages` (tsvector+GIN)** migration files, and the **UI wiring** (palette search, unread badge, dashboard progress). | verify → merge AFTER part1 |
+| Branch | What's on it | Status |
+|--------|--------------|--------|
+| **`main`** | production (Vercel auto-deploys from it). Untouched by this batch. | live |
+| **`feat/ux-batch-part3`** | the UX batch — committed work (below) + the pending items 1–5. | working tip |
 
-`perf/scale-part2` is the working tip and contains everything. Resume there.
+**Committed on the branch** (tip `0c96e41`): waveform voice notes + one default avatar (`9cca0f0`); members
+identity-column lock + orphan-sweep age guard (`2684b6e`); roles-docs correction + committed isolation/role
+proofs (`a4a008a`); guest-can't-board-workspace-tasks fix (`eabdf1f`); DM delete-for-me hides + monotonic read
+cursor + tasks jsonb server-side hardening (`0c96e41`).
 
-## DB state (LIVE on Supabase `nqlzjuxqgajeoypyzlnv` — survives the wipe)
+## The UX batch — items 1–5 (designed + PROVEN via rolled-back proofs; awaiting apply)
 
-All applied + proven this pass (rolled-back proofs; DB restored byte-for-byte after every fixture):
-- `20260713175541_scale_hot_path_composite_indexes` — before/after EXPLAIN at volume; advisors clean.
-- `20260713180216_server_side_text_length_checks` — 5a; 9 CHECK constraints.
-- `20260713180526_notifications_unread_count_rpc` — 5b unread; proven 3/3.
-- `20260713205334_message_search_tsvector_rpc` — 5d; re-proven on the SHIPPING body_tsv+GIN shape (member exact hits, guest 0, outsider 0, soft-deleted excluded).
-- `20260713205355_workspace_task_stats_rpc` — 5b stats; proven (member 11==11, guest 4==4, outsider 0).
+All DB work was proven with `begin; … rollback;` proofs against the live DB (harness guard + anti-vacuity
+guard + completeness guard; adversarially re-verified). **Nothing applied yet.**
 
-These are **backward-compatible**: indexes are invisible; CHECKs match the client caps; the three RPCs are
-**dormant until `perf/scale-part2` merges** (that's the code that calls them). Regression after applying: **42/42**
-isolation+role; storage/RLS surface intact. Confirm the ledger with the Supabase MCP `list_migrations`.
+1. **Project delete — cascade / unassign** (`public.delete_project` RPC). cascade (delete tasks + project) =
+   **owner-only (rank 3)** + typed-confirm modal; unassign (re-file tasks) = **owner+admin (rank 2)**. Both
+   scoped by `workspace_id` (the cross-tenant guard — shared free-text slugs like `personal`/`other`) AND by
+   `can_see_task` (GATE A — invisible private tasks untouched at every rank); project-existence guard blocks the
+   slug footgun. `projects_delete_admin` kept unchanged (143/143 F10 stays green). **Proof: 29/29** incl. the M8
+   "strip workspace_id → RED" demonstration. (`supabase/tests/project_delete_cascade_rolled_back_proof.sql`)
+2+3. **Profile + avatar + display_name hardening** (one migration, one roster-RPC recreate). Adds
+   `avatar_url`/`bio`/`status_text`/`status_emoji` to `members`; `members_validate_profile` trigger closes the
+   role-impersonation hole on `status_text`, `status_emoji`, and `display_name` (fullwidth/mathematical/
+   zero-width/spacing/literal role words via `private._looks_like_role_title`); `handle_new_user` sanitizes the
+   OAuth-derived name so **signup never fails**; extended `UPDATE` column grant (identity stays locked); roster
+   RPC recreated to expose the new fields (guest still gets NULL email+bio + row-scoping). **Proof: 38/38.**
+   (`supabase/tests/profile_and_avatar_rolled_back_proof.sql`) **Residuals (documented, out of scope):**
+   Cyrillic/Greek confusables + leetspeak (proof W08/W09 assert them allowed); `avatar_url` is https-only and a
+   tracking-pixel residual **until the storage-hosted avatars bucket lands in this batch** (then restricted to
+   the storage host).
+4. **Baseline + ledger-gap files + this HANDOFF** (docs/files only — see *Rebuild gaps* below).
+5. **Permanent proof files** — commit the rolled-back proofs for the new surfaces (project delete, profile,
+   DM hides, …) into `supabase/tests/` so a future change can't silently regress them.
 
-## ⛔ BLOCKING: Item 4 — frontend runtime verification (pending the owner)
+**Agreed apply order** (re-run **48/48** cross-tenant isolation + **143/143** role-boundary after EACH apply):
+**baseline (no-op) → project delete → profile+avatar+display_name recreate → proof files.**
 
-Neither branch is merged. `perf/scale-robustness-pass` merges to `main` (= production deploy) **only after** the
-owner runs this checklist on the live app and confirms it passes (`npm run dev` → sign in):
+## Rebuild gaps (honest — read before trusting a from-scratch rebuild)
 
-| # | Fix | Do | Expect |
-|---|-----|-----|--------|
-| 1 | Context memo | DevTools "Highlight updates" → type in QuickAdd / toggle a filter | only affected bits flash, not the whole board |
-| 2 | ProjectsView O(n) | Projects view; move a task between projects | counts/% correct + instant |
-| 3 | Reconnect reconcile | Board → Network Offline; edit a task elsewhere; go Online + tab away/back | board refetches the missed change; pill→"live" |
-| 4 | DM debounce | Send 5–6 DMs fast from another account | list re-summarize fires once ~400ms after the burst |
-| 5 | Write-failure toasts | Offline → edit/delete task, delete project, toggle subtask | toast + revert (no silent failure) |
-| 6 | ProjectModal minimal-patch | Edit a project; change ONLY color | only color written; name/icon untouched |
+The migration ledger does **not** fully reproduce the DB from zero. Known gaps:
 
-`perf/scale-part2` adds more frontend (A11/A17/5c + the RPC wiring) — verify those too before merging part2.
+1. **No original baseline `CREATE TABLE` exists.** `tasks` / `projects` / `members` were created directly on
+   Supabase **before the ledger began** — no hand-written script was ever written (confirmed with the owner).
+   `supabase/migrations/00000000000000_baseline.sql` is a **BEST-EFFORT RECONSTRUCTION** from the live schema,
+   rewound to the pre-ledger shape, **honesty-flagged inline** (`«?»`), and **never applied** (no-op live). It is
+   NOT a verified artifact — a real from-scratch rebuild must be validated **end-to-end** (DB password + owner
+   present). The original base RLS policies are unrecoverable (placeholders provided, superseded by Phase 2/3A).
+2. **`rls_auto_enable()` + the `ensure_rls` event trigger** (auto-enables RLS on new public tables) and the
+   **original `handle_new_user()`** are also pre-ledger/out-of-band. Their live definitions are exact but were
+   never in a migration file; the baseline includes best-effort copies (functions are later `CREATE OR REPLACE`d
+   by real migrations, so the final state is correct on replay).
+3. **Two ledger entries had no local file — now recovered.** `20260529185644` (the revoke-EXECUTE hardening) and
+   `20260529233941` (the **superseded** first version of the notifications migration; the corrected re-apply is
+   `…234347`, already in-repo) were pulled **verbatim** from `supabase_migrations.schema_migrations.statements`
+   and committed. The remote ledger's `…233941`/`…234347` duplicate is now represented in-repo.
 
-## Remaining open items (designed/flagged, not built)
+## DB change discipline (unchanged)
 
-1. **Filter-aware `workspace_task_stats`** — the current RPC is workspace-wide; the Dashboard's open/user-scoped
-   counts + Matrix's filter-scoped quadrants are NOT wired (would change numbers). Add assignee/privacy/project
-   filter params to wire them faithfully. (approval)
-2. **DM search RPC** (`search_dm_messages`, participant-gated) — to complete CommandPalette search (team chat is
-   done via `search_messages`; DM is still a client grep).
-3. **Team-chat unread cursor** — `chatUnread` is a session-local counter; a real server cursor needs a new
-   `chat_reads` table + a `chat_unread_count` RPC (mirror `dm_unread_counts`).
-4. **Render-perf memoization** — A4 DashboardView (~20 unmemoized passes), A14 ScheduleView (O(11·n)), A15
-   MyTasksView. Safe, pure refactors (same pattern already applied to Kanban/Matrix/Projects).
+Propose SQL → wait for approval → `apply_migration` → verify (preserve per-user baselines; re-run the isolation
++ role proofs; `get_advisors`) → **add the matching file to `supabase/migrations/`** (version from
+`list_migrations`) → commit + push. Migrations idempotent. Rolled-back proofs use `begin; … rollback;` with the
+`set local role authenticated` + `request.jwt.claims` harness (postgres has `rolbypassrls` — a proof that forgets
+the role switch proves nothing; every proof opens with a self-validating harness guard).
 
-## Exact next steps after the wipe
+## Exact next steps after a wipe
 
-1. **[`RESTORE.md`](RESTORE.md)**: toolchain → clone → git identity/TLS → `npm install` → launch `claude` from
-   inside the repo (loads `.mcp.json`) → recreate `.env` → auth the Supabase MCP.
-   - `.env` anon key: recover from the live bundle per RESTORE.md §5 (`sb_publishable_…` in `/assets/index-*.js`
-     at <https://tasks.opscommandcenter.com>). URL = `https://nqlzjuxqgajeoypyzlnv.supabase.co`.
-2. `git branch -a` → the work is on `perf/scale-part2` (tip) and `perf/scale-robustness-pass`. `git checkout perf/scale-part2`.
-3. Sanity: `npm run build` (clean), `npm run lint` (**12 errors / 2 warnings** baseline).
-4. **Item 4**: owner runs the checklist above → on pass, merge `perf/scale-robustness-pass` → `main` (deploys),
-   then verify + merge `perf/scale-part2`.
-5. Optionally pick up the remaining open items (filter-aware stats RPC + DM search need approval).
+1. [`RESTORE.md`](RESTORE.md): toolchain → clone → git identity/TLS → `npm install` → launch `claude` from inside
+   the repo (loads `.mcp.json`) → recreate `.env` → auth the Supabase MCP.
+2. `git checkout feat/ux-batch-part3`. Sanity: `npm run build`, `npm run lint`.
+3. Resume the UX batch: apply items 1–5 in the agreed order once the owner approves, re-running 48/48 + 143/143
+   after each apply. Then the app-side work (project-delete modal + RPC wiring; ProfileModal self-editor +
+   `members.updateProfile`; avatars bucket + storage-hosted avatar wiring).
 
-## Gates held all pass: build clean · lint 12/2 · advisors clean (only the accepted leaked-password WARN) · regression 42/42 · DB restored byte-for-byte.
+## CLAUDE.md is the durable project guide — this HANDOFF is batch-scoped and disposable.
