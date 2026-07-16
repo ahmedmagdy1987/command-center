@@ -59,6 +59,41 @@ export const members = {
     if (error) throw error;
     return data;
   },
+
+  /**
+   * Update the signed-in user's OWN profile. Only these columns are grantable (identity columns are
+   * locked by the members_lock_identity trigger); content is validated server-side by
+   * members_validate_profile (role-title impersonation, length caps, storage-hosted avatar). Pass any
+   * subset of { displayName, statusText, statusEmoji, bio, avatarUrl }. Returns the updated row.
+   */
+  async updateProfile(patch) {
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+    const fields = {};
+    if (patch.displayName !== undefined) fields.display_name = patch.displayName;
+    if (patch.statusText  !== undefined) fields.status_text  = patch.statusText;
+    if (patch.statusEmoji !== undefined) fields.status_emoji = patch.statusEmoji;
+    if (patch.bio         !== undefined) fields.bio          = patch.bio;
+    if (patch.avatarUrl   !== undefined) fields.avatar_url   = patch.avatarUrl;
+    const { data, error } = await supabase.from('members').update(fields).eq('id', session.user.id).select().single();
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Upload an avatar image to the public `avatars` bucket under the caller's own folder (<uid>/…) and
+   * return its stable public URL — which is what avatar_url stores (members_validate_profile pins
+   * avatar_url to this bucket). The RLS avatars_insert_own policy enforces the own-folder path.
+   */
+  async uploadAvatar(file) {
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+    const ext = ((file.name || '').split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+    const path = `${session.user.id}/${uid()}.${ext}`;
+    const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type || undefined });
+    if (error) throw error;
+    return supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl;
+  },
 };
 
 /* =================================================================================
@@ -113,7 +148,8 @@ export const workspaceMembers = {
     if (!workspaceId) return [];
     const { data, error } = await supabase.rpc('workspace_members_list', { p_workspace_id: workspaceId });
     if (error) throw error;
-    return (data || []).map(r => ({ userId: r.user_id, displayName: r.display_name, email: r.email, role: r.role }));
+    return (data || []).map(r => ({ userId: r.user_id, displayName: r.display_name, email: r.email, role: r.role,
+      avatarUrl: r.avatar_url, bio: r.bio, statusText: r.status_text, statusEmoji: r.status_emoji }));
   },
 
   /**

@@ -209,7 +209,7 @@ const writeStoredWorkspace = (userId, id) => { try { localStorage.setItem(wsStor
 // We accept both: UUID -> match by id (and self-upgrade the URL to the slug); else -> match by slug.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function AppProvider({ children, session, currentMember, onSignOut }) {
+function AppProvider({ children, session, currentMember, onSignOut, refreshCurrentMember }) {
   const location = useLocation();
   const navigate = useNavigate();
   const userId = session?.user?.id;
@@ -863,11 +863,11 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   // Resolve an assignee id -> { id, label, hex, soft, initials } for chips/labels. 'Me' for self,
   // 'Unassigned' (neutral) for null, display name otherwise. Color is deterministic per user id.
   const resolveAssignee = useCallback((assigneeId) => {
-    if (!assigneeId) return { id: null, label: 'Unassigned', hex: UNASSIGNED_STYLE.hex, soft: UNASSIGNED_STYLE.soft, initials: '·' };
+    if (!assigneeId) return { id: null, label: 'Unassigned', hex: UNASSIGNED_STYLE.hex, soft: UNASSIGNED_STYLE.soft, initials: '·', avatarUrl: null };
     const m = members.find(x => x.userId === assigneeId);
     const name = m?.displayName || m?.email || 'Member';
     const c = assigneeColor(assigneeId);
-    return { id: assigneeId, label: assigneeId === userId ? 'Me' : name, hex: c.hex, soft: c.soft, initials: initialsOf(name) };
+    return { id: assigneeId, label: assigneeId === userId ? 'Me' : name, hex: c.hex, soft: c.soft, initials: initialsOf(name), avatarUrl: m?.avatarUrl || null };
   }, [members, userId]);
 
   // "Added by X" label for a task's creator: 'you' for self, the member's name, or a graceful fallback.
@@ -917,7 +917,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   const value = useMemo(() => ({
     tasks, projects, workspaceStats, theme, view, filters, compact, draggedId,
     paletteOpen, quickAddOpen, editingTask,
-    loading, membershipsLoaded, syncStatus, session, currentMember, isMember, isOwner, isAdmin, isGuest, canManageMembers, myRole, onSignOut,
+    loading, membershipsLoaded, syncStatus, session, currentMember, refreshCurrentMember, isMember, isOwner, isAdmin, isGuest, canManageMembers, myRole, onSignOut,
     workspaces, currentWorkspaceId, switchWorkspace, createWorkspace,
     members, meId: userId, resolveAssignee, refreshMembers,
     setTheme, setView, setFilters, setCompact, setDraggedId,
@@ -933,7 +933,7 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   }), [
     tasks, projects, workspaceStats, theme, view, filters, compact, draggedId,
     paletteOpen, quickAddOpen, editingTask,
-    loading, membershipsLoaded, syncStatus, session, currentMember, isMember, isOwner, isAdmin, isGuest, canManageMembers, myRole, onSignOut,
+    loading, membershipsLoaded, syncStatus, session, currentMember, refreshCurrentMember, isMember, isOwner, isAdmin, isGuest, canManageMembers, myRole, onSignOut,
     workspaces, currentWorkspaceId, switchWorkspace, createWorkspace,
     members, userId, resolveAssignee, refreshMembers,
     setTheme, setView, setFilters, setCompact, setDraggedId,
@@ -3358,6 +3358,7 @@ function TopBar() {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const fileRef = useRef(null);
 
   const showFilters = ['kanban', 'projects', 'schedule', 'matrix'].includes(view);
@@ -3446,6 +3447,7 @@ function TopBar() {
                   <MenuItem icon={Sparkles} onClick={() => { setMenuOpen(false); navigate('/pricing'); }}>Plans &amp; pricing</MenuItem>
                   <MenuItem icon={FileText} onClick={() => { setMenuOpen(false); navigate('/terms'); }}>Terms of Service</MenuItem>
                   <MenuItem icon={Shield} onClick={() => { setMenuOpen(false); navigate('/privacy'); }}>Privacy Policy</MenuItem>
+                  <MenuItem icon={User} onClick={() => { setProfileOpen(true); setMenuOpen(false); }}>Edit profile</MenuItem>
                   <MenuItem icon={KeyRound} onClick={() => { setPasswordModalOpen(true); setMenuOpen(false); }}>Change password</MenuItem>
                   <div className="h-px bg-white/5 my-1" />
                   <MenuItem icon={LogOut} onClick={() => { onSignOut?.(); setMenuOpen(false); }}>Sign out</MenuItem>
@@ -3459,7 +3461,104 @@ function TopBar() {
       </div>
     </header>
     <ChangePasswordModal open={passwordModalOpen} onClose={() => setPasswordModalOpen(false)} />
+    {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
     </>
+  );
+}
+
+/**
+ * Self-profile editor: display name, status (emoji + text), bio, and avatar upload. Conditionally mounted
+ * (so useState initializers prefill from the freshly-loaded currentMember — no set-state-in-effect). Writes
+ * via membersApi.updateProfile; the server validates (role-title impersonation, length, storage-hosted
+ * avatar) so a rejection surfaces inline. Avatar uploads to the caller's own folder in the public avatars
+ * bucket and stores the resulting public URL. refreshCurrentMember() re-syncs the top bar after saving.
+ */
+function ProfileModal({ onClose }) {
+  const { currentMember, refreshCurrentMember } = useApp();
+  const [displayName, setDisplayName] = useState(() => currentMember?.display_name || '');
+  const [statusText, setStatusText] = useState(() => currentMember?.status_text || '');
+  const [statusEmoji, setStatusEmoji] = useState(() => currentMember?.status_emoji || '');
+  const [bio, setBio] = useState(() => currentMember?.bio || '');
+  const [avatarUrl, setAvatarUrl] = useState(() => currentMember?.avatar_url || null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const fileRef = useRef(null);
+  const panelRef = useRef(null);
+  useEffect(() => { setTimeout(() => panelRef.current?.focus(), 30); }, []);
+
+  const pickAvatar = async (file) => {
+    if (!file) return;
+    setErr(''); setBusy(true);
+    try { setAvatarUrl(await membersApi.uploadAvatar(file)); }
+    catch (e) { setErr(e?.message || 'Avatar upload failed.'); }
+    finally { setBusy(false); }
+  };
+
+  const save = async () => {
+    setErr(''); setBusy(true);
+    try {
+      await membersApi.updateProfile({ displayName, statusText, statusEmoji, bio, avatarUrl });
+      await refreshCurrentMember?.();
+      onClose();
+    } catch (e) {
+      setErr(e?.message || 'Could not save your profile.');
+      setBusy(false);
+    }
+  };
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
+        <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Edit profile"
+          className="pointer-events-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5 outline-none max-h-[85vh] overflow-y-auto"
+          style={{ animation: 'slideUp .2s ease' }}
+          onClick={e => e.stopPropagation()}
+          onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}>
+          <h2 className="text-base font-semibold text-white mb-4">Edit profile</h2>
+
+          <div className="flex items-center gap-3 mb-4">
+            <Avatar name={displayName || currentMember?.email} userId={currentMember?.id} photoUrl={avatarUrl} size={56} />
+            <div className="flex flex-col gap-1.5">
+              <button onClick={() => fileRef.current?.click()} disabled={busy}
+                className="h-8 px-3 rounded-lg bg-white/5 border border-white/10 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors disabled:opacity-50">
+                {busy ? 'Working…' : 'Upload photo'}
+              </button>
+              {avatarUrl && <button onClick={() => setAvatarUrl(null)} className="text-[11px] text-white/40 hover:text-rose-300 text-left">Remove photo</button>}
+              <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; pickAvatar(f); }} />
+            </div>
+          </div>
+
+          <label className="block text-[11px] text-white/50 mb-1">Display name</label>
+          <input value={displayName} onChange={e => setDisplayName(e.target.value)} maxLength={60}
+            className="w-full h-9 px-3 mb-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-violet-400/50" />
+
+          <label className="block text-[11px] text-white/50 mb-1">Status</label>
+          <div className="flex gap-2 mb-3">
+            <input value={statusEmoji} onChange={e => setStatusEmoji(e.target.value)} maxLength={16} placeholder="🟢" aria-label="Status emoji"
+              className="w-14 h-9 px-2 rounded-xl bg-white/5 border border-white/10 text-sm text-white text-center outline-none focus:border-violet-400/50" />
+            <input value={statusText} onChange={e => setStatusText(e.target.value)} maxLength={80} placeholder="What are you up to?" aria-label="Status text"
+              className="flex-1 h-9 px-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-violet-400/50" />
+          </div>
+
+          <label className="block text-[11px] text-white/50 mb-1">Bio</label>
+          <textarea value={bio} onChange={e => setBio(e.target.value)} maxLength={280} rows={3}
+            className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-violet-400/50 resize-none" />
+          <div className="text-[10px] text-white/30 text-right mb-3">{bio.length}/280</div>
+
+          {err && <p className="text-xs text-rose-300 mb-3 break-words">{err}</p>}
+
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={onClose}
+              className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">Cancel</button>
+            <button onClick={save} disabled={busy}
+              className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors disabled:opacity-50">Save</button>
+          </div>
+        </div>
+      </div>
+    </>,
+    document.body
   );
 }
 function MenuItem({ icon: Icon, children, onClick }) {
@@ -4334,9 +4433,9 @@ function ScheduleView() {
 /* =================================================================================
    MAIN APP
 ================================================================================= */
-export default function App({ session, currentMember, onSignOut }) {
+export default function App({ session, currentMember, onSignOut, refreshCurrentMember }) {
   return (
-    <AppProvider session={session} currentMember={currentMember} onSignOut={onSignOut}>
+    <AppProvider session={session} currentMember={currentMember} onSignOut={onSignOut} refreshCurrentMember={refreshCurrentMember}>
       <AppShell />
     </AppProvider>
   );
