@@ -1,12 +1,20 @@
-# Workspace Roles & Permissions — Recon, Design & Feasibility (FOR RATIFICATION)
+# Workspace Roles & Permissions — Design doc + AS-BUILT reference
 
-> **Status: PROPOSAL ONLY. Nothing applied.** No migration, no RLS change, no UI. This pass is
-> recon + design + one rolled-back feasibility proof. **Do not implement until Tony ratifies the
-> role → permission matrix below** (esp. the flagged **Guest scope** and **Guest team-chat** calls).
+> ## ⚠️ STATUS: **RATIFIED, APPLIED AND LIVE** since 2026-06-26. (Corrected 2026-07-15.)
 >
-> Context: the codebase has a clean **45/45 tenant-isolation audit** (2026-06-26). Roles touch RLS on
-> every table, so the apply will be staged, each boundary proven rolled-back, and the full isolation
-> audit re-run afterward to confirm no regression.
+> **This header used to read "PROPOSAL ONLY. Nothing applied." — that was badly stale and actively
+> misleading**: the roles system shipped in `20260626103433` (+ `…103550` hardening), `…111955`
+> (mentions) and `…135949` (invite-as-role), was proven by a 35/35 rolled-back boundary proof, and is
+> live in the UI. A reader trusting line 3 would have concluded roles don't exist.
+>
+> **How to read this file:** §1.2 is the **as-built** authorization surface, re-verified against the live
+> DB on 2026-07-15 — trust it. Everything framed as a *proposal / plan / open question* below §2 is the
+> historical design record: some of it shipped, some didn't. Where the two disagree, **§1.2 and the live
+> DB win.** Known not-shipped: delete/leave-workspace and `is_workspace_admin` (verified live: zero
+> matching functions; `workspaces` has exactly one policy, `workspaces_select_member`).
+>
+> The re-runnable proofs now live in `supabase/tests/` — `cross_tenant_isolation_rolled_back_proof.sql`
+> and `workspace_role_boundary_rolled_back_proof.sql`. Run those instead of reconstructing from prose.
 
 ---
 
@@ -35,53 +43,72 @@ compose only at the few call sites where both apply (see §2.4). **Do not entang
     `accept_invitation`). So **there is no way to change a member's role today** — roles are set once,
     at workspace creation (`owner`) or invite-accept (`member`). Adding role mutation is the new capability.
 - **`workspaces.owner_id uuid NULL → auth.users ON DELETE SET NULL`** — the *historical creator*
-  pointer, **NOT the authorization source** (it's nullable and informational). The per-workspace owner
-  authority is `workspace_members.role='owner'`, read via `private.is_workspace_owner`.
+  pointer, **NOT the authorization source** (it's nullable and informational). The per-workspace
+  authority is `workspace_members.role`, read via `private.workspace_role_rank`.
 - **`members.role`** (global profile table): `text NOT NULL DEFAULT 'member'`, `CHECK (role IN ('owner','member'))`.
   **Vestigial for authz** since Phase 3B-2 — used only as a profile field; protected by the
-  `members_lock_role` BEFORE-UPDATE trigger (blocks any role change). *(This trigger is on `members`,
-  NOT `workspace_members`.)*
+  `members_lock_identity` BEFORE-UPDATE trigger (blocks changes to `role`, and also to `id` / `email` /
+  `created_at`). *(This trigger is on `members`, NOT `workspace_members`. It replaced the role-only
+  `members_lock_role` on 2026-07-15 — see CLAUDE.md* Bug-fix pass*.)*
 
-## 1.2 The complete authorization surface (every gate, today)
+## 1.2 The complete authorization surface (every gate, live — re-verified 2026-07-15)
 
-**The ONLY role-gated helper is `private.is_workspace_owner(ws_id)` (`role='owner'`).** Everything
-else gates on membership / participation / recipiency / authorship.
+> **This section was rewritten on 2026-07-15.** It previously described the PRE-roles-migration world
+> and was wrong in nearly every row: it named `is_workspace_owner` as "the only role-gated helper" when
+> that helper now gates **nothing at all**, listed `projects_delete_owner` (renamed) as owner-only when
+> project delete is **owner+admin**, and predated the guest-scoping and task-policy renames. Every row
+> below was read back from `pg_policy` / `pg_get_functiondef` against the live DB.
+
+**Role gating runs through `private.workspace_role_rank(ws_id)` → owner 3 · admin 2 · member 1 · guest 0.**
+`private.is_workspace_owner` still exists but is **VESTIGIAL — zero live policies and zero live functions
+reference it.** Don't reach for it; gate on rank.
 
 **Private SECURITY DEFINER helpers** (search_path='', EXECUTE auth-only):
 | Helper | Logic | Used by |
 |---|---|---|
 | `is_workspace_member(ws_id)` | exists membership row | almost every policy + most RPCs |
-| `is_workspace_owner(ws_id)` | exists membership row **with `role='owner'`** | the role gate (below) |
+| `workspace_role(ws_id)` / `workspace_role_rank(ws_id)` | caller's role / rank in that ws | **every role-aware policy + RPC** |
+| `is_workspace_owner(ws_id)` | exists membership row **with `role='owner'`** | **nothing (vestigial)** |
 | `is_dm_participant(conv_id)` | `auth.uid() ∈ (user_lo,user_hi)` | all `dm_*` policies |
-| `shares_workspace(target)` | caller co-members with target | `members` SELECT |
+| `shares_workspace(target)` | caller co-members with target | `can_see_member_profile` |
+| `can_see_member_profile(id)` | self OR guest-scoped co-worker visibility | `members` SELECT |
+| `can_see_task(user,task)` / `can_see_team_chat(user,ws)` | evaluates a surface for an ARBITRARY user | mention triggers |
+| `can_view_task(task)` / `can_edit_task(task)` | mirrors the task SELECT / UPDATE predicates | `task_attachments` + storage |
 
-**RLS policies — ROLE-GATED (the entire current role surface = 2 policies):**
+**RLS policies — ROLE-GATED:**
 | Policy | Table | Cmd | Gate |
 |---|---|---|---|
-| `projects_delete_owner` | projects | DELETE | `is_workspace_owner(workspace_id)` |
-| `invitations_select_owner` | invitations | SELECT | `is_workspace_owner(workspace_id)` |
+| `projects_delete_admin` | projects | DELETE | `workspace_role_rank >= 2` (**owner+admin**) |
+| `projects_insert_member` / `projects_update_member` | projects | INSERT/UPDATE | `is_workspace_member AND rank >= 1` (excludes guests) |
+| `projects_select_member` | projects | SELECT | `is_workspace_member AND role <> 'guest'` |
+| `invitations_select_owner` | invitations | SELECT | `workspace_role_rank >= 2` (**owner+admin** — the *name* is stale, the gate is rank) |
+| `tasks_select_role` | tasks | SELECT | member + privacy + `(role <> 'guest' OR creator/assignee)` |
+| `tasks_insert_role` | tasks | INSERT | member + privacy + **`created_by = auth.uid()`** + `(role <> 'guest' OR assignee)` |
+| `tasks_update_role` / `tasks_delete_role` | tasks | UPDATE/DELETE | member + privacy + `(rank >= 2 OR creator OR assignee)` |
 
-**RLS policies — MEMBERSHIP / participant / recipient / author gated (any member, no role distinction):**
-- **tasks** ⟨P2⟩ select/insert/update/delete: `is_workspace_member AND (privacy='workspace' OR (privacy='private' AND (created_by=uid OR assignee_id=uid)))`.
-- **projects** select/insert/update: `is_workspace_member`.
+**RLS policies — MEMBERSHIP / participant / recipient / author gated (no role distinction):**
 - **messages** select: `is_workspace_member`; insert/update/delete: `sender_id=uid AND is_workspace_member`.
 - **comments** select: task is visible (`EXISTS tasks` → inherits task RLS); insert/update/delete: `author_id=uid AND is_workspace_member` (+ task in same ws on insert).
 - **dm_conversations** select: participant `AND is_workspace_member`. **dm_messages** all: participant (+ membership on insert). **dm_reads** all: participant.
 - **notifications** select/update/delete: `recipient_id=uid AND is_workspace_member`. (No insert policy — trigger-only.)
-- **members** select: `id=uid OR shares_workspace(id)`; insert/update: `id=uid`. (No delete.)
-- **workspaces** select: member. **workspace_members** select: `user_id=uid` (self only).
+- **members** select: `can_see_member_profile(id)`; insert: `id=uid`; update: `id=uid` **+ the
+  `members_lock_identity` trigger + an `UPDATE(display_name)`-only column grant** (id/email/created_at/role
+  are immutable — RLS alone can't express that, since `WITH CHECK` never sees the OLD row). (No delete.)
+- **workspaces** select: member. **workspace_members** select: `user_id=uid` (self only; RPC-only writes).
+- **task_attachments** select: `can_view_task`; insert: `can_edit_task` + `<20`/task; delete: uploader-own OR `rank >= 2`.
 
 **SECURITY DEFINER RPCs and their gating:**
 | RPC | Gate |
 |---|---|
 | `create_workspace(name)` | any signed-in user (creator becomes `owner`) |
-| `create_invitation(ws,email)` | **`is_workspace_owner`** + email valid + not already member; sets `role='member'` |
+| `create_invitation(ws,email,role)` | **`workspace_role_rank >= 2`** + email valid + not already member; `p_role` ∈ {member,guest} |
 | `accept_invitation(token)` | email-bound to caller; inserts `workspace_members(ws, uid, inv.role)` |
-| `revoke_invitation(id)` | **`is_workspace_owner`** |
+| `revoke_invitation(id)` | **`workspace_role_rank >= 2`** |
 | `invitation_preview(token)` | any authenticated (token holder) — returns ws name + invited email + status |
 | `get_or_create_dm_conversation(ws,peer)` | `is_workspace_member` (caller) **AND** peer is a member |
 | `workspace_members_list(ws)` | `is_workspace_member` (any member can list the roster, for the assignee picker) |
-| `project_task_count(proj,ws)` | **`is_workspace_owner`** (the project-delete gate) |
+| `project_task_count(proj,ws)` | **`workspace_role_rank >= 2`** — deliberately matches `projects_delete_admin`, so the count never throws for someone allowed to delete |
+| `set_member_role(ws,user,role)` / `remove_member(ws,user)` | caller must out-rank target AND new role; last-owner protected; no self-escalation |
 
 **Storage policies (`voice-notes` bucket, private):**
 - `voice_notes_insert_member`: own folder (`foldername[1]=uid`) AND `EXISTS members` (global existence).

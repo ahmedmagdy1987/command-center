@@ -8,7 +8,7 @@ import {
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
   Info, LogOut, Loader2,
   KeyRound, Bell, MessageSquare, MessagesSquare, Send, Mic, Square, Play, Pause, Users, Mail, UserPlus, ArrowRight,
-  FileText, Shield, Paperclip, FileImage
+  FileText, Shield, Paperclip, FileImage, User
 } from 'lucide-react';
 import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, directMessages as directMessagesApi, workspaces as workspacesApi, workspaceMembers as workspaceMembersApi, invitations as invitationsApi, attachments as attachmentsApi, auth } from './lib/api';
 import { supabase } from './lib/supabase';
@@ -32,7 +32,13 @@ const VIEW_TO_PATH = {
   members: '/members',
 };
 const PATH_TO_VIEW = Object.fromEntries(Object.entries(VIEW_TO_PATH).map(([v, p]) => [p, v]));
-const GUEST_VIEWS = new Set(['mine', 'dms']);   // a Guest's only relevant destinations: own/assigned tasks + DMs
+const GUEST_VIEWS = new Set(['mine', 'dms']);
+
+// Bulk import used to accept any file of any size with any number of rows: the ONLY check was
+// "is .tasks a non-empty array". These caps are UX guardrails — the DB is the authority (the
+// tasks_id_len_chk/tasks_project_len_chk CHECKs, tasks_insert_role, enforce_guest_task_pin).
+const IMPORT_MAX_BYTES = 5 * 1024 * 1024;   // 5 MB — thousands of realistic tasks, well under the PostgREST body limit
+const IMPORT_MAX_ROWS = 1000;   // a Guest's only relevant destinations: own/assigned tasks + DMs
 
 // OS-aware keyboard modifier label. The keydown handler already accepts Ctrl OR Cmd, so only
 // the *displayed* hint needs to differ: ⌘ on macOS, Ctrl elsewhere (Windows/Linux).
@@ -58,6 +64,20 @@ const UNASSIGNED_STYLE = { hex: '#8b92a8', soft: 'rgba(139,146,168,0.14)' };
 const hashStr = (s) => { let h = 0; for (let i = 0; i < (s || '').length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); };
 const assigneeColor = (userId) => (userId ? ASSIGNEE_PALETTE[hashStr(userId) % ASSIGNEE_PALETTE.length] : UNASSIGNED_STYLE);
 const initialsOf = (s) => (s || '?').trim().slice(0, 1).toUpperCase();
+// Two-letter initials for avatars: "Ahmed Magdy" -> AM, "ahmed@x.com" -> AH (the local part only —
+// the domain is the same for everyone and carries no identity). Returns '' when there is no name to
+// work with, which is the signal for <Avatar> to fall back to the silhouette instead of rendering
+// a lone "?" in a circle. Distinct from initialsOf, which stays single-letter for the compact
+// assignee chips where a second glyph doesn't fit.
+const initialsFor = (s) => {
+  const t = (s || '').trim();
+  if (!t) return '';
+  const base = t.includes('@') ? t.split('@')[0] : t;
+  const words = base.split(/[\s._-]+/).filter(Boolean);
+  if (!words.length) return '';
+  if (words.length >= 2) return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+  return words[0].slice(0, 2).toUpperCase();
+};
 
 // Assignee-filter match: 'all' | 'me' | 'unassigned' | <userId>.
 const matchesAssignee = (task, filterVal, meId) =>
@@ -82,17 +102,14 @@ const STATUSES = {
   done:      { id: 'done',      label: 'Done',      hint: 'Completed' },
 };
 
-const DEFAULT_PROJECTS = [
-  { id: 'social',   name: 'Social Media', color: '#a78bfa', icon: '☉' },
-  { id: 'blogs',    name: 'Blogs',        color: '#f472b6', icon: '✎' },
-  { id: 'seo',      name: 'SEO',          color: '#38bdf8', icon: '◎' },
-  { id: 'outreach', name: 'Outreach',     color: '#34d399', icon: '↗' },
-  { id: 'assets',   name: 'Assets',       color: '#fb923c', icon: '◈' },
-  { id: 'personal', name: 'Personal',     color: '#f43f5e', icon: '♡' },
-  { id: 'website',  name: 'Website',      color: '#facc15', icon: '◐' },
-  { id: 'tools',    name: 'Tools',        color: '#94a3b8', icon: '⚙' },
-  { id: 'other',    name: 'Other',        color: '#64748b', icon: '◇' },
-];
+// DEFAULT_PROJECTS used to be substituted whenever a workspace had ZERO projects
+// (`setProjects(p.length ? p : DEFAULT_PROJECTS)`), which meant an empty workspace rendered NINE
+// phantom projects backed by no DB row: ProjectsView listed them, task chips resolved against them,
+// and clicking delete on one raised 42704 with no UI path out. It also made the real "No projects
+// yet" empty state below unreachable dead code. Removed 2026-07-16 — the client now shows exactly
+// what the DB holds. Note `tasks.project` still DEFAULTs to 'other' and sanitizeTask still coerces
+// blank -> 'other', and no 'other' project row exists in any workspace, so such a task simply
+// renders no chip (`projects.find(...)` -> undefined). That is the intended graceful degradation.
 
 // Palette + glyphs offered when creating/editing a project.
 const PROJECT_PALETTE = ['#a78bfa','#f472b6','#38bdf8','#34d399','#fb923c','#f43f5e','#facc15','#94a3b8','#64748b','#22d3ee','#c084fc','#4ade80'];
@@ -192,12 +209,12 @@ const writeStoredWorkspace = (userId, id) => { try { localStorage.setItem(wsStor
 // We accept both: UUID -> match by id (and self-upgrade the URL to the slug); else -> match by slug.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function AppProvider({ children, session, currentMember, onSignOut }) {
+function AppProvider({ children, session, currentMember, onSignOut, refreshCurrentMember }) {
   const location = useLocation();
   const navigate = useNavigate();
   const userId = session?.user?.id;
   const [tasks, setTasks] = useState([]);
-  const [projects, setProjects] = useState(DEFAULT_PROJECTS);
+  const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState('connecting');
 
@@ -319,6 +336,11 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   useEffect(() => { themeStore.set(THEME_KEY, theme); }, [theme]);
   useLayoutEffect(() => { document.documentElement.setAttribute('data-theme', theme); }, [theme]);
 
+  // Ref mirror of the active workspace (alongside chatViewRef / dmActiveConvRef) so a reconcile
+  // refetch that was in flight across a workspace switch can bail instead of applying stale data.
+  const currentWorkspaceIdRef = useRef(null);
+  useEffect(() => { currentWorkspaceIdRef.current = currentWorkspaceId; }, [currentWorkspaceId]);
+
   // Resolve the current workspace BEFORE any data query/subscription. Precedence:
   // ?ws= (only if the user is a member) -> localStorage (only if still valid) -> first workspace.
   // An invalid/stale choice silently falls back to the first valid one and corrects URL + storage,
@@ -360,6 +382,10 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     return () => { mounted = false; };
   }, [userId, navigate]);
 
+  // 5b: server-computed workspace task aggregates (RLS-scoped) for headline numbers that shouldn't need the
+  // whole task array. Kept fresh by a debounced effect below; cleared on switch.
+  const [workspaceStats, setWorkspaceStats] = useState(null);
+
   // Load the current workspace's data once it's resolved; re-runs (clear + refetch) on switch.
   useEffect(() => {
     if (!currentWorkspaceId) return;
@@ -367,12 +393,14 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     (async () => {
       setLoading(true);
       setTasks([]);                  // clear so a switch doesn't flash the previous workspace's data
-      setProjects(DEFAULT_PROJECTS);
+      setProjects([]);
+      setWorkspaceStats(null);
       try {
-        const [t, p] = await Promise.all([tasksApi.list(currentWorkspaceId), projectsApi.list(currentWorkspaceId)]);
+        const [t, p, s] = await Promise.all([tasksApi.list(currentWorkspaceId), projectsApi.list(currentWorkspaceId), tasksApi.stats(currentWorkspaceId).catch(() => null)]);
         if (!mounted) return;
         setTasks(t);
-        setProjects(p.length ? p : DEFAULT_PROJECTS);
+        setProjects(p);
+        setWorkspaceStats(s);
       } catch (err) {
         console.error('Failed to load:', err);
         setSyncStatus('offline');
@@ -382,6 +410,14 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     })();
     return () => { mounted = false; };
   }, [currentWorkspaceId]);
+
+  // 5b: refresh the server task stats after any task change (own edit or realtime), debounced so a burst
+  // collapses into one aggregate query. The initial load fetches them above; this keeps them current.
+  useEffect(() => {
+    if (!currentWorkspaceId) return undefined;
+    const t = setTimeout(() => { tasksApi.stats(currentWorkspaceId).then(setWorkspaceStats).catch(() => {}); }, 500);
+    return () => clearTimeout(t);
+  }, [currentWorkspaceId, tasks]);
 
   // Load the current workspace's members for the assignee picker + member-aware views/labels.
   useEffect(() => {
@@ -437,25 +473,64 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   useEffect(() => {
     if (!currentWorkspaceId || !userId) return;   // clearing is handled by the prior run's cleanup
     let on = true;
-    Promise.resolve().then(() => { if (on) refreshDms(currentWorkspaceId); });   // defer off the sync effect path
+    let timer = null;
+    // Coalesce bursts: refreshDms runs THREE queries (listConversations + listRecentMessages(500) +
+    // unreadCounts). Firing that per incoming DM event is a thundering herd once a busy workspace has
+    // several active threads. A trailing debounce collapses a burst into one re-summarize; the open
+    // thread itself stays instant (it's driven by the separate per-conversation subscribeThread).
+    const scheduleRefresh = () => {
+      if (timer) return;                                    // one refresh already queued; this event is covered
+      timer = setTimeout(() => { timer = null; if (on) refreshDms(currentWorkspaceId); }, 400);
+    };
+    Promise.resolve().then(() => { if (on) refreshDms(currentWorkspaceId); });   // initial load: immediate
     const unsub = directMessagesApi.subscribe(({ message }) => {
       if (!on || !message) return;
-      refreshDms(currentWorkspaceId);
+      scheduleRefresh();
     }, currentWorkspaceId);
-    return () => { on = false; unsub(); setDmConversations([]); setDmActiveConv(null); };
+    return () => { on = false; if (timer) clearTimeout(timer); unsub(); setDmConversations([]); setDmActiveConv(null); };
+  }, [currentWorkspaceId, userId, refreshDms]);
+
+  // Reconcile global state after a reconnect / tab-refocus. Realtime auto-reconnects, but any events
+  // that fired while the socket or network was down are gone for good — without this, the board and DM
+  // list can show stale data indefinitely. Unlike the workspace-switch effect this does NOT clear-and-
+  // flash; it refetches in place. Throttled so an online/focus flap can't stampede the queries, and
+  // guarded by the workspace ref so a refetch that raced a switch is discarded.
+  const lastReconcileRef = useRef(0);
+  const reconcile = useCallback(async (reason) => {
+    const ws = currentWorkspaceId;
+    if (!ws || !userId) return;
+    const now = Date.now();
+    if (now - lastReconcileRef.current < 8000) return;   // at most one reconcile per 8s
+    lastReconcileRef.current = now;
+    try {
+      const [t, p] = await Promise.all([tasksApi.list(ws), projectsApi.list(ws)]);
+      if (currentWorkspaceIdRef.current !== ws) return;   // a switch raced us — drop the stale result
+      setTasks(t);
+      setProjects(p);
+      setSyncStatus('live');
+    } catch (e) {
+      console.error(`Reconcile (${reason}) failed:`, e);
+      setSyncStatus('offline');
+    }
+    refreshDms(ws);
   }, [currentWorkspaceId, userId, refreshDms]);
 
   useEffect(() => {
-    const onOnline = () => setSyncStatus('live');
+    const onOnline = () => { setSyncStatus('live'); reconcile('online'); };
     const onOffline = () => setSyncStatus('offline');
+    // A dropped websocket often does NOT fire a window offline/online event (the network is fine, the
+    // socket just died); catching the tab regaining visibility reconciles that common case too.
+    const onVisible = () => { if (document.visibilityState === 'visible' && navigator.onLine !== false) reconcile('visible'); };
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
+    document.addEventListener('visibilitychange', onVisible);
     if (typeof navigator !== 'undefined' && navigator.onLine === false) setSyncStatus('offline');
     return () => {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
+      document.removeEventListener('visibilitychange', onVisible);
     };
-  }, []);
+  }, [reconcile]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -517,8 +592,9 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       // workspace the user belongs to into the active view (RLS-safe, but wrong scope on screen).
       // Also re-sync the open modal so it doesn't keep showing an edit the server rejected.
       tasksApi.list(currentWorkspaceId).then(fresh => { setTasks(fresh); setEditingTask(et => et ? (fresh.find(t => t.id === et.id) ?? et) : et); }).catch(() => {});
+      showToast("Couldn't save that change — reverted to the last saved version.");
     }
-  }, [currentWorkspaceId]);
+  }, [currentWorkspaceId, showToast]);
 
   // Two-phase delete: fade/slide the card out (~180ms), then remove + persist. Reduced-motion -> immediate.
   const deleteTask = useCallback((id) => {
@@ -532,13 +608,14 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
         tasksApi.delete(id).catch(err => {
           console.error('Delete failed:', err);
           tasksApi.list(currentWorkspaceId).then(setTasks).catch(() => {});   // reconcile with server on failure
+          showToast("Couldn't delete the task — it's back in the list.");
         });
       });
     };
     if (prefersReducedMotion()) { finish(); return; }
     setExitingIds(p => new Set(p).add(id));
     setTimeout(finish, 180);
-  }, [currentWorkspaceId]);
+  }, [currentWorkspaceId, showToast]);
 
   // ---- Projects: create (member), rename/recolor (member), delete (owner; all RLS-enforced) ----
   const createProject = useCallback(async ({ name, color, icon }) => {
@@ -553,24 +630,33 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       await projectsApi.update(id, patch);
     } catch (err) {
       console.error('Update project failed:', err);
-      projectsApi.list(currentWorkspaceId).then(p => setProjects(p.length ? p : DEFAULT_PROJECTS)).catch(() => {});
+      projectsApi.list(currentWorkspaceId).then(p => setProjects(p)).catch(() => {});
+      showToast("Couldn't save the project change — reverted.");
     }
-  }, [currentWorkspaceId]);
+  }, [currentWorkspaceId, showToast]);
 
-  // Two-phase delete: fade the card out (~180ms), then remove + persist. Reduced-motion -> immediate.
-  const deleteProject = useCallback((id) => {
-    const finish = () => {
+  // Two-phase delete via the sanctioned delete_project RPC: fade the card out (~180ms), then run the
+  // cascade/unassign and refetch (both tasks and projects changed server-side). Reduced-motion ->
+  // immediate. mode: 'cascade' (owner: delete tasks too) | 'unassign' (owner+admin: re-file to reassignTo).
+  const deleteProject = useCallback((id, mode, reassignTo) => {
+    const reconcile = () => Promise.all([tasksApi.list(currentWorkspaceId), projectsApi.list(currentWorkspaceId)])
+      .then(([t, p]) => { setTasks(t); setProjects(p); }).catch(() => {});
+    const finish = async () => {
       setProjects(p => p.filter(x => x.id !== id));
       setExitingProjectIds(p => { const n = new Set(p); n.delete(id); return n; });
-      projectsApi.delete(id).catch(err => {
+      try {
+        await projectsApi.deleteViaRpc(id, currentWorkspaceId, mode, reassignTo);
+        await reconcile();
+      } catch (err) {
         console.error('Delete project failed:', err);
-        projectsApi.list(currentWorkspaceId).then(p => setProjects(p.length ? p : DEFAULT_PROJECTS)).catch(() => {});
-      });
+        await reconcile();
+        showToast("Couldn't delete the project — nothing was changed.");
+      }
     };
     if (prefersReducedMotion()) { finish(); return; }
     setExitingProjectIds(p => new Set(p).add(id));
     setTimeout(finish, 180);
-  }, [currentWorkspaceId]);
+  }, [currentWorkspaceId, showToast]);
 
   const duplicateTask = useCallback(async (id) => {
     const original = tasks.find(t => t.id === id);
@@ -605,8 +691,9 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
       console.error('Subtask update failed:', err);
       // Reconcile to server on failure — including the open modal, which otherwise keeps the stale checklist.
       tasksApi.list(currentWorkspaceId).then(fresh => { setTasks(fresh); setEditingTask(et => et ? (fresh.find(t => t.id === et.id) ?? et) : et); }).catch(() => {});
+      showToast("Couldn't save the checklist change — reverted to the server copy.");
     }
-  }, [currentWorkspaceId]);
+  }, [currentWorkspaceId, showToast]);
 
   const toggleSubtask = useCallback((taskId, subId) =>
     mutateSubtasks(taskId, subs => subs.map(s => s.id === subId ? { ...s, done: !s.done } : s)),
@@ -636,31 +723,59 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     }),
   [mutateSubtasks]);
 
-  const exportJSON = () => {
+  const exportJSON = useCallback(() => {
     const blob = new Blob([JSON.stringify({ tasks, projects, exportedAt: nowISO() }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `command-center-${Date.now()}.json`; a.click(); URL.revokeObjectURL(url);
-  };
+  }, [tasks, projects]);
 
-  const importJSON = (file) => {
+  const importJSON = useCallback((file) => {
+    // Derived from memberships here rather than the isGuest binding: isGuest is declared further down,
+    // so naming it in this dep array would be a TDZ ReferenceError on every render. Same source of
+    // truth as the myRole memo. (UI half only — the DB is authoritative.)
+    const role = memberships.find(m => m.workspaceId === currentWorkspaceId)?.role ?? null;
+    if (role === 'guest') { showToast("Guests can't import tasks.", 'info'); return; }
+    if (file.size > IMPORT_MAX_BYTES) {
+      showToast(`That file is too large (max ${Math.round(IMPORT_MAX_BYTES / 1024 / 1024)} MB).`);
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const d = JSON.parse(e.target.result);
-        if (Array.isArray(d.tasks) && d.tasks.length) setImportPreview({ tasks: d.tasks, count: d.tasks.length });   // opens a ConfirmModal
-        else showToast('That file has no tasks to import.', 'info');
+        if (!Array.isArray(d.tasks) || !d.tasks.length) { showToast('That file has no tasks to import.', 'info'); return; }
+        if (d.tasks.length > IMPORT_MAX_ROWS) {
+          showToast(`That file has ${d.tasks.length} tasks — the limit is ${IMPORT_MAX_ROWS} per import.`);
+          return;
+        }
+        setImportPreview({ tasks: d.tasks, count: d.tasks.length });   // opens a ConfirmModal
       } catch {
         showToast("That file isn't valid JSON.");
       }
     };
+    reader.onerror = () => showToast("Couldn't read that file.");
     reader.readAsText(file);
-  };
+  }, [showToast, memberships, currentWorkspaceId]);
+
   const confirmImport = useCallback(async () => {
     const pv = importPreview; setImportPreview(null);
     if (!pv) return;
-    try { const created = await tasksApi.bulkInsert(pv.tasks, currentWorkspaceId); setTasks(prev => [...created, ...prev]); }
+    // Never trust ids from a file. Minting fresh ones kills two problems at once: a colliding id
+    // aborts the WHOLE batch (bulkInsert is one statement), and 23505-vs-success would otherwise be a
+    // cross-tenant probe for whether a task id exists (ids are a global TEXT PK).
+    // Also pin assignee to a real member of THIS workspace — an unknown id is only FK-checked against
+    // auth.users, so it would fire notify_on_task_assigned and write a notification row in a stranger's
+    // name that nobody can read.
+    const memberIds = new Set(members.map(m => m.id));
+    const rows = pv.tasks.map(t => {
+      const row = { ...(t && typeof t === 'object' ? t : {}) };
+      delete row.id;                                                              // mint a fresh id (see above)
+      if (!memberIds.has(row.assigneeId)) row.assigneeId = null;                  // pin to a real member of this workspace
+      return row;
+    });
+    try { const created = await tasksApi.bulkInsert(rows, currentWorkspaceId); setTasks(prev => [...created, ...prev]); }
     catch (err) { console.error('Import failed:', err); showToast("Couldn't import those tasks. Please try again."); }
-  }, [importPreview, currentWorkspaceId, showToast]);
+  }, [importPreview, currentWorkspaceId, showToast, members]);
 
   const switchWorkspace = useCallback((id) => {
     if (id === currentWorkspaceId || !workspaces.some(w => w.id === id)) return;
@@ -748,11 +863,11 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   // Resolve an assignee id -> { id, label, hex, soft, initials } for chips/labels. 'Me' for self,
   // 'Unassigned' (neutral) for null, display name otherwise. Color is deterministic per user id.
   const resolveAssignee = useCallback((assigneeId) => {
-    if (!assigneeId) return { id: null, label: 'Unassigned', hex: UNASSIGNED_STYLE.hex, soft: UNASSIGNED_STYLE.soft, initials: '·' };
+    if (!assigneeId) return { id: null, label: 'Unassigned', hex: UNASSIGNED_STYLE.hex, soft: UNASSIGNED_STYLE.soft, initials: '·', avatarUrl: null };
     const m = members.find(x => x.userId === assigneeId);
     const name = m?.displayName || m?.email || 'Member';
     const c = assigneeColor(assigneeId);
-    return { id: assigneeId, label: assigneeId === userId ? 'Me' : name, hex: c.hex, soft: c.soft, initials: initialsOf(name) };
+    return { id: assigneeId, label: assigneeId === userId ? 'Me' : name, hex: c.hex, soft: c.soft, initials: initialsOf(name), avatarUrl: m?.avatarUrl || null };
   }, [members, userId]);
 
   // "Added by X" label for a task's creator: 'you' for self, the member's name, or a graceful fallback.
@@ -771,13 +886,13 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
   }, [addTask]);
 
   // Close the task modal; if the open task is an abandoned "+ Add task" draft with an empty title, delete it.
-  const closeEditing = () => {
+  const closeEditing = useCallback(() => {
     if (editingTask && editingTask.id === draftIdRef.current && !(editingTask.title || '').trim()) {
       deleteTask(editingTask.id);
     }
     draftIdRef.current = null;
     setEditingTask(null);
-  };
+  }, [editingTask, deleteTask]);
   useEffect(() => { closeEditingRef.current = closeEditing; });   // keep the Esc-time closer current (ref write off-render)
 
   // ── Monetization: resolve this workspace's plan + entitlements, plus a small
@@ -794,10 +909,15 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     isPreview: !!getPreviewPlanId(),
   }), [members.length, memberships, currentWorkspaceId]);
 
-  const value = {
-    tasks, projects, theme, view, filters, compact, draggedId,
+  // Memoize the context value so a re-render of AppProvider that DIDN'T change any of these members
+  // (e.g. a parent/App re-render) doesn't hand every useApp() consumer a fresh object and reconcile
+  // the whole tree. All setters/useCallback handlers are already stable, so in practice this only
+  // produces a new value when a state/derived field actually changes. Deps list every member; the
+  // stable ones are harmless to include, but omitting a state field would ship a stale closure.
+  const value = useMemo(() => ({
+    tasks, projects, workspaceStats, theme, view, filters, compact, draggedId,
     paletteOpen, quickAddOpen, editingTask,
-    loading, membershipsLoaded, syncStatus, session, currentMember, isMember, isOwner, isAdmin, isGuest, canManageMembers, myRole, onSignOut,
+    loading, membershipsLoaded, syncStatus, session, currentMember, refreshCurrentMember, isMember, isOwner, isAdmin, isGuest, canManageMembers, myRole, onSignOut,
     workspaces, currentWorkspaceId, switchWorkspace, createWorkspace,
     members, meId: userId, resolveAssignee, refreshMembers,
     setTheme, setView, setFilters, setCompact, setDraggedId,
@@ -810,7 +930,23 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     chatUnread, markChatRead,
     dmConversations, dmUnread, dmActiveConv, setDmActiveConv, markDmRead, startDm, refreshDms,
     entitlements, upgradeFeature, requestUpgrade, dismissUpgrade,
-  };
+  }), [
+    tasks, projects, workspaceStats, theme, view, filters, compact, draggedId,
+    paletteOpen, quickAddOpen, editingTask,
+    loading, membershipsLoaded, syncStatus, session, currentMember, refreshCurrentMember, isMember, isOwner, isAdmin, isGuest, canManageMembers, myRole, onSignOut,
+    workspaces, currentWorkspaceId, switchWorkspace, createWorkspace,
+    members, userId, resolveAssignee, refreshMembers,
+    setTheme, setView, setFilters, setCompact, setDraggedId,
+    setPaletteOpen, setQuickAddOpen, setEditingTask,
+    addTask, updateTask, deleteTask, duplicateTask, toggleSubtask, addSubtask, removeSubtask, moveSubtask,
+    createProject, renameProject, deleteProject, exitingProjectIds,
+    pendingInvites, acceptInvitation, refreshInvites,
+    startDraftTask, closeEditing, exitingIds, creatorLabel,
+    exportJSON, importJSON, showToast,
+    chatUnread, markChatRead,
+    dmConversations, dmUnread, dmActiveConv, setDmActiveConv, markDmRead, startDm, refreshDms,
+    entitlements, upgradeFeature, requestUpgrade, dismissUpgrade,
+  ]);
   return (
     <AppCtx.Provider value={value}>
       {children}
@@ -1158,7 +1294,7 @@ function MentionText({ text, mentions }) {
  *  The dropdown is PORTALED to <body> and anchored above the field, so it's never clipped by a modal /
  *  chat container's overflow. onMentionsChange reports the ids whose `@name` is still in the text. The
  *  server trigger is the real gate — it only notifies a mentioned user who can actually see the surface. */
-function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onEnter, onTyping, onBlur, rows = 2, placeholder, className, autoFocus, textareaRef }) {
+function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onEnter, onTyping, onBlur, rows = 2, placeholder, className, autoFocus, textareaRef, maxLength = 10000 }) {
   const innerRef = useRef(null);
   const taRef = textareaRef || innerRef;
   const pickedRef = useRef(new Map());   // userId -> displayName for everyone picked from the dropdown
@@ -1208,7 +1344,7 @@ function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onE
   };
   return (
     <div className="relative flex-1 min-w-0">
-      <textarea ref={taRef} value={value} onChange={handleChange} onKeyDown={onKeyDown}
+      <textarea ref={taRef} value={value} onChange={handleChange} onKeyDown={onKeyDown} maxLength={maxLength}
         onClick={(e) => openMenuFor(e.target.value, e.target.selectionStart ?? 0)}
         onBlur={onBlur} rows={rows} placeholder={placeholder} autoFocus={autoFocus} className={cx(className, 'w-full')} />
       {menu && pos && filtered.length > 0 && createPortal(
@@ -1218,8 +1354,7 @@ function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onE
           {filtered.map((m, i) => (
             <button key={m.userId} type="button" onMouseDown={(ev) => { ev.preventDefault(); pick(m); }} onMouseEnter={() => setActive(i)}
               className={cx('w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left', i === active ? 'bg-violet-500/25 text-white' : 'text-white/85')}>
-              <span className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-semibold shrink-0"
-                style={{ background: assigneeColor(m.userId).soft, color: assigneeColor(m.userId).hex }}>{initialsOf(m.displayName || m.email)}</span>
+              <Avatar name={m.displayName || m.email} userId={m.userId} photoUrl={m.avatarUrl} size={20} />
               <span className="truncate">{m.displayName || m.email}</span>
             </button>
           ))}
@@ -1279,9 +1414,14 @@ function TaskComments({ taskId }) {
 
   const nameOf = (id) => people[id]?.display_name || people[id]?.email || 'Someone';
 
+  // A17: in-flight guard — a fast double-Enter fires two keydown handlers closing over the same render's
+  // `text` (state hasn't re-rendered yet), so both would post the same comment (and double its notification).
+  // Matches the chat Composer / QuickAdd pattern.
+  const sendingRef = useRef(false);
   const send = async () => {
     const body = text.trim();
-    if (!body) return;
+    if (!body || sendingRef.current) return;
+    sendingRef.current = true;
     const mns = mentions;
     setText(''); setMentions([]);
     try {
@@ -1290,6 +1430,8 @@ function TaskComments({ taskId }) {
     } catch (err) {
       console.error('Failed to add comment:', err);
       setText(body); // restore on failure
+    } finally {
+      sendingRef.current = false;
     }
   };
 
@@ -1431,20 +1573,27 @@ function Attachments({ taskId, canEdit }) {
     setError('');
     let count = items.length;
     setUploading(true);
-    for (const file of files) {
-      // Client-side pre-checks for friendly messages; the server RLS + bucket config are authoritative.
-      if (!attachmentsApi.ALLOWED_MIME.has(file.type)) { setError(`"${file.name}" — that file type isn't allowed. Images, PDF, text, CSV, ZIP, and Office documents only.`); continue; }
-      if (file.size > attachmentsApi.MAX_BYTES) { setError(`"${file.name}" is too large — files must be under 25 MB.`); continue; }
-      if (count >= attachmentsApi.MAX_PER_TASK) { setError(`A task can have at most ${attachmentsApi.MAX_PER_TASK} attachments.`); break; }
-      try {
-        const created = await attachmentsApi.upload(taskId, file, currentWorkspaceId);
-        setItems(prev => [...(prev || []), created]);
-        count += 1;
-      } catch {
-        setError(`Couldn't upload "${file.name}". You may have hit the 25 MB file, ${attachmentsApi.MAX_PER_TASK}-per-task, or workspace storage limit — or you don't have permission.`);
+    // finally guarantees the "Uploading…" state clears even if an unexpected error escapes the
+    // per-file try below — the dropzone can never wedge on a stuck spinner. (A truly HUNG upload on a
+    // half-open socket still needs an AbortController timeout in api.js; that's flagged separately so
+    // the timeout can be tuned against a real slow 25 MB upload rather than guessed here.)
+    try {
+      for (const file of files) {
+        // Client-side pre-checks for friendly messages; the server RLS + bucket config are authoritative.
+        if (!attachmentsApi.ALLOWED_MIME.has(file.type)) { setError(`"${file.name}" — that file type isn't allowed. Images, PDF, text, CSV, ZIP, and Office documents only.`); continue; }
+        if (file.size > attachmentsApi.MAX_BYTES) { setError(`"${file.name}" is too large — files must be under 25 MB.`); continue; }
+        if (count >= attachmentsApi.MAX_PER_TASK) { setError(`A task can have at most ${attachmentsApi.MAX_PER_TASK} attachments.`); break; }
+        try {
+          const created = await attachmentsApi.upload(taskId, file, currentWorkspaceId);
+          setItems(prev => [...(prev || []), created]);
+          count += 1;
+        } catch {
+          setError(`Couldn't upload "${file.name}". You may have hit the 25 MB file, ${attachmentsApi.MAX_PER_TASK}-per-task, or workspace storage limit — or you don't have permission.`);
+        }
       }
+    } finally {
+      setUploading(false);
     }
-    setUploading(false);
   };
 
   const onPick = (e) => { if (e.target.files?.length) runUpload(e.target.files); e.target.value = ''; };
@@ -1575,7 +1724,8 @@ function TaskModal() {
             value={t.title}
             onChange={e => set({ title: e.target.value })}
             readOnly={!canEditTask}
-            className="w-full bg-transparent text-xl sm:text-2xl font-semibold text-white placeholder-white/30 outline-none font-display read-only:cursor-default"
+            maxLength={500}
+            className="w-full bg-transparent text-xl sm:text-2xl font-semibold text-white placeholder-white/30 outline-none font-display read-only:cursor-default break-words"
             placeholder="Task title"
           />
           {t.createdBy && <div className="mt-1.5 text-[11px] text-white/35">Added by {creatorLabel(t.createdBy)}</div>}
@@ -1637,6 +1787,7 @@ function TaskModal() {
             <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5">Notes</div>
             <textarea value={t.description} onChange={e => set({ description: e.target.value })} rows={4}
               readOnly={!canEditTask}
+              maxLength={20000}
               placeholder="Context, acceptance criteria, links…"
               className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white/90 outline-none focus:border-white/25 resize-y read-only:cursor-default read-only:opacity-80" />
           </div>
@@ -1646,6 +1797,7 @@ function TaskModal() {
               <div className="text-[10px] font-medium uppercase tracking-widest text-rose-300/70 mb-1.5">Blocked because</div>
               <input value={t.blockedReason} onChange={e => set({ blockedReason: e.target.value })} placeholder="Waiting on…"
                 readOnly={!canEditTask}
+                maxLength={1000}
                 className="w-full bg-rose-500/5 border border-rose-500/20 rounded-lg px-3 py-2 text-sm text-white/90 outline-none focus:border-rose-500/40 read-only:cursor-default" />
             </div>
           )}
@@ -1684,7 +1836,7 @@ function TaskModal() {
               {canEditTask ? (
                 <div className="flex gap-2 pt-1">
                   <input value={newSub} onChange={e => setNewSub(e.target.value)} onKeyDown={e => e.key === 'Enter' && submitSub()}
-                    placeholder="Add checklist item…"
+                    placeholder="Add checklist item…" maxLength={500}
                     className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white/90 outline-none focus:border-violet-400/50" />
                   <button onClick={submitSub} className="px-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white/70 text-sm">Add</button>
                 </div>
@@ -2051,7 +2203,7 @@ function QuickAdd() {
           <Sparkles className="w-4 h-4 text-violet-400" />
           <input ref={inputRef} value={title} onChange={e => setTitle(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') submit(); }}
-            placeholder="What needs to get done?"
+            placeholder="What needs to get done?" maxLength={500}
             className="flex-1 bg-transparent text-lg text-white outline-none placeholder-white/30 font-display" />
           <kbd className="text-[10px] text-white/30 bg-white/5 border border-white/10 rounded px-1.5 py-0.5">Enter</kbd>
         </div>
@@ -2106,11 +2258,12 @@ function CommandPalette() {
   const [q, setQ] = useState('');
   const inputRef = useRef(null);
   const [idx, setIdx] = useState(0);
-  // Messages aren't held in a global store, so load the workspace's team-chat + DM bodies on open
-  // and search them client-side. Both calls are RLS-scoped (team chat gates on non-guest membership,
-  // DMs on participation), so results can only ever include messages the user is already allowed to
-  // see — the same by-construction isolation as the task search (which filters the RLS-loaded tasks).
-  const [msgIndex, setMsgIndex] = useState([]);
+  // 5d: team-chat search now runs server-side via the search_messages RPC (full history + RLS-safe: a guest
+  // still gets 0 team-chat hits, enforced by messages_select_member — not a client role check). We only load
+  // DM bodies here for the client-side DM grep (a DM search RPC is a separate follow-up); DMs stay
+  // participant-scoped by RLS. This also drops the old 200-row chat prefetch on every palette open.
+  const [msgIndex, setMsgIndex] = useState([]);          // DM bodies only
+  const [serverChatMsgs, setServerChatMsgs] = useState([]);   // team-chat matches from the RPC
 
   useEffect(() => { if (paletteOpen) { setQ(''); setIdx(0); setTimeout(() => inputRef.current?.focus(), 50); } }, [paletteOpen]);
 
@@ -2118,20 +2271,28 @@ function CommandPalette() {
     if (!paletteOpen) return;
     let on = true;
     const load = currentWorkspaceId
-      ? Promise.all([
-          messagesApi.list(200, currentWorkspaceId).catch(() => []),
-          directMessagesApi.listRecentMessages(currentWorkspaceId, 500).catch(() => []),
-        ])
-      : Promise.resolve([[], []]);   // no workspace → empty index (set async so this effect never setState-s synchronously)
-    load.then(([chat, dm]) => {
+      ? directMessagesApi.listRecentMessages(currentWorkspaceId, 500).catch(() => [])
+      : Promise.resolve([]);   // no workspace → empty index (set async so this effect never setState-s synchronously)
+    load.then(dm => {
       if (!on) return;
-      setMsgIndex([
-        ...chat.filter(m => m.body && !m.deletedAt).map(m => ({ kind: 'chat', id: m.id, body: m.body, senderId: m.senderId })),
-        ...dm.filter(m => m.body && !m.deletedAt).map(m => ({ kind: 'dm', id: m.id, body: m.body, senderId: m.senderId, conversationId: m.conversationId })),
-      ]);
+      setMsgIndex(dm.filter(m => m.body && !m.deletedAt).map(m => ({ kind: 'dm', id: m.id, body: m.body, senderId: m.senderId, conversationId: m.conversationId })));
     });
     return () => { on = false; };
   }, [paletteOpen, currentWorkspaceId]);
+
+  // Debounced server search over team chat (RLS-respecting). Guest -> 0 hits, by construction.
+  useEffect(() => {
+    const term = q.trim();
+    let on = true;
+    const t = setTimeout(() => {
+      if (!on) return;
+      if (!paletteOpen || !term || !currentWorkspaceId) { setServerChatMsgs([]); return; }
+      messagesApi.search(term, currentWorkspaceId, 6)
+        .then(rows => { if (on) setServerChatMsgs(rows.filter(m => m.body && !m.deletedAt).map(m => ({ kind: 'chat', id: m.id, body: m.body, senderId: m.senderId }))); })
+        .catch(() => { if (on) setServerChatMsgs([]); });
+    }, 200);
+    return () => { on = false; clearTimeout(t); };
+  }, [q, paletteOpen, currentWorkspaceId]);
 
   // No per-message URL anchor exists (see recon) — deep-link to the channel / conversation, like notifications do.
   const openMessage = (m) => {
@@ -2168,9 +2329,11 @@ function CommandPalette() {
       const desc  = (t.description || '').toLowerCase();
       return title.includes(term) || desc.includes(term);
     }).slice(0, 6);
-    const msgs = msgIndex.filter(m => m.body.toLowerCase().includes(term)).slice(0, 6);
+    // team-chat matches from the server RPC (full history, guest-safe) + DM matches from the loaded window
+    const dmMsgs = msgIndex.filter(m => m.body.toLowerCase().includes(term)).slice(0, 6);
+    const msgs = [...serverChatMsgs, ...dmMsgs].slice(0, 6);
     return { cmds, tasks: tList, msgs };
-  }, [q, tasks, commands, msgIndex]);
+  }, [q, tasks, commands, msgIndex, serverChatMsgs]);
 
   const flat = [
     ...results.cmds.map(c => ({ type: 'cmd', item: c })),
@@ -2499,24 +2662,31 @@ function NotificationBell() {
   const [toasts, setToasts] = useState([]);
   const [exitingNotifIds, setExitingNotifIds] = useState(() => new Set());
   const [confirmClear, setConfirmClear] = useState(false);
+  const [serverUnread, setServerUnread] = useState(null);   // 5b: accurate unread from the RPC (past the 50-row window)
   const removeToast = useCallback((id) => setToasts(prev => prev.filter(t => t.id !== id)), []);
 
-  const unreadCount = items.reduce((n, x) => n + (x.read ? 0 : 1), 0);
+  const localUnread = items.reduce((n, x) => n + (x.read ? 0 : 1), 0);
+  // Prefer the server count (correct even when unread > the 50 rows the bell loads); fall back to local.
+  const unreadCount = serverUnread != null ? serverUnread : localUnread;
 
   // Initial load of the current user's notifications (RLS scopes to recipient).
   useEffect(() => {
-    if (!userId || !currentWorkspaceId) { setLoading(false); return; }
+    if (!userId || !currentWorkspaceId) { setItems([]); setLoading(false); return; }
     let mounted = true;
+    // A11: clear the PREVIOUS workspace's notifications on switch — like tasks/projects/members/DMs already
+    // do — so they can't survive as merge "extras" and inflate the new workspace's unread badge.
+    setItems([]);
     setLoading(true);
     notificationsApi.list(50, currentWorkspaceId)
       .then(list => {
         if (!mounted) return;
-        // Merge with any realtime items that arrived during the fetch (dedupe by id, newest-first)
-        // so a notification streamed in mid-load is not clobbered by the list replacement.
+        // Merge with any realtime items that arrived during THIS fetch (dedupe by id, newest-first) so a
+        // notification streamed in mid-load isn't clobbered — but ONLY current-workspace items, never a
+        // stale cross-workspace carryover.
         setItems(prev => {
           if (prev.length === 0) return list;
           const seen = new Set(list.map(x => x.id));
-          const extras = prev.filter(x => !seen.has(x.id));
+          const extras = prev.filter(x => !seen.has(x.id) && x.workspaceId === currentWorkspaceId);
           return [...extras, ...list].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
         });
       })
@@ -2524,6 +2694,14 @@ function NotificationBell() {
       .finally(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
   }, [userId, currentWorkspaceId]);
+
+  // 5b: keep the accurate server unread count fresh — on load, on switch, and after any bell change
+  // (new notification, mark-read, clear), debounced so a burst collapses into one count query.
+  useEffect(() => {
+    if (!userId || !currentWorkspaceId) return undefined;
+    const t = setTimeout(() => { notificationsApi.unreadCount(currentWorkspaceId).then(setServerUnread).catch(() => {}); }, 300);
+    return () => clearTimeout(t);
+  }, [userId, currentWorkspaceId, items]);
 
   // Realtime: a new notification for this recipient bumps the badge + raises an in-app toast.
   useEffect(() => {
@@ -2832,6 +3010,94 @@ function ConfirmModal({ open, title, message, confirmLabel = 'Delete', confirmDi
   );
 }
 
+/**
+ * Project delete modal. Owner+admin only (the trigger button is already gated). When the project has
+ * tasks, the caller chooses: "Keep the tasks" (unassign -> re-file to another project) or, OWNER ONLY,
+ * "Delete the tasks too" (cascade), which requires typing the project name to confirm (matches the
+ * "No bulk-delete without a typed-confirmation modal" landmine). Both routes go through the
+ * delete_project RPC, which enforces the rank + workspace + caller-visibility rules server-side.
+ * taskCount: null = checking, -1 = error, >=0 = reliable count (from the project_task_count RPC).
+ */
+function ProjectDeleteModal({ open, project, taskCount, isOwner, onCancel, onConfirm }) {
+  const [mode, setMode] = useState('unassign');   // 'unassign' | 'cascade'
+  const [confirmText, setConfirmText] = useState('');
+  const panelRef = useRef(null);
+  useEffect(() => { if (open) setTimeout(() => panelRef.current?.focus(), 30); }, [open]);
+  if (!open || !project) return null;
+
+  const checking = taskCount === null;
+  const errored = taskCount === -1;
+  const count = typeof taskCount === 'number' && taskCount > 0 ? taskCount : 0;
+  const reassignTo = project.id === 'other' ? 'personal' : 'other';   // where kept tasks land
+  const cascadeReady = mode !== 'cascade' || confirmText.trim() === (project.name || '').trim();
+  const canConfirm = !checking && !errored && cascadeReady;
+  // reset in the close handlers (not an effect) so a reopened modal starts fresh — cascade must always
+  // require re-typing the project name — while staying clear of the react-hooks/set-state-in-effect rule.
+  const reset = () => { setMode('unassign'); setConfirmText(''); };
+  const handleCancel = () => { reset(); onCancel(); };
+  const doConfirm = () => { if (!canConfirm) return; const m = mode, r = reassignTo; reset(); onConfirm(m, r); };
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={handleCancel} />
+      <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
+        <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Delete ${project.name}`}
+          className="pointer-events-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5 outline-none"
+          style={{ animation: 'slideUp .2s ease' }}
+          onClick={e => e.stopPropagation()}
+          onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); handleCancel(); } }}>
+          <h2 className="text-base font-semibold text-white mb-1 break-words">Delete “{project.name}”?</h2>
+
+          {checking && <p className="text-xs text-white/55 mb-4">Checking for tasks…</p>}
+          {errored && <p className="text-xs text-rose-300 mb-4">Couldn't check this project's tasks. Please try again.</p>}
+          {!checking && !errored && count === 0 && (
+            <p className="text-xs text-white/55 mb-4">This project has no tasks. It will be permanently deleted.</p>
+          )}
+
+          {!checking && !errored && count > 0 && (
+            <div className="space-y-2 mb-4">
+              <p className="text-xs text-white/55">“{project.name}” has {count} task{count === 1 ? '' : 's'}. Choose what happens to them:</p>
+              <label className={cx('flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-colors',
+                mode === 'unassign' ? 'border-violet-400/50 bg-violet-500/10' : 'border-white/10 hover:bg-white/5')}>
+                <input type="radio" name="pdmode" checked={mode === 'unassign'} onChange={() => setMode('unassign')} className="mt-0.5" />
+                <span className="text-xs text-white/80"><span className="font-medium text-white">Keep the tasks</span> — move them to “{reassignTo}”, then delete the project.</span>
+              </label>
+              {isOwner && (
+                <label className={cx('flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-colors',
+                  mode === 'cascade' ? 'border-rose-400/50 bg-rose-500/10' : 'border-white/10 hover:bg-white/5')}>
+                  <input type="radio" name="pdmode" checked={mode === 'cascade'} onChange={() => setMode('cascade')} className="mt-0.5" />
+                  <span className="text-xs text-white/80"><span className="font-medium text-rose-200">Delete the tasks too</span> — permanently removes the project and its {count} task{count === 1 ? '' : 's'}. Can't be undone.</span>
+                </label>
+              )}
+              {mode === 'cascade' && (
+                <div className="pt-1">
+                  <p className="text-[11px] text-white/50 mb-1.5">Type <span className="text-white/80 font-medium">{project.name}</span> to confirm:</p>
+                  <input autoFocus value={confirmText} onChange={e => setConfirmText(e.target.value)}
+                    className="w-full h-9 px-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-rose-400/50"
+                    placeholder={project.name} aria-label="Type the project name to confirm deletion" />
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={handleCancel}
+              className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">Cancel</button>
+            <button onClick={doConfirm} disabled={!canConfirm}
+              className={cx('h-9 px-4 rounded-xl text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
+                !canConfirm ? 'bg-white/10 text-white/40 cursor-not-allowed'
+                  : mode === 'cascade' ? 'bg-rose-500 hover:bg-rose-400' : 'bg-violet-500 hover:bg-violet-400')}>
+              <Trash2 className="w-3.5 h-3.5" />
+              {count > 0 && mode === 'cascade' ? `Delete project + ${count} task${count === 1 ? '' : 's'}` : 'Delete project'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>,
+    document.body
+  );
+}
+
 /** In-app "upgrade to unlock X" modal. Opened by AppProvider.requestUpgrade(featureKey); reads the
  *  feature/limit copy from lib/plans.js (FEATURE_META) and routes to /pricing or /checkout. Graceful
  *  by design — every gated action opens this, never a dead end or a silent failure. */
@@ -2927,7 +3193,17 @@ function ProjectModal({ open, onClose, project }) {
     if (trimmed.length > 80) { setErr('Name must be 80 characters or fewer.'); return; }
     setBusy(true); setErr('');
     try {
-      if (editing) await renameProject(project.id, { name: trimmed, color, icon: icon || '◇' });
+      if (editing) {
+        // Send ONLY the fields that actually changed (not the whole {name,color,icon} object), so a
+        // concurrent edit to a field this user didn't touch isn't clobbered by a last-write-wins
+        // full-object rewrite — the same minimal-patch discipline the task-field edits already use.
+        const iconVal = icon || '◇';
+        const patch = {};
+        if (trimmed !== (project.name || '')) patch.name = trimmed;
+        if (color !== (project.color || PROJECT_PALETTE[0])) patch.color = color;
+        if (iconVal !== (project.icon || '◇')) patch.icon = iconVal;
+        if (Object.keys(patch).length) await renameProject(project.id, patch);
+      }
       else await createProject({ name: trimmed, color, icon: icon || '◇' });
       onClose();
     } catch (e2) {
@@ -3077,11 +3353,12 @@ function WorkspaceSwitcher() {
 }
 
 function TopBar() {
-  const { theme, setTheme, setPaletteOpen, setQuickAddOpen, filters, setFilters, view, compact, setCompact, exportJSON, importJSON, projects, syncStatus, currentMember, myRole, onSignOut, members, meId, requestUpgrade } = useApp();
+  const { theme, setTheme, setPaletteOpen, setQuickAddOpen, filters, setFilters, view, compact, setCompact, exportJSON, importJSON, projects, syncStatus, currentMember, myRole, onSignOut, members, meId, isGuest, membershipsLoaded } = useApp();
   const entitlements = useEntitlements();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const fileRef = useRef(null);
 
   const showFilters = ['kanban', 'projects', 'schedule', 'matrix'].includes(view);
@@ -3157,11 +3434,20 @@ function TopBar() {
                   )}
                   <MenuItem icon={theme === 'dark' ? Sun : Moon} onClick={() => { setTheme(theme === 'dark' ? 'light' : 'dark'); setMenuOpen(false); }}>Switch to {theme === 'dark' ? 'light' : 'dark'}</MenuItem>
                   <MenuItem icon={Download} onClick={() => { exportJSON(); setMenuOpen(false); }}>Export JSON</MenuItem>
-                  <MenuItem icon={Upload} onClick={() => { setMenuOpen(false); if (entitlements.can('bulkImport')) fileRef.current?.click(); else requestUpgrade('bulkImport'); }}>Import JSON</MenuItem>
+                  {/* Import is free on every plan (plans.js FEATURE_TABLE: type 'always'), so the old
+                      entitlements.can('bulkImport') gate here was DEAD CODE — every plan sets it true, so
+                      the requestUpgrade branch was unreachable. Replaced with the gate that is actually
+                      real: guests must not bulk-import. Guests are bounced to /my-tasks, but TopBar renders
+                      on that route too, so GUEST_VIEWS did not cover this. The DB is the authority
+                      (tasks_insert_role + enforce_guest_task_pin, migration 20260715…); this is the UI half. */}
+                  {membershipsLoaded && !isGuest && (
+                    <MenuItem icon={Upload} onClick={() => { setMenuOpen(false); fileRef.current?.click(); }}>Import JSON</MenuItem>
+                  )}
                   <div className="h-px bg-white/5 my-1" />
                   <MenuItem icon={Sparkles} onClick={() => { setMenuOpen(false); navigate('/pricing'); }}>Plans &amp; pricing</MenuItem>
                   <MenuItem icon={FileText} onClick={() => { setMenuOpen(false); navigate('/terms'); }}>Terms of Service</MenuItem>
                   <MenuItem icon={Shield} onClick={() => { setMenuOpen(false); navigate('/privacy'); }}>Privacy Policy</MenuItem>
+                  <MenuItem icon={User} onClick={() => { setProfileOpen(true); setMenuOpen(false); }}>Edit profile</MenuItem>
                   <MenuItem icon={KeyRound} onClick={() => { setPasswordModalOpen(true); setMenuOpen(false); }}>Change password</MenuItem>
                   <div className="h-px bg-white/5 my-1" />
                   <MenuItem icon={LogOut} onClick={() => { onSignOut?.(); setMenuOpen(false); }}>Sign out</MenuItem>
@@ -3175,7 +3461,104 @@ function TopBar() {
       </div>
     </header>
     <ChangePasswordModal open={passwordModalOpen} onClose={() => setPasswordModalOpen(false)} />
+    {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
     </>
+  );
+}
+
+/**
+ * Self-profile editor: display name, status (emoji + text), bio, and avatar upload. Conditionally mounted
+ * (so useState initializers prefill from the freshly-loaded currentMember — no set-state-in-effect). Writes
+ * via membersApi.updateProfile; the server validates (role-title impersonation, length, storage-hosted
+ * avatar) so a rejection surfaces inline. Avatar uploads to the caller's own folder in the public avatars
+ * bucket and stores the resulting public URL. refreshCurrentMember() re-syncs the top bar after saving.
+ */
+function ProfileModal({ onClose }) {
+  const { currentMember, refreshCurrentMember } = useApp();
+  const [displayName, setDisplayName] = useState(() => currentMember?.display_name || '');
+  const [statusText, setStatusText] = useState(() => currentMember?.status_text || '');
+  const [statusEmoji, setStatusEmoji] = useState(() => currentMember?.status_emoji || '');
+  const [bio, setBio] = useState(() => currentMember?.bio || '');
+  const [avatarUrl, setAvatarUrl] = useState(() => currentMember?.avatar_url || null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const fileRef = useRef(null);
+  const panelRef = useRef(null);
+  useEffect(() => { setTimeout(() => panelRef.current?.focus(), 30); }, []);
+
+  const pickAvatar = async (file) => {
+    if (!file) return;
+    setErr(''); setBusy(true);
+    try { setAvatarUrl(await membersApi.uploadAvatar(file)); }
+    catch (e) { setErr(e?.message || 'Avatar upload failed.'); }
+    finally { setBusy(false); }
+  };
+
+  const save = async () => {
+    setErr(''); setBusy(true);
+    try {
+      await membersApi.updateProfile({ displayName, statusText, statusEmoji, bio, avatarUrl });
+      await refreshCurrentMember?.();
+      onClose();
+    } catch (e) {
+      setErr(e?.message || 'Could not save your profile.');
+      setBusy(false);
+    }
+  };
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
+        <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Edit profile"
+          className="pointer-events-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5 outline-none max-h-[85vh] overflow-y-auto"
+          style={{ animation: 'slideUp .2s ease' }}
+          onClick={e => e.stopPropagation()}
+          onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}>
+          <h2 className="text-base font-semibold text-white mb-4">Edit profile</h2>
+
+          <div className="flex items-center gap-3 mb-4">
+            <Avatar name={displayName || currentMember?.email} userId={currentMember?.id} photoUrl={avatarUrl} size={56} />
+            <div className="flex flex-col gap-1.5">
+              <button onClick={() => fileRef.current?.click()} disabled={busy}
+                className="h-8 px-3 rounded-lg bg-white/5 border border-white/10 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors disabled:opacity-50">
+                {busy ? 'Working…' : 'Upload photo'}
+              </button>
+              {avatarUrl && <button onClick={() => setAvatarUrl(null)} className="text-[11px] text-white/40 hover:text-rose-300 text-left">Remove photo</button>}
+              <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; pickAvatar(f); }} />
+            </div>
+          </div>
+
+          <label className="block text-[11px] text-white/50 mb-1">Display name</label>
+          <input value={displayName} onChange={e => setDisplayName(e.target.value)} maxLength={60}
+            className="w-full h-9 px-3 mb-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-violet-400/50" />
+
+          <label className="block text-[11px] text-white/50 mb-1">Status</label>
+          <div className="flex gap-2 mb-3">
+            <input value={statusEmoji} onChange={e => setStatusEmoji(e.target.value)} maxLength={16} placeholder="🟢" aria-label="Status emoji"
+              className="w-14 h-9 px-2 rounded-xl bg-white/5 border border-white/10 text-sm text-white text-center outline-none focus:border-violet-400/50" />
+            <input value={statusText} onChange={e => setStatusText(e.target.value)} maxLength={80} placeholder="What are you up to?" aria-label="Status text"
+              className="flex-1 h-9 px-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-violet-400/50" />
+          </div>
+
+          <label className="block text-[11px] text-white/50 mb-1">Bio</label>
+          <textarea value={bio} onChange={e => setBio(e.target.value)} maxLength={280} rows={3}
+            className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-violet-400/50 resize-none" />
+          <div className="text-[10px] text-white/30 text-right mb-3">{bio.length}/280</div>
+
+          {err && <p className="text-xs text-rose-300 mb-3 break-words">{err}</p>}
+
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={onClose}
+              className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">Cancel</button>
+            <button onClick={save} disabled={busy}
+              className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors disabled:opacity-50">Save</button>
+          </div>
+        </div>
+      </div>
+    </>,
+    document.body
   );
 }
 function MenuItem({ icon: Icon, children, onClick }) {
@@ -3238,7 +3621,7 @@ function Card({ children, className, title, subtitle, action, accent }) {
    DASHBOARD
 ================================================================================= */
 function DashboardView() {
-  const { tasks, setEditingTask, setView, meId } = useApp();
+  const { tasks, setEditingTask, setView, meId, workspaceStats } = useApp();
 
   // First run: an empty workspace gets a welcome + a clear "create your first task" path, not a wall
   // of empty cards. (The witty empty states below are kept for steady-state — a bucket clear because
@@ -3274,7 +3657,11 @@ function DashboardView() {
     doneWeek: tasks.filter(t => t.status === 'done' && t.completedAt && daysBetween(new Date(), t.completedAt) >= -6).length,
   };
 
-  const progress = tasks.length ? Math.round((tasks.filter(t => t.status === 'done').length / tasks.length) * 100) : 0;
+  // 5b: overall completion from the server aggregate (correct even once the task list is paginated);
+  // fall back to the in-memory array while the stats are still loading.
+  const progress = (workspaceStats && workspaceStats.total)
+    ? Math.round((workspaceStats.done / workspaceStats.total) * 100)
+    : (tasks.length ? Math.round((tasks.filter(t => t.status === 'done').length / tasks.length) * 100) : 0);
 
   return (
     <div className="space-y-6">
@@ -3852,7 +4239,7 @@ function ProjectsView() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteCount, setDeleteCount] = useState(null); // null = checking, -1 = error, >=0 = count
 
-  // On a delete request, fetch the reliable (owner-only, RLS-blind-spot-free) task count.
+  // On a delete request, fetch the reliable (owner/admin-gated, RLS-blind-spot-free) task count.
   // deleteCount is reset to null by the open/close handlers (not here), to avoid sync setState in an effect.
   useEffect(() => {
     if (!deleteTarget) return;
@@ -3864,18 +4251,20 @@ function ProjectsView() {
   }, [deleteTarget, currentWorkspaceId]);
 
   const canManage = membershipsLoaded && (isOwner || isAdmin || isMember);   // RLS: create/rename = rank>=1 (member/admin/owner)
-  const blocked = deleteCount === null || deleteCount !== 0;
-  const deleteMessage =
-    deleteCount === null ? 'Checking for tasks…'
-    : deleteCount === -1 ? "Couldn't check this project's tasks. Please try again."
-    : deleteCount > 0 ? `"${deleteTarget?.name}" still has ${deleteCount} task${deleteCount === 1 ? '' : 's'}. Move or delete them before deleting the project.`
-    : `Delete "${deleteTarget?.name}"? This can't be undone.`;
 
-  const filtered = tasks.filter(t => {
+  const filtered = useMemo(() => tasks.filter(t => {
     if (!matchesAssignee(t, filters.assignee, meId)) return false;
     if (filters.privacy !== 'all' && t.privacy !== filters.privacy) return false;
     return true;
-  });
+  }), [tasks, filters.assignee, filters.privacy, meId]);
+
+  // Bucket the filtered tasks by project id ONCE (O(n)) instead of re-scanning the whole list inside
+  // every project card (O(projects x tasks) — 150k comparisons/render at 30 projects x 5,000 tasks).
+  const tasksByProject = useMemo(() => {
+    const m = new Map();
+    for (const t of filtered) { const a = m.get(t.project); if (a) a.push(t); else m.set(t.project, [t]); }
+    return m;
+  }, [filtered]);
 
   return (
     <div className="space-y-6">
@@ -3902,7 +4291,7 @@ function ProjectsView() {
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {projects.map(p => {
-          const pTasks = filtered.filter(t => t.project === p.id);
+          const pTasks = tasksByProject.get(p.id) || [];
           const open = pTasks.filter(t => t.status !== 'done');
           const done = pTasks.filter(t => t.status === 'done');
           const pct = pTasks.length ? Math.round((done.length / pTasks.length) * 100) : 0;
@@ -3952,14 +4341,13 @@ function ProjectsView() {
 
       <ProjectModal open={createOpen} onClose={() => setCreateOpen(false)} project={null} />
       <ProjectModal open={!!editTarget} onClose={() => setEditTarget(null)} project={editTarget} />
-      <ConfirmModal
+      <ProjectDeleteModal
         open={!!deleteTarget}
-        title={deleteCount > 0 ? 'Project still has tasks' : 'Delete project?'}
-        message={deleteMessage}
-        confirmLabel="Delete project"
-        confirmDisabled={blocked}
-        onConfirm={() => { if (!deleteTarget) return; const id = deleteTarget.id; setDeleteTarget(null); setDeleteCount(null); deleteProject(id); }}
-        onClose={() => { setDeleteTarget(null); setDeleteCount(null); }}
+        project={deleteTarget}
+        taskCount={deleteCount}
+        isOwner={isOwner}
+        onCancel={() => { setDeleteTarget(null); setDeleteCount(null); }}
+        onConfirm={(mode, reassignTo) => { if (!deleteTarget) return; const id = deleteTarget.id; setDeleteTarget(null); setDeleteCount(null); deleteProject(id, mode, reassignTo); }}
       />
     </div>
   );
@@ -4045,9 +4433,9 @@ function ScheduleView() {
 /* =================================================================================
    MAIN APP
 ================================================================================= */
-export default function App({ session, currentMember, onSignOut }) {
+export default function App({ session, currentMember, onSignOut, refreshCurrentMember }) {
   return (
-    <AppProvider session={session} currentMember={currentMember} onSignOut={onSignOut}>
+    <AppProvider session={session} currentMember={currentMember} onSignOut={onSignOut} refreshCurrentMember={refreshCurrentMember}>
       <AppShell />
     </AppProvider>
   );
@@ -4057,6 +4445,30 @@ export default function App({ session, currentMember, onSignOut }) {
    TEAM CHAT
 ================================================================================= */
 const fmtDur = (s) => { s = Number(s); if (!isFinite(s) || s < 0) s = 0; s = Math.round(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+// Playback source for a voice note the CURRENT tab just recorded, keyed by its storage path. Lets the
+// sender play their own note straight from the blob they still hold instead of re-downloading it
+// (a signed-URL call + an audio fetch). Sender-only and tab-local; everyone else takes the signed URL.
+const localAudioUrls = new Map();
+const rememberLocalAudio = (path, url) => { if (path && url) localAudioUrls.set(path, url); };
+
+const WAVEFORM_BARS = 32;
+// Deterministic bar heights for the waveform. These are a VISUAL APPROXIMATION, not real amplitudes:
+// real peaks would mean decoding every note (AudioContext) or a new peaks column, and at 32 bars the
+// difference isn't perceivable. Seeding off the message id keeps a given note's shape stable across
+// re-renders and identical for both participants, which is what makes it read as "the note's shape".
+const waveformPeaks = (seed) => {
+  let h = hashStr(String(seed || 'voice')) || 1;
+  const out = [];
+  for (let i = 0; i < WAVEFORM_BARS; i++) {
+    h = (h * 1103515245 + 12345) & 0x7fffffff;
+    const r = (h % 1000) / 1000;
+    // Taper the ends so it reads like speech rather than a noise block.
+    const envelope = 0.62 + 0.38 * Math.sin((i / (WAVEFORM_BARS - 1)) * Math.PI);
+    out.push(Math.max(0.16, Math.min(1, (0.3 + r * 0.7) * envelope)));
+  }
+  return out;
+};
 
 /** Build the subtle "X is typing… / recording…" line from presence state. */
 const presenceLabel = (others) => {
@@ -4077,20 +4489,36 @@ const pickAudioMime = () => {
   return '';
 };
 
-// Custom, theme-aware audio player (play/pause, seekable bar, elapsed / total).
-function AudioPlayer({ url, duration }) {
+// The <audio> element currently playing, so starting one note pauses any other (WhatsApp-style —
+// without this, tapping play on a second note leaves both talking over each other).
+let nowPlayingAudio = null;
+
+// Custom, theme-aware voice-note player: play/pause, seekable waveform, elapsed / total.
+// Colors are INLINE rather than Tailwind classes on purpose — light mode here is retrofitted via
+// `[data-theme="light"]` rules that live inside per-view <style> blocks, so a class-based fill only
+// gets themed while the view that declares the rule is mounted (which is why the old bar washed out
+// in a cold-loaded DM). Inline styles read `theme` straight from context and are correct everywhere.
+function AudioPlayer({ url, duration, seed, pending }) {
+  const { theme } = useApp();
+  const light = theme === 'light';
   const audioRef = useRef(null);
   const barRef = useRef(null);
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
   const [total, setTotal] = useState(() => (isFinite(duration) && duration > 0 ? duration : 0));
   const [failed, setFailed] = useState(false);
+  const peaks = useMemo(() => waveformPeaks(seed), [seed]);
+
+  useEffect(() => () => { if (nowPlayingAudio === audioRef.current) nowPlayingAudio = null; }, []);
 
   const toggle = () => {
     const a = audioRef.current;
     if (!a) return;
-    if (a.paused) a.play().catch(() => setPlaying(false));  // onPlay/onPause keep state in sync
-    else a.pause();
+    if (a.paused) {
+      if (nowPlayingAudio && nowPlayingAudio !== a) nowPlayingAudio.pause();
+      nowPlayingAudio = a;
+      a.play().catch(() => setPlaying(false));  // onPlay/onPause keep state in sync
+    } else a.pause();
   };
   const seekTo = (ratio) => {
     const a = audioRef.current;
@@ -4110,12 +4538,17 @@ function AudioPlayer({ url, duration }) {
     else if (e.key === 'Home') { e.preventDefault(); seekTo(0); }
     else if (e.key === 'End') { e.preventDefault(); seekTo(1); }
   };
-  const pct = total ? Math.min(100, (current / total) * 100) : 0;
+  const ratio = total ? Math.min(1, current / total) : 0;
 
   if (failed) return <div className="mt-1 text-[11px] text-rose-300/70">Voice note unavailable</div>;
 
+  const playedHex = light ? '#7c3aed' : '#a78bfa';
+  const unplayedHex = light ? 'rgba(15,17,23,0.24)' : 'rgba(255,255,255,0.24)';
+
   return (
-    <div className="mt-1 flex items-center gap-2 w-[240px] max-w-full rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5">
+    // No nested border/background: the bubble already provides one, and boxing the player inside it
+    // was the "ugly" part. The waveform sits directly on the bubble, like WhatsApp.
+    <div className={cx('mt-1 flex items-center gap-2.5 w-[240px] max-w-full', pending && 'opacity-60')}>
       <audio ref={audioRef} src={url} preload="metadata"
         onLoadedMetadata={e => { const d = e.currentTarget.duration; if (isFinite(d) && d > 0) setTotal(d); }}
         onTimeUpdate={e => setCurrent(e.currentTarget.currentTime)}
@@ -4123,35 +4556,46 @@ function AudioPlayer({ url, duration }) {
         onPause={() => setPlaying(false)}
         onEnded={() => { setPlaying(false); setCurrent(0); }}
         onError={() => setFailed(true)} />
-      <button onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}
-        className="shrink-0 w-7 h-7 rounded-full bg-violet-500/25 hover:bg-violet-500/35 border border-violet-400/30 flex items-center justify-center text-white">
-        {playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 translate-x-px" />}
+      <button onClick={toggle} disabled={pending} aria-label={playing ? 'Pause' : 'Play'}
+        className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors disabled:cursor-default"
+        style={{ background: light ? 'rgba(124,58,237,0.14)' : 'rgba(139,92,246,0.25)', border: `1px solid ${playedHex}4d`, color: playedHex }}>
+        {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          : playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 translate-x-px" />}
       </button>
-      <div ref={barRef} onClick={onBarClick} onKeyDown={onBarKey} role="slider" tabIndex={0}
+      <div ref={barRef} onClick={onBarClick} onKeyDown={onBarKey} role="slider" tabIndex={pending ? -1 : 0}
         aria-label="Seek" aria-valuemin={0} aria-valuemax={Math.round(total)} aria-valuenow={Math.round(current)}
-        className="flex-1 h-1.5 rounded-full bg-white/10 cursor-pointer relative overflow-hidden focus:outline-none focus:ring-2 focus:ring-violet-400/40">
-        <div className="absolute inset-y-0 left-0 rounded-full bg-violet-400" style={{ width: `${pct}%` }} />
+        className="flex-1 h-7 flex items-center gap-[2px] cursor-pointer rounded focus:outline-none focus:ring-2 focus:ring-violet-400/40">
+        {peaks.map((p, i) => (
+          <span key={i} aria-hidden="true"
+            className="flex-1 rounded-full transition-colors duration-75"
+            style={{ height: `${Math.round(p * 100)}%`, minWidth: 2, background: (i / WAVEFORM_BARS) < ratio ? playedHex : unplayedHex }} />
+        ))}
       </div>
-      <span className="shrink-0 text-[10px] tabular-nums text-white/45">{fmtDur(current)}/{fmtDur(total)}</span>
+      <span className="shrink-0 text-[10px] tabular-nums" style={{ color: light ? 'rgba(15,17,23,0.5)' : 'rgba(255,255,255,0.45)' }}>
+        {fmtDur(playing || current ? current : total)}
+      </span>
     </div>
   );
 }
 
-function VoiceNote({ path, duration }) {
-  const [url, setUrl] = useState(null);
+function VoiceNote({ path, localUrl, duration, pending }) {
+  // A note this tab just recorded already has its audio in memory, so it plays with no network at
+  // all. Everyone else (and this tab after a reload) falls back to a signed URL.
+  const [url, setUrl] = useState(() => localUrl || localAudioUrls.get(path) || null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
+    if (url || !path) return;
     let on = true;
     messagesApi.signedUrl(path).then(u => { if (on) setUrl(u); }).catch(() => { if (on) setFailed(true); });
     return () => { on = false; };
-  }, [path]);
+  }, [path, url]);
   if (failed) return <div className="mt-1 text-[11px] text-rose-300/70">Voice note unavailable</div>;
   if (!url) return (
-    <div className="mt-1 inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-[11px] text-white/40">
+    <div className="mt-1 inline-flex items-center gap-2 px-1 py-1.5 text-[11px] text-white/40">
       <Loader2 className="w-3 h-3 animate-spin" />Loading…
     </div>
   );
-  return <AudioPlayer url={url} duration={duration} />;
+  return <AudioPlayer url={url} duration={duration} seed={path || 'pending'} pending={pending} />;
 }
 
 /* ── Messaging time helpers ─────────────────────────────────────────────────── */
@@ -4208,15 +4652,41 @@ function DayDivider({ label }) {
   );
 }
 
-/** Round sender avatar (deterministic color + initial). */
-function MsgAvatar({ name, userId, size = 28 }) {
+/** The one avatar in the app. Photo if the user has one, else their initials, else a silhouette —
+ *  never an empty circle. The deterministic per-user color still tints the fallback, so a person
+ *  stays recognisable at a glance whether or not they've uploaded a photo.
+ *  `photoUrl` is inert until the profile-photo work lands; every call site is already wired for it. */
+function Avatar({ name, userId, photoUrl, size = 28, className }) {
   const c = assigneeColor(userId);
+  const [broken, setBroken] = useState(false);
+  const initials = initialsFor(name);
+  const showPhoto = !!photoUrl && !broken;
+
   return (
-    <span className="rounded-full flex items-center justify-center font-semibold shrink-0 select-none"
-      style={{ width: size, height: size, background: c.soft, color: c.hex, border: `1px solid ${c.hex}33`, fontSize: Math.round(size * 0.4) }}>
-      {initialsOf(name)}
+    <span className={cx('rounded-full flex items-center justify-center font-semibold shrink-0 select-none overflow-hidden', className)}
+      style={{
+        width: size, height: size,
+        background: showPhoto ? 'transparent' : c.soft,
+        color: c.hex,
+        border: `1px solid ${c.hex}33`,
+        fontSize: Math.round(size * 0.36),
+      }}>
+      {showPhoto ? (
+        // Fixed box + lazy/async decode: an avatar renders in every roster row and chat line, so it
+        // must never drive layout off an image whose real dimensions we don't control.
+        <img src={photoUrl} alt="" width={size} height={size} loading="lazy" decoding="async"
+          onError={() => setBroken(true)}
+          style={{ width: size, height: size, objectFit: 'cover', display: 'block' }} />
+      ) : initials ? initials : (
+        <User aria-hidden="true" style={{ width: Math.round(size * 0.5), height: Math.round(size * 0.5) }} />
+      )}
     </span>
   );
+}
+
+/** Round sender avatar for chat/DM bubbles. Thin alias kept so the messaging call sites read clearly. */
+function MsgAvatar({ name, userId, photoUrl, size = 28 }) {
+  return <Avatar name={name} userId={userId} photoUrl={photoUrl} size={size} />;
 }
 
 // Edit/delete are allowed for 10 minutes after sending — the SAME window the DB trigger enforces.
@@ -4240,7 +4710,8 @@ function MsgBubble({ m, mine, onDelete, onEdit }) {
   const canCopy = hasBody && !deleted;
   // Trigger visibility (pure): the precise 10-min window is computed in openMenu, not at render
   // (Date.now() is impure for render), and gates Edit/Delete inside the menu via `actable`.
-  const menuBtn = !deleted && (canCopy || mine);
+  // A pending bubble has no server row yet, so there is nothing to edit, copy or delete on it.
+  const menuBtn = !deleted && !m.pending && (canCopy || mine);
   const MENU_W = 144;
   // Anchor the menu to the trigger's viewport rect, then render it via a PORTAL to document.body so
   // it escapes the scroll/overflow clipping of the message list (the old absolute menu was clipped
@@ -4304,7 +4775,9 @@ function MsgBubble({ m, mine, onDelete, onEdit }) {
           {edited && <span className="ml-1.5 text-[10px] text-white/35 not-italic">(edited)</span>}
         </div>
       )}
-      {m.audioPath && <VoiceNote path={m.audioPath} duration={m.audioDuration} />}
+      {(m.audioPath || m.localUrl) && (
+        <VoiceNote path={m.audioPath} localUrl={m.localUrl} duration={m.audioDuration} pending={m.pending} />
+      )}
       {menuBtn && (
         <button ref={btnRef} onClick={() => (menu ? setMenu(false) : openMenu())} aria-label="Message actions"
           className={cx('absolute -top-2 w-6 h-6 rounded-full bg-[#0f1017] border border-white/10 flex items-center justify-center text-white/45 hover:text-white/80 transition-opacity',
@@ -4343,9 +4816,10 @@ function MsgBubble({ m, mine, onDelete, onEdit }) {
 /** The scrollable message timeline — sticky day dividers, sender grouping, avatars (both
  *  surfaces), per-message receipts (DM), skeleton loading, empty state, sticky-bottom
  *  autoscroll, and a jump-to-latest button. Shared by the team channel and DM threads. */
-function MessageList({ items, userId, nameOf, loading, empty, onDelete, onEdit, receiptFor }) {
+function MessageList({ items, userId, nameOf, loading, empty, onDelete, onEdit, receiptFor, hasMore, onLoadOlder, loadingOlder }) {
   const scrollRef = useRef(null);
   const atBottomRef = useRef(true);
+  const prependAnchorRef = useRef(null);   // 5c: distance-from-bottom captured before an older page prepends
   const [showJump, setShowJump] = useState(false);
   const jump = () => { const el = scrollRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); };
   const onScroll = () => {
@@ -4353,10 +4827,23 @@ function MessageList({ items, userId, nameOf, loading, empty, onDelete, onEdit, 
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     atBottomRef.current = near; setShowJump(!near);
   };
-  // Stick to the bottom on new messages only when already near it (or it's my own send),
-  // so reading older history isn't yanked away.
+  // 5c: capture the scroll anchor synchronously (before the fetch resolves + items grow) so the viewport
+  // can be restored to the same message after older history is prepended above.
+  const handleLoadOlder = () => {
+    const el = scrollRef.current;
+    if (el) prependAnchorRef.current = el.scrollHeight - el.scrollTop;   // invariant under a top-prepend
+    onLoadOlder?.();
+  };
   useLayoutEffect(() => {
     const el = scrollRef.current; if (!el) return;
+    // Just prepended older history -> keep the same message in view (don't jump), and don't bottom-stick.
+    if (prependAnchorRef.current != null) {
+      el.scrollTop = el.scrollHeight - prependAnchorRef.current;
+      prependAnchorRef.current = null;
+      return;
+    }
+    // Otherwise stick to the bottom on new messages only when already near it (or it's my own send),
+    // so reading older history isn't yanked away.
     const last = items[items.length - 1];
     if (atBottomRef.current || last?.senderId === userId) { el.scrollTop = el.scrollHeight; setShowJump(false); }
   }, [items, userId]);
@@ -4380,7 +4867,16 @@ function MessageList({ items, userId, nameOf, loading, empty, onDelete, onEdit, 
   return (
     <div className="relative flex-1 min-h-0">
       <div ref={scrollRef} onScroll={onScroll} className="absolute inset-0 overflow-y-auto px-4 py-4">
-        {loading ? <ChatSkeleton /> : items.length === 0 ? empty : days.map(day => (
+        {loading ? <ChatSkeleton /> : items.length === 0 ? empty : (<>
+        {hasMore && (
+          <div className="flex justify-center pb-2">
+            <button onClick={handleLoadOlder} disabled={loadingOlder}
+              className="text-[11px] px-3 h-7 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 text-white/60 disabled:opacity-50 transition-colors">
+              {loadingOlder ? 'Loading…' : 'Load older messages'}
+            </button>
+          </div>
+        )}
+        {days.map(day => (
           <section key={day.key}>
             <DayDivider label={day.label} />
             {day.rows.map(({ m, firstOfGroup }) => {
@@ -4403,6 +4899,7 @@ function MessageList({ items, userId, nameOf, loading, empty, onDelete, onEdit, 
             })}
           </section>
         ))}
+        </>)}
       </div>
       {showJump && (
         <button onClick={jump} aria-label="Jump to latest"
@@ -4532,6 +5029,9 @@ function ChatView() {
   const [items, setItems] = useState([]);
   const [people, setPeople] = useState({});
   const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);          // 5c: an older page may exist
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const loadingOlderRef = useRef(false);
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [micError, setMicError] = useState('');
@@ -4575,7 +5075,7 @@ function ChatView() {
   useEffect(() => {
     if (!currentWorkspaceId) return;
     let on = true;
-    messagesApi.list(200, currentWorkspaceId).then(list => { if (on) setItems(list); }).catch(e => console.error('Failed to load messages:', e)).finally(() => { if (on) setLoading(false); });
+    messagesApi.list(200, currentWorkspaceId).then(list => { if (on) { setItems(list); setHasMore(list.length >= 200); } }).catch(e => console.error('Failed to load messages:', e)).finally(() => { if (on) setLoading(false); });
     markChatRead();
     const unsub = messagesApi.subscribe(({ type, message }) => {
       if (!message || !on) return;
@@ -4590,6 +5090,20 @@ function ChatView() {
     }, 'messages-thread', currentWorkspaceId);
     return () => { on = false; unsub(); };
   }, [markChatRead, currentWorkspaceId, userId]);
+
+  // 5c: fetch the previous page of history and prepend it (dedupe by id). Guarded against concurrent runs.
+  const loadOlder = useCallback(async () => {
+    if (loadingOlderRef.current) return;
+    const oldest = items[0];
+    if (!oldest) return;
+    loadingOlderRef.current = true; setLoadingOlder(true);
+    try {
+      const page = await messagesApi.listBefore(oldest.createdAt, 200, currentWorkspaceId);
+      if (page.length) setItems(prev => { const seen = new Set(prev.map(m => m.id)); return [...page.filter(m => !seen.has(m.id)), ...prev]; });
+      setHasMore(page.length >= 200);
+    } catch (e) { console.error('Load older messages failed:', e); }
+    finally { loadingOlderRef.current = false; setLoadingOlder(false); }
+  }, [items, currentWorkspaceId]);
 
   // Stop any in-flight recording on unmount.
   useEffect(() => () => {
@@ -4628,10 +5142,32 @@ function ChatView() {
         chunksRef.current = [];
         if (cancelRef.current || blob.size === 0) return;
         if (dur < 0.4) { setMicError('Too short. Hold to record a little longer.'); return; }
+        // Paint the bubble NOW from the local blob. sendVoice is three serial round-trips
+        // (getSession -> upload the whole blob -> insert), and until this it rendered nothing at all
+        // for that entire window.
+        const tempId = `pending-${uid()}`;
+        const localUrl = URL.createObjectURL(blob);
+        setItems(prev => [...prev, {
+          id: tempId, senderId: userId, body: null, audioPath: null, audioDuration: dur,
+          createdAt: nowISO(), pending: true, localUrl,
+        }]);
         try {
           const created = await messagesApi.sendVoice(blob, dur, ct, currentWorkspaceId);
-          setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
-        } catch (e) { console.error('Voice send failed:', e); setMicError('Failed to send voice note.'); }
+          // Keep the blob as this note's playback source so the sender never re-downloads what they
+          // just uploaded; it outlives the placeholder, so don't revoke it here.
+          rememberLocalAudio(created.audioPath, localUrl);
+          // Swap the placeholder for the server row. Insert-if-absent because the realtime echo can
+          // land the same row while the upload is still in flight.
+          setItems(prev => {
+            const rest = prev.filter(m => m.id !== tempId);
+            return rest.some(m => m.id === created.id) ? rest : [...rest, created];
+          });
+        } catch (e) {
+          console.error('Voice send failed:', e);
+          URL.revokeObjectURL(localUrl);
+          setItems(prev => prev.filter(m => m.id !== tempId));
+          setMicError('Failed to send voice note.');
+        }
       };
       mrRef.current = mr;
       startRef.current = Date.now();
@@ -4697,6 +5233,9 @@ function ChatView() {
         userId={userId}
         nameOf={nameOf}
         loading={loading}
+        hasMore={hasMore}
+        onLoadOlder={loadOlder}
+        loadingOlder={loadingOlder}
         onDelete={remove}
         onEdit={edit}
         empty={(
@@ -4801,8 +5340,7 @@ function DirectMessagesView() {
             <button key={c.id} onClick={() => setDmActiveConv(c.id)}
               className={cx('w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors',
                 selected ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]')}>
-              <span className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-semibold shrink-0"
-                style={{ background: a.soft, color: a.hex, border: `1px solid ${a.hex}33` }}>{a.initials}</span>
+              <Avatar name={a.label === 'Me' ? 'You' : a.label} userId={c.peerId} photoUrl={a.avatarUrl} size={32} />
               <span className="flex-1 min-w-0">
                 <span className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium text-white/85 truncate">{a.label === 'Me' ? 'You' : a.label}</span>
@@ -4866,6 +5404,9 @@ function DmThread({ conversationId, peerId, onBack }) {
   const [shownTyping, setShownTyping] = useState('');   // peer typing label (safety expiry + clear-on-message)
   const typingExpiryRef = useRef(null);
   const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);          // 5c: an older page may exist
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const loadingOlderRef = useRef(false);
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [micError, setMicError] = useState('');
@@ -4907,7 +5448,7 @@ function DmThread({ conversationId, peerId, onBack }) {
   useEffect(() => {
     let on = true;
     directMessagesApi.listMessages(conversationId, 200)
-      .then(list => { if (on) setItems(list); })
+      .then(list => { if (on) { setItems(list); setHasMore(list.length >= 200); } })
       .catch(e => console.error('Failed to load DM thread:', e))
       .finally(() => { if (on) setLoading(false); });
     refreshReads();
@@ -5021,10 +5562,26 @@ function DmThread({ conversationId, peerId, onBack }) {
         chunksRef.current = [];
         if (cancelRef.current || blob.size === 0) return;
         if (dur < 0.4) { setMicError('Too short. Hold to record a little longer.'); return; }
+        // Same instant-render path as team chat — see the comment there.
+        const tempId = `pending-${uid()}`;
+        const localUrl = URL.createObjectURL(blob);
+        setItems(prev => [...prev, {
+          id: tempId, senderId: userId, body: null, audioPath: null, audioDuration: dur,
+          createdAt: nowISO(), pending: true, localUrl,
+        }]);
         try {
           const created = await directMessagesApi.sendVoice(conversationId, blob, dur, ct);
-          setItems(prev => prev.some(m => m.id === created.id) ? prev : [...prev, created]);
-        } catch (e) { console.error('DM voice send failed:', e); setMicError('Failed to send voice note.'); }
+          rememberLocalAudio(created.audioPath, localUrl);
+          setItems(prev => {
+            const rest = prev.filter(m => m.id !== tempId);
+            return rest.some(m => m.id === created.id) ? rest : [...rest, created];
+          });
+        } catch (e) {
+          console.error('DM voice send failed:', e);
+          URL.revokeObjectURL(localUrl);
+          setItems(prev => prev.filter(m => m.id !== tempId));
+          setMicError('Failed to send voice note.');
+        }
       };
       mrRef.current = mr;
       startRef.current = Date.now();
@@ -5063,6 +5620,20 @@ function DmThread({ conversationId, peerId, onBack }) {
     catch (e) { console.error('DM edit failed:', e); directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(() => {}); }
   };
 
+  // 5c: fetch the previous page of this thread and prepend it (dedupe by id). Guarded against concurrent runs.
+  const loadOlder = useCallback(async () => {
+    if (loadingOlderRef.current) return;
+    const oldest = items[0];
+    if (!oldest) return;
+    loadingOlderRef.current = true; setLoadingOlder(true);
+    try {
+      const page = await directMessagesApi.listMessagesBefore(conversationId, oldest.createdAt, 200);
+      if (page.length) setItems(prev => { const seen = new Set(prev.map(m => m.id)); return [...page.filter(m => !seen.has(m.id)), ...prev]; });
+      setHasMore(page.length >= 200);
+    } catch (e) { console.error('Load older DMs failed:', e); }
+    finally { loadingOlderRef.current = false; setLoadingOlder(false); }
+  }, [items, conversationId]);
+
   return (
     <div className="flex flex-col h-full">
       <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2.5 shrink-0">
@@ -5079,6 +5650,9 @@ function DmThread({ conversationId, peerId, onBack }) {
         userId={userId}
         nameOf={nameOf}
         loading={loading}
+        hasMore={hasMore}
+        onLoadOlder={loadOlder}
+        loadingOlder={loadingOlder}
         onDelete={remove}
         onEdit={edit}
         receiptFor={receiptFor}
@@ -5303,9 +5877,12 @@ function MembersView() {
             const canModify = !isSelf && !isLastOwner && (myRank >= 3 ? true : (myRank >= 2 ? targetRank < 2 : false));
             return (
               <div key={m.userId} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/[0.02]">
-                <div className="min-w-0">
-                  <div className="text-sm text-white/90 truncate">{m.displayName || m.email}{isSelf && <span className="text-white/40"> (you)</span>}</div>
-                  <div className="text-[11px] text-white/40 truncate">{m.email}</div>
+                <div className="min-w-0 flex items-center gap-2.5">
+                  <Avatar name={m.displayName || m.email} userId={m.userId} photoUrl={m.avatarUrl} size={32} />
+                  <div className="min-w-0">
+                    <div className="text-sm text-white/90 truncate">{m.displayName || m.email}{isSelf && <span className="text-white/40"> (you)</span>}</div>
+                    <div className="text-[11px] text-white/40 truncate">{m.email}</div>
+                  </div>
                 </div>
                 <div className="shrink-0 flex items-center gap-2">
                   {!isSelf && (

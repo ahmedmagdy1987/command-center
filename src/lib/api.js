@@ -59,6 +59,41 @@ export const members = {
     if (error) throw error;
     return data;
   },
+
+  /**
+   * Update the signed-in user's OWN profile. Only these columns are grantable (identity columns are
+   * locked by the members_lock_identity trigger); content is validated server-side by
+   * members_validate_profile (role-title impersonation, length caps, storage-hosted avatar). Pass any
+   * subset of { displayName, statusText, statusEmoji, bio, avatarUrl }. Returns the updated row.
+   */
+  async updateProfile(patch) {
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+    const fields = {};
+    if (patch.displayName !== undefined) fields.display_name = patch.displayName;
+    if (patch.statusText  !== undefined) fields.status_text  = patch.statusText;
+    if (patch.statusEmoji !== undefined) fields.status_emoji = patch.statusEmoji;
+    if (patch.bio         !== undefined) fields.bio          = patch.bio;
+    if (patch.avatarUrl   !== undefined) fields.avatar_url   = patch.avatarUrl;
+    const { data, error } = await supabase.from('members').update(fields).eq('id', session.user.id).select().single();
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Upload an avatar image to the public `avatars` bucket under the caller's own folder (<uid>/…) and
+   * return its stable public URL — which is what avatar_url stores (members_validate_profile pins
+   * avatar_url to this bucket). The RLS avatars_insert_own policy enforces the own-folder path.
+   */
+  async uploadAvatar(file) {
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+    const ext = ((file.name || '').split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+    const path = `${session.user.id}/${uid()}.${ext}`;
+    const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type || undefined });
+    if (error) throw error;
+    return supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl;
+  },
 };
 
 /* =================================================================================
@@ -113,7 +148,8 @@ export const workspaceMembers = {
     if (!workspaceId) return [];
     const { data, error } = await supabase.rpc('workspace_members_list', { p_workspace_id: workspaceId });
     if (error) throw error;
-    return (data || []).map(r => ({ userId: r.user_id, displayName: r.display_name, email: r.email, role: r.role }));
+    return (data || []).map(r => ({ userId: r.user_id, displayName: r.display_name, email: r.email, role: r.role,
+      avatarUrl: r.avatar_url, bio: r.bio, statusText: r.status_text, statusEmoji: r.status_emoji }));
   },
 
   /**
@@ -226,16 +262,26 @@ export const projects = {
     return data;
   },
 
-  /** Delete a project. RLS projects_delete_owner gates to the workspace owner. */
-  async delete(id) {
-    const { error } = await supabase.from('projects').delete().eq('id', id);
+  /**
+   * Delete a project via the sanctioned delete_project RPC (the app's only delete path — the direct
+   * projects DELETE is retired here). mode 'cascade' (OWNER only, rank 3) deletes the project's
+   * caller-visible tasks; mode 'unassign' (OWNER+ADMIN, rank 2) re-files them to reassignTo; both then
+   * delete the project row. Server-side: workspace-scoped + can_see_task (GATE A) + project must exist.
+   * Returns { mode, tasks_affected, project_deleted }.
+   */
+  async deleteViaRpc(projectId, workspaceId, mode, reassignTo = 'other') {
+    const { data, error } = await supabase.rpc('delete_project', {
+      p_project_id: projectId, p_workspace_id: workspaceId, p_mode: mode, p_reassign_to: reassignTo,
+    });
     if (error) throw error;
+    return data;
   },
 
   /**
-   * Owner-only reliable count of a project's tasks via the project_task_count RPC (a SECURITY
+   * Owner/admin-only reliable count of a project's tasks via the project_task_count RPC (a SECURITY
    * DEFINER count that bypasses the caller's RLS blind spots, so a project with another member's
-   * private tasks can't be deleted-and-stranded). Throws for non-owners.
+   * private tasks can't be deleted-and-stranded). Gated on workspace_role_rank >= 2 to match the
+   * projects_delete_admin policy it guards; throws 42501 below that rank.
    */
   async taskCount(projectId, workspaceId) {
     const { data, error } = await supabase.rpc('project_task_count', { p_project_id: projectId, p_workspace_id: workspaceId });
@@ -254,6 +300,14 @@ export const tasks = {
     const { data, error } = await q;
     if (error) throw error;
     return (data || []).map(fromDbTask);
+  },
+
+  /** 5b: server-side headline aggregates (counts by status/priority/quadrant, overdue, unassigned, progress)
+   *  computed under the caller's RLS — the dashboard/matrix/schedule tiles no longer need the whole array. */
+  async stats(workspaceId) {
+    const { data, error } = await supabase.rpc('workspace_task_stats', { p_ws: workspaceId });
+    if (error) throw error;
+    return data || null;
   },
 
   /** Fetch a single task by id (text PK), mapped to app shape. Null if not found. */
@@ -352,6 +406,14 @@ export const tasks = {
    delete their own rows (enforced by RLS: recipient_id = auth.uid()).
 ================================================================================= */
 export const notifications = {
+  /** 5b: accurate unread count for the current user in a workspace (server RPC — correct past the 50-row
+   *  list window that the bell renders). Drives the bell badge + "N new" header. */
+  async unreadCount(workspaceId) {
+    const { data, error } = await supabase.rpc('notifications_unread_count', { p_ws: workspaceId });
+    if (error) throw error;
+    return Number(data) || 0;
+  },
+
   /** List the current user's notifications, newest first. RLS scopes to the recipient. */
   async list(limit = 50, workspaceId) {
     let q = supabase
@@ -534,6 +596,16 @@ export const comments = {
    the private 'voice-notes' bucket at <uid>/<uuid>.<ext>, played via signed URLs.
 ================================================================================= */
 export const messages = {
+  /** 5d: full-text search over team-chat messages via the RLS-respecting search_messages RPC (replaces the
+   *  old client-side grep over the loaded window). A guest still gets 0 team-chat hits (server-enforced). */
+  async search(query, workspaceId, limit = 50) {
+    const q = (query || '').trim();
+    if (!q) return [];
+    const { data, error } = await supabase.rpc('search_messages', { p_ws: workspaceId, p_q: q, p_limit: limit });
+    if (error) throw error;
+    return (data || []).map(fromDbMessage);
+  },
+
   /** List the channel: the NEWEST `limit` messages, returned oldest-first. */
   async list(limit = 200, workspaceId) {
     // Order DESC + limit fetches the most-recent N (ASC + limit would return the OLDEST N and hide
@@ -542,6 +614,19 @@ export const messages = {
       .from('messages').select('*')
       .order('created_at', { ascending: false })
       .limit(limit);
+    if (workspaceId) q = q.eq('workspace_id', workspaceId);
+    const { data, error } = await q;
+    if (error) throw error;
+    return (data || []).map(fromDbMessage).reverse();
+  },
+
+  /** 5c: the OLDER page — messages strictly before `beforeCreatedAt` (ISO), newest-first fetch, returned
+   *  oldest-first for prepending. Keyset on created_at; rides the messages_ws_created_idx composite. */
+  async listBefore(beforeCreatedAt, limit = 200, workspaceId) {
+    let q = supabase
+      .from('messages').select('*')
+      .lt('created_at', beforeCreatedAt)
+      .order('created_at', { ascending: false }).limit(limit);
     if (workspaceId) q = q.eq('workspace_id', workspaceId);
     const { data, error } = await q;
     if (error) throw error;
@@ -724,6 +809,18 @@ export const directMessages = {
     const { data, error } = await supabase
       .from('dm_messages').select('*')
       .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: false }).limit(limit);
+    if (error) throw error;
+    return (data || []).map(fromDbDirectMessage).reverse();
+  },
+
+  /** 5c: the OLDER page for a thread — messages strictly before `beforeCreatedAt`, oldest-first for
+   *  prepending. Rides dm_messages_conv_idx (conversation_id, created_at). */
+  async listMessagesBefore(conversationId, beforeCreatedAt, limit = 200) {
+    const { data, error } = await supabase
+      .from('dm_messages').select('*')
+      .eq('conversation_id', conversationId)
+      .lt('created_at', beforeCreatedAt)
       .order('created_at', { ascending: false }).limit(limit);
     if (error) throw error;
     return (data || []).map(fromDbDirectMessage).reverse();
