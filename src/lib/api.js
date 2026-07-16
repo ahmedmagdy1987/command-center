@@ -90,7 +90,12 @@ export const members = {
     if (!session) throw new Error('Not authenticated');
     const ext = ((file.name || '').split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
     const path = `${session.user.id}/${uid()}.${ext}`;
-    const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type || undefined });
+    // upsert:false on purpose. The filename is a fresh uid() every time, so a conflict is impossible and
+    // upsert buys nothing — but upsert issues INSERT ... ON CONFLICT DO UPDATE, which must READ the
+    // conflicting row and therefore depends on a SELECT policy. That dependency is what broke every upload
+    // with 42501 when the bucket briefly had no SELECT policy (see 20260716131220). A plain INSERT needs
+    // only avatars_insert_own, so the upload path stays correct even if the SELECT policy ever changes.
+    const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: false, contentType: file.type || undefined });
     if (error) throw error;
     return supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl;
   },

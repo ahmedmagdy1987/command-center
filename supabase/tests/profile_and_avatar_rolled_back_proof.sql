@@ -169,12 +169,19 @@ create policy avatars_insert_own on storage.objects for insert to authenticated
   with check (bucket_id='avatars' and (storage.foldername(name))[1] = (select auth.uid())::text);
 drop policy if exists avatars_update_own on storage.objects;
 create policy avatars_update_own on storage.objects for update to authenticated
-  using (bucket_id='avatars' and (storage.foldername(name))[1] = (select auth.uid())::text);
+  using (bucket_id='avatars' and (storage.foldername(name))[1] = (select auth.uid())::text)
+  with check (bucket_id='avatars' and (storage.foldername(name))[1] = (select auth.uid())::text);
 drop policy if exists avatars_delete_own on storage.objects;
 create policy avatars_delete_own on storage.objects for delete to authenticated
   using (bucket_id='avatars' and (storage.foldername(name))[1] = (select auth.uid())::text);
--- NB: no broad SELECT policy — a public bucket serves objects via the CDN public URL without one, and a
--- broad SELECT would let clients list the bucket (public_bucket_allows_listing advisor).
+-- SELECT is SCOPED to the caller's OWN folder (migration 20260716131220). Bucket-wide SELECT would let
+-- clients list the bucket (public_bucket_allows_listing advisor) — but SOME select is required, because
+-- upload({upsert:true}) issues INSERT ... ON CONFLICT DO UPDATE which must READ the conflicting row;
+-- with no SELECT policy every upload died with 42501. This block mirrors the LIVE policy set; the
+-- upsert path itself is covered by avatars_upload_rls_rolled_back_proof.sql.
+drop policy if exists avatars_select_own on storage.objects;
+create policy avatars_select_own on storage.objects for select to authenticated
+  using (bucket_id='avatars' and (storage.foldername(name))[1] = (select auth.uid())::text);
 
 -- ---------------------------------------------------------------------------
 -- (2) HARNESS
