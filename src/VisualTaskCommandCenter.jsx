@@ -635,16 +635,23 @@ function AppProvider({ children, session, currentMember, onSignOut }) {
     }
   }, [currentWorkspaceId, showToast]);
 
-  // Two-phase delete: fade the card out (~180ms), then remove + persist. Reduced-motion -> immediate.
-  const deleteProject = useCallback((id) => {
-    const finish = () => {
+  // Two-phase delete via the sanctioned delete_project RPC: fade the card out (~180ms), then run the
+  // cascade/unassign and refetch (both tasks and projects changed server-side). Reduced-motion ->
+  // immediate. mode: 'cascade' (owner: delete tasks too) | 'unassign' (owner+admin: re-file to reassignTo).
+  const deleteProject = useCallback((id, mode, reassignTo) => {
+    const reconcile = () => Promise.all([tasksApi.list(currentWorkspaceId), projectsApi.list(currentWorkspaceId)])
+      .then(([t, p]) => { setTasks(t); setProjects(p); }).catch(() => {});
+    const finish = async () => {
       setProjects(p => p.filter(x => x.id !== id));
       setExitingProjectIds(p => { const n = new Set(p); n.delete(id); return n; });
-      projectsApi.delete(id).catch(err => {
+      try {
+        await projectsApi.deleteViaRpc(id, currentWorkspaceId, mode, reassignTo);
+        await reconcile();
+      } catch (err) {
         console.error('Delete project failed:', err);
-        projectsApi.list(currentWorkspaceId).then(p => setProjects(p)).catch(() => {});
-        showToast("Couldn't delete the project — it's back in the list.");
-      });
+        await reconcile();
+        showToast("Couldn't delete the project — nothing was changed.");
+      }
     };
     if (prefersReducedMotion()) { finish(); return; }
     setExitingProjectIds(p => new Set(p).add(id));
@@ -3003,6 +3010,94 @@ function ConfirmModal({ open, title, message, confirmLabel = 'Delete', confirmDi
   );
 }
 
+/**
+ * Project delete modal. Owner+admin only (the trigger button is already gated). When the project has
+ * tasks, the caller chooses: "Keep the tasks" (unassign -> re-file to another project) or, OWNER ONLY,
+ * "Delete the tasks too" (cascade), which requires typing the project name to confirm (matches the
+ * "No bulk-delete without a typed-confirmation modal" landmine). Both routes go through the
+ * delete_project RPC, which enforces the rank + workspace + caller-visibility rules server-side.
+ * taskCount: null = checking, -1 = error, >=0 = reliable count (from the project_task_count RPC).
+ */
+function ProjectDeleteModal({ open, project, taskCount, isOwner, onCancel, onConfirm }) {
+  const [mode, setMode] = useState('unassign');   // 'unassign' | 'cascade'
+  const [confirmText, setConfirmText] = useState('');
+  const panelRef = useRef(null);
+  useEffect(() => { if (open) setTimeout(() => panelRef.current?.focus(), 30); }, [open]);
+  if (!open || !project) return null;
+
+  const checking = taskCount === null;
+  const errored = taskCount === -1;
+  const count = typeof taskCount === 'number' && taskCount > 0 ? taskCount : 0;
+  const reassignTo = project.id === 'other' ? 'personal' : 'other';   // where kept tasks land
+  const cascadeReady = mode !== 'cascade' || confirmText.trim() === (project.name || '').trim();
+  const canConfirm = !checking && !errored && cascadeReady;
+  // reset in the close handlers (not an effect) so a reopened modal starts fresh — cascade must always
+  // require re-typing the project name — while staying clear of the react-hooks/set-state-in-effect rule.
+  const reset = () => { setMode('unassign'); setConfirmText(''); };
+  const handleCancel = () => { reset(); onCancel(); };
+  const doConfirm = () => { if (!canConfirm) return; const m = mode, r = reassignTo; reset(); onConfirm(m, r); };
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={handleCancel} />
+      <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
+        <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Delete ${project.name}`}
+          className="pointer-events-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5 outline-none"
+          style={{ animation: 'slideUp .2s ease' }}
+          onClick={e => e.stopPropagation()}
+          onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); handleCancel(); } }}>
+          <h2 className="text-base font-semibold text-white mb-1 break-words">Delete “{project.name}”?</h2>
+
+          {checking && <p className="text-xs text-white/55 mb-4">Checking for tasks…</p>}
+          {errored && <p className="text-xs text-rose-300 mb-4">Couldn't check this project's tasks. Please try again.</p>}
+          {!checking && !errored && count === 0 && (
+            <p className="text-xs text-white/55 mb-4">This project has no tasks. It will be permanently deleted.</p>
+          )}
+
+          {!checking && !errored && count > 0 && (
+            <div className="space-y-2 mb-4">
+              <p className="text-xs text-white/55">“{project.name}” has {count} task{count === 1 ? '' : 's'}. Choose what happens to them:</p>
+              <label className={cx('flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-colors',
+                mode === 'unassign' ? 'border-violet-400/50 bg-violet-500/10' : 'border-white/10 hover:bg-white/5')}>
+                <input type="radio" name="pdmode" checked={mode === 'unassign'} onChange={() => setMode('unassign')} className="mt-0.5" />
+                <span className="text-xs text-white/80"><span className="font-medium text-white">Keep the tasks</span> — move them to “{reassignTo}”, then delete the project.</span>
+              </label>
+              {isOwner && (
+                <label className={cx('flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-colors',
+                  mode === 'cascade' ? 'border-rose-400/50 bg-rose-500/10' : 'border-white/10 hover:bg-white/5')}>
+                  <input type="radio" name="pdmode" checked={mode === 'cascade'} onChange={() => setMode('cascade')} className="mt-0.5" />
+                  <span className="text-xs text-white/80"><span className="font-medium text-rose-200">Delete the tasks too</span> — permanently removes the project and its {count} task{count === 1 ? '' : 's'}. Can't be undone.</span>
+                </label>
+              )}
+              {mode === 'cascade' && (
+                <div className="pt-1">
+                  <p className="text-[11px] text-white/50 mb-1.5">Type <span className="text-white/80 font-medium">{project.name}</span> to confirm:</p>
+                  <input autoFocus value={confirmText} onChange={e => setConfirmText(e.target.value)}
+                    className="w-full h-9 px-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-rose-400/50"
+                    placeholder={project.name} aria-label="Type the project name to confirm deletion" />
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={handleCancel}
+              className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">Cancel</button>
+            <button onClick={doConfirm} disabled={!canConfirm}
+              className={cx('h-9 px-4 rounded-xl text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
+                !canConfirm ? 'bg-white/10 text-white/40 cursor-not-allowed'
+                  : mode === 'cascade' ? 'bg-rose-500 hover:bg-rose-400' : 'bg-violet-500 hover:bg-violet-400')}>
+              <Trash2 className="w-3.5 h-3.5" />
+              {count > 0 && mode === 'cascade' ? `Delete project + ${count} task${count === 1 ? '' : 's'}` : 'Delete project'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>,
+    document.body
+  );
+}
+
 /** In-app "upgrade to unlock X" modal. Opened by AppProvider.requestUpgrade(featureKey); reads the
  *  feature/limit copy from lib/plans.js (FEATURE_META) and routes to /pricing or /checkout. Graceful
  *  by design — every gated action opens this, never a dead end or a silent failure. */
@@ -4057,12 +4152,6 @@ function ProjectsView() {
   }, [deleteTarget, currentWorkspaceId]);
 
   const canManage = membershipsLoaded && (isOwner || isAdmin || isMember);   // RLS: create/rename = rank>=1 (member/admin/owner)
-  const blocked = deleteCount === null || deleteCount !== 0;
-  const deleteMessage =
-    deleteCount === null ? 'Checking for tasks…'
-    : deleteCount === -1 ? "Couldn't check this project's tasks. Please try again."
-    : deleteCount > 0 ? `"${deleteTarget?.name}" still has ${deleteCount} task${deleteCount === 1 ? '' : 's'}. Move or delete them before deleting the project.`
-    : `Delete "${deleteTarget?.name}"? This can't be undone.`;
 
   const filtered = useMemo(() => tasks.filter(t => {
     if (!matchesAssignee(t, filters.assignee, meId)) return false;
@@ -4153,14 +4242,13 @@ function ProjectsView() {
 
       <ProjectModal open={createOpen} onClose={() => setCreateOpen(false)} project={null} />
       <ProjectModal open={!!editTarget} onClose={() => setEditTarget(null)} project={editTarget} />
-      <ConfirmModal
+      <ProjectDeleteModal
         open={!!deleteTarget}
-        title={deleteCount > 0 ? 'Project still has tasks' : 'Delete project?'}
-        message={deleteMessage}
-        confirmLabel="Delete project"
-        confirmDisabled={blocked}
-        onConfirm={() => { if (!deleteTarget) return; const id = deleteTarget.id; setDeleteTarget(null); setDeleteCount(null); deleteProject(id); }}
-        onClose={() => { setDeleteTarget(null); setDeleteCount(null); }}
+        project={deleteTarget}
+        taskCount={deleteCount}
+        isOwner={isOwner}
+        onCancel={() => { setDeleteTarget(null); setDeleteCount(null); }}
+        onConfirm={(mode, reassignTo) => { if (!deleteTarget) return; const id = deleteTarget.id; setDeleteTarget(null); setDeleteCount(null); deleteProject(id, mode, reassignTo); }}
       />
     </div>
   );

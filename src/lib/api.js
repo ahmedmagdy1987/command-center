@@ -226,10 +226,19 @@ export const projects = {
     return data;
   },
 
-  /** Delete a project. RLS projects_delete_admin gates to workspace_role_rank >= 2 (owner or admin). */
-  async delete(id) {
-    const { error } = await supabase.from('projects').delete().eq('id', id);
+  /**
+   * Delete a project via the sanctioned delete_project RPC (the app's only delete path — the direct
+   * projects DELETE is retired here). mode 'cascade' (OWNER only, rank 3) deletes the project's
+   * caller-visible tasks; mode 'unassign' (OWNER+ADMIN, rank 2) re-files them to reassignTo; both then
+   * delete the project row. Server-side: workspace-scoped + can_see_task (GATE A) + project must exist.
+   * Returns { mode, tasks_affected, project_deleted }.
+   */
+  async deleteViaRpc(projectId, workspaceId, mode, reassignTo = 'other') {
+    const { data, error } = await supabase.rpc('delete_project', {
+      p_project_id: projectId, p_workspace_id: workspaceId, p_mode: mode, p_reassign_to: reassignTo,
+    });
     if (error) throw error;
+    return data;
   },
 
   /**
