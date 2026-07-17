@@ -2,7 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useR
 import { createPortal } from 'react-dom';
 import {
   LayoutDashboard, KanbanSquare, Grid3x3, FolderKanban, CalendarDays, Lock, UserCog,
-  Plus, Search, Command, Settings, Sun, Moon, Download, Upload, RefreshCw, X, Check, CheckCheck,
+  Plus, Search, Command, Sun, Moon, Download, Upload, RefreshCw, X, Check,
   Clock, AlertCircle, Flag, Link2, Trash2, Copy, ChevronRight, ChevronDown, ChevronUp,
   CheckCircle2, Calendar, Zap, Timer, MoreHorizontal, Edit3, Filter,
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
@@ -233,6 +233,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   const [exitingIds, setExitingIds] = useState(() => new Set());
   // Project cards mid-exit-animation (same two-phase pattern as tasks).
   const [exitingProjectIds, setExitingProjectIds] = useState(() => new Set());
+  const [profileUserId, setProfileUserId] = useState(null);   // whose profile the ProfileView shows (null = closed)
   // The caller's pending invitations into OTHER workspaces (for the accept surfaces).
   const [pendingInvites, setPendingInvites] = useState([]);
   // Refs: the just-created "+ Add task" draft (auto-deleted if abandoned empty) + a stable Esc-time closer.
@@ -863,12 +864,40 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   // Resolve an assignee id -> { id, label, hex, soft, initials } for chips/labels. 'Me' for self,
   // 'Unassigned' (neutral) for null, display name otherwise. Color is deterministic per user id.
   const resolveAssignee = useCallback((assigneeId) => {
-    if (!assigneeId) return { id: null, label: 'Unassigned', hex: UNASSIGNED_STYLE.hex, soft: UNASSIGNED_STYLE.soft, initials: '·', avatarUrl: null };
+    if (!assigneeId) return { id: null, label: 'Unassigned', hex: UNASSIGNED_STYLE.hex, soft: UNASSIGNED_STYLE.soft, initials: '·', avatarUrl: null, statusEmoji: '', statusText: '' };
     const m = members.find(x => x.userId === assigneeId);
     const name = m?.displayName || m?.email || 'Member';
     const c = assigneeColor(assigneeId);
-    return { id: assigneeId, label: assigneeId === userId ? 'Me' : name, hex: c.hex, soft: c.soft, initials: initialsOf(name), avatarUrl: m?.avatarUrl || null };
+    return { id: assigneeId, label: assigneeId === userId ? 'Me' : name, hex: c.hex, soft: c.soft, initials: initialsOf(name),
+      avatarUrl: m?.avatarUrl || null, statusEmoji: m?.statusEmoji || '', statusText: m?.statusText || '' };
   }, [members, userId]);
+
+  /**
+   * The ONE identity lookup every surface uses: a roster row -> a renderable person. Returns null for
+   * someone who isn't in the current workspace roster (a former member), so callers degrade gracefully
+   * instead of rendering an empty shell. email/bio come back NULL for a guest viewer — the roster RPC
+   * withholds them server-side — so the profile view simply hides those rows rather than special-casing.
+   */
+  const personOf = useCallback((personId) => {
+    if (!personId) return null;
+    const m = members.find(x => x.userId === personId);
+    if (!m) return null;
+    return {
+      id: personId,
+      name: m.displayName || m.email || 'Member',
+      email: m.email || null,
+      role: m.role,
+      avatarUrl: m.avatarUrl || null,
+      statusEmoji: m.statusEmoji || '',
+      statusText: m.statusText || '',
+      bio: m.bio || null,
+      isSelf: personId === userId,
+    };
+  }, [members, userId]);
+
+  // Profile view: any identity surface calls openProfile(id); ONE <ProfileView> is mounted in AppShell.
+  const openProfile = useCallback((personId) => { if (personId) setProfileUserId(personId); }, []);
+  const closeProfile = useCallback(() => setProfileUserId(null), []);
 
   // "Added by X" label for a task's creator: 'you' for self, the member's name, or a graceful fallback.
   const creatorLabel = useCallback((id) => {
@@ -919,7 +948,8 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
     paletteOpen, quickAddOpen, editingTask,
     loading, membershipsLoaded, syncStatus, session, currentMember, refreshCurrentMember, isMember, isOwner, isAdmin, isGuest, canManageMembers, myRole, onSignOut,
     workspaces, currentWorkspaceId, switchWorkspace, createWorkspace,
-    members, meId: userId, resolveAssignee, refreshMembers,
+    members, meId: userId, resolveAssignee, personOf, refreshMembers,
+    profileUserId, openProfile, closeProfile,
     setTheme, setView, setFilters, setCompact, setDraggedId,
     setPaletteOpen, setQuickAddOpen, setEditingTask,
     addTask, updateTask, deleteTask, duplicateTask, toggleSubtask, addSubtask, removeSubtask, moveSubtask,
@@ -935,7 +965,8 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
     paletteOpen, quickAddOpen, editingTask,
     loading, membershipsLoaded, syncStatus, session, currentMember, refreshCurrentMember, isMember, isOwner, isAdmin, isGuest, canManageMembers, myRole, onSignOut,
     workspaces, currentWorkspaceId, switchWorkspace, createWorkspace,
-    members, userId, resolveAssignee, refreshMembers,
+    members, userId, resolveAssignee, personOf, refreshMembers,
+    profileUserId, openProfile, closeProfile,
     setTheme, setView, setFilters, setCompact, setDraggedId,
     setPaletteOpen, setQuickAddOpen, setEditingTask,
     addTask, updateTask, deleteTask, duplicateTask, toggleSubtask, addSubtask, removeSubtask, moveSubtask,
@@ -1001,14 +1032,22 @@ function PriorityDot({ priority, size = 8, glow = true }) {
   return <span className="inline-block rounded-full shrink-0" style={{ width: size, height: size, background: p.hex, boxShadow: glow ? `0 0 10px ${p.glow}` : 'none' }} />;
 }
 
+/** The assignee pill. Swapping its 1.5px dot for a real face is the highest-leverage change in the app:
+ *  task cards, the TaskModal header, dashboard MiniRows, Top-3 and the command palette all render through
+ *  here. Unassigned passes an empty name on purpose so Avatar shows its silhouette rather than initialling
+ *  the word "Unassigned". Theme-aware for the same reason Avatar is — `soft` + `hex` text washes out on
+ *  light, so light mode uses near-black text on a faint tint. NOT wrapped in PersonButton: three of its
+ *  four call sites already sit inside a clickable task card, and a button-in-button is invalid DOM. */
 function AssigneeChip({ assigneeId, showLabel = true, size = 'sm' }) {
-  const { resolveAssignee } = useApp();
+  const { resolveAssignee, theme } = useApp();
   const a = resolveAssignee(assigneeId);
-  const dims = size === 'sm' ? 'h-5 px-2 text-[10px]' : 'h-6 px-2.5 text-xs';
+  const light = theme === 'light';
+  const dims = size === 'sm' ? 'h-5 text-[10px]' : 'h-6 text-xs';
+  const face = size === 'sm' ? 14 : 18;
   return (
-    <span className={cx('inline-flex items-center gap-1.5 rounded-full font-medium tracking-wide', dims)}
-      style={{ background: a.soft, color: a.hex, border: `1px solid ${a.hex}33` }}>
-      <span className="w-1.5 h-1.5 rounded-full" style={{ background: a.hex }} />
+    <span className={cx('inline-flex items-center gap-1 rounded-full font-medium tracking-wide pl-0.5', dims, showLabel ? (size === 'sm' ? 'pr-2' : 'pr-2.5') : 'pr-0.5')}
+      style={{ background: light ? `${a.hex}1f` : a.soft, color: light ? '#0b0b12' : a.hex, border: `1px solid ${a.hex}33` }}>
+      <Avatar name={a.id ? a.label : ''} userId={a.id} photoUrl={a.avatarUrl} size={face} />
       {showLabel && a.label}
     </span>
   );
@@ -1262,7 +1301,14 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showAssign
         {task.tags.slice(0, compact ? 0 : 2).map(t => (
           <span key={t} className="text-[10px] text-white/40">#{t}</span>
         ))}
-        {!compact && task.createdBy && <span className="text-[10px] text-white/30">· by {creatorLabel(task.createdBy)}</span>}
+        {!compact && task.createdBy && (
+          /* A face, but NOT a PersonButton: the whole card is already a click target for opening the task. */
+          <span className="text-[10px] text-white/30 inline-flex items-center gap-1">
+            · by
+            <Avatar name={creatorLabel(task.createdBy)} userId={task.createdBy} photoUrl={resolveAssignee(task.createdBy).avatarUrl} size={12} />
+            {creatorLabel(task.createdBy)}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -1272,20 +1318,25 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showAssign
  *  member (longest-first) so "@Ahmed Magdy" highlights as one pill, not just "@Ahmed". Cosmetic — the
  *  mention payload is the uuid[]. */
 function MentionText({ text, mentions }) {
-  const { members } = useApp();
+  const { members, openProfile } = useApp();
   const s = String(text || '');
   // Pill ONLY names that were actually mentioned (the row's mentions uuid[]) — not any @Name that happens
   // to match a member. So free-typed "@Ahmed" (which fires no notification) and DM bodies (no mentions
   // array / no picker) don't render a misleading pill.
   if (!s.includes('@') || !Array.isArray(mentions) || !mentions.length) return s;
   const mentionSet = new Set(mentions);
-  const names = (members || []).filter(m => mentionSet.has(m.userId)).map(m => m.displayName || m.email).filter(Boolean).sort((a, b) => b.length - a.length);
+  const mentioned = (members || []).filter(m => mentionSet.has(m.userId) && (m.displayName || m.email));
+  const names = mentioned.map(m => m.displayName || m.email).sort((a, b) => b.length - a.length);
   if (!names.length) return s;
   const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp('(@(?:' + names.map(esc).join('|') + '))', 'g');
-  const known = new Set(names.map(n => '@' + n));
-  return s.split(re).map((p, i) => known.has(p)
-    ? <span key={i} className="rounded px-1 -mx-0.5 bg-violet-500/20 text-violet-200 font-medium">{p}</span>
+  // '@Name' -> userId, so the pill can open that person's profile. The pill (not an inline avatar) is the
+  // right affordance here: a face mid-sentence wrecks line-height and reads as noise.
+  const idByAt = new Map(mentioned.map(m => ['@' + (m.displayName || m.email), m.userId]));
+  return s.split(re).map((p, i) => idByAt.has(p)
+    ? <button key={i} type="button" title="View profile"
+        onClick={e => { e.stopPropagation(); e.preventDefault(); openProfile(idByAt.get(p)); }}
+        className="rounded px-1 -mx-0.5 bg-violet-500/20 text-violet-200 font-medium hover:bg-violet-500/30 transition-colors">{p}</button>
     : p);
 }
 
@@ -1470,8 +1521,15 @@ function TaskComments({ taskId }) {
           return (
             <div key={c.id} className="group">
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs font-medium text-white/80">{mine ? 'You' : nameOf(c.authorId)}</span>
-                <span className="text-[10px] text-white/35">{timeAgo(c.createdAt)}{edited ? ' · edited' : ''}</span>
+                {/* `people` is members.list() (select('*')) so avatar_url/status_emoji are already loaded. */}
+                <PersonButton personId={c.authorId} className="gap-1.5 min-w-0" title={mine ? 'Your profile' : `View ${nameOf(c.authorId)}'s profile`}>
+                  <Avatar name={nameOf(c.authorId)} userId={c.authorId} photoUrl={people[c.authorId]?.avatar_url} size={20} />
+                  <span className="text-xs font-medium text-white/80 truncate">
+                    {people[c.authorId]?.status_emoji && <span className="mr-1">{people[c.authorId].status_emoji}</span>}
+                    {mine ? 'You' : nameOf(c.authorId)}
+                  </span>
+                </PersonButton>
+                <span className="text-[10px] text-white/35 shrink-0">{timeAgo(c.createdAt)}{edited ? ' · edited' : ''}</span>
                 {mine && editId !== c.id && (
                   <span className="ml-auto flex items-center gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100 transition-opacity">
                     <button onClick={() => { setEditId(c.id); setEditText(c.body); }} className="text-[10px] text-white/40 hover:text-white/80">Edit</button>
@@ -1728,7 +1786,18 @@ function TaskModal() {
             className="w-full bg-transparent text-xl sm:text-2xl font-semibold text-white placeholder-white/30 outline-none font-display read-only:cursor-default break-words"
             placeholder="Task title"
           />
-          {t.createdBy && <div className="mt-1.5 text-[11px] text-white/35">Added by {creatorLabel(t.createdBy)}</div>}
+          {t.createdBy && (() => { const cr = resolveAssignee(t.createdBy); return (
+            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-white/35">
+              <span>Added by</span>
+              <PersonButton personId={t.createdBy} className="gap-1.5 min-w-0" title={`View ${creatorLabel(t.createdBy)}'s profile`}>
+                <Avatar name={creatorLabel(t.createdBy)} userId={t.createdBy} photoUrl={cr.avatarUrl} size={16} />
+                <span className="text-white/55 hover:text-white/80 truncate">
+                  {cr.statusEmoji && <span className="mr-1">{cr.statusEmoji}</span>}
+                  {creatorLabel(t.createdBy)}
+                </span>
+              </PersonButton>
+            </div>
+          ); })()}
         </div>
 
         <ConfirmModal open={confirmOpen} title="Delete task"
@@ -1888,7 +1957,7 @@ function SelectPill({ label, value, options, onChange, color, disabled = false }
  *  resolveAssignee to move to arrays — a separate, DB-touching decision.) Avatars are derived from the
  *  value (a user id) where possible; 'all' shows a group icon, '' / 'unassigned' a neutral dot. */
 function AssigneeSelect({ label, value, options, onChange, variant = 'field', disabled = false }) {
-  const { meId, theme } = useApp();
+  const { meId, resolveAssignee } = useApp();
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(false);   // drives the gentle enter/exit transition
   const [query, setQuery] = useState('');
@@ -1899,9 +1968,11 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field', di
 
   const avatarFor = (v, lbl) => {
     if (v === 'all') return { all: true };
-    if (v === '' || v === 'unassigned' || v == null) return { hex: UNASSIGNED_STYLE.hex, soft: UNASSIGNED_STYLE.soft, initials: '·' };
-    const c = assigneeColor(v === 'me' ? meId : v);
-    return { hex: c.hex, soft: c.soft, initials: initialsOf(lbl) };
+    if (v === '' || v === 'unassigned' || v == null) return { unassigned: true, hex: UNASSIGNED_STYLE.hex, soft: UNASSIGNED_STYLE.soft, initials: '·' };
+    const id = v === 'me' ? meId : v;
+    const c = assigneeColor(id);
+    const r = resolveAssignee(id);
+    return { id, hex: c.hex, soft: c.soft, initials: initialsOf(lbl), avatarUrl: r.avatarUrl, statusEmoji: r.statusEmoji };
   };
   const current = options.find(([v]) => v === value);
   const curAv = current ? avatarFor(current[0], current[1]) : null;
@@ -1941,7 +2012,7 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field', di
     <>
       <button type="button" ref={btnRef} disabled={disabled} onClick={() => (open ? close() : openMenu())} aria-haspopup="listbox" aria-expanded={open} className={cx(triggerCls, disabled && 'opacity-60 !cursor-default')}>
         {variant === 'filter' && <Filter className="w-3 h-3 text-white/40 shrink-0" />}
-        {curAv && !curAv.all && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: curAv.hex }} />}
+        {curAv && !curAv.all && <Avatar name={curAv.unassigned ? '' : (current ? current[1] : '')} userId={curAv.id} photoUrl={curAv.avatarUrl} size={16} />}
         <span className="text-white/40 shrink-0">{label}:</span>
         <span className="text-white/95 font-medium truncate max-w-[140px]">{current ? current[1] : (value || '')}</span>
         <ChevronDown className={cx('w-3 h-3 text-white/40 shrink-0 transition-transform', open && 'rotate-180')} />
@@ -1972,10 +2043,15 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field', di
                     {av.all ? (
                       <span className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 bg-white/10 text-white/60"><Users className="w-3 h-3" /></span>
                     ) : (
-                      <span className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-semibold shrink-0"
-                        style={theme === 'light' ? { background: av.hex, color: '#0b0b12' } : { background: av.soft, color: av.hex }}>{av.initials}</span>
+                      // Avatar, not a hand-rolled circle: it already does photo -> initials -> silhouette
+                      // AND the light-mode swap that used to be duplicated inline right here.
+                      <Avatar name={av.unassigned ? '' : o[1]} userId={av.id} photoUrl={av.avatarUrl} size={20} />
                     )}
-                    <span className="flex-1 truncate">{o[1]}</span>
+                    <span className="flex-1 truncate">
+                      {/* status helps you pick who's free — but not on the filter, which is a criterion, not a person */}
+                      {variant !== 'filter' && av.statusEmoji && <span className="mr-1">{av.statusEmoji}</span>}
+                      {o[1]}
+                    </span>
                     {isSel && <Check className="w-3.5 h-3.5 text-violet-300 shrink-0" />}
                   </button>
                 );
@@ -2409,14 +2485,18 @@ function CommandPalette() {
                 const ii = results.cmds.length + results.tasks.length + i;
                 const active = ii === idx;
                 const Icon = m.kind === 'dm' ? MessagesSquare : MessageSquare;
-                const who = resolveAssignee(m.senderId).label;
+                const sender = resolveAssignee(m.senderId);
+                const who = sender.label;
                 return (
                   <button key={`${m.kind}-${m.id}`} onClick={() => openMessage(m)} onMouseEnter={() => setIdx(ii)}
                     className={cx('w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm transition-colors',
                       active ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5')}>
-                    <Icon className="w-4 h-4 shrink-0 text-white/40" />
+                    {/* The face says who; the DM/Team glyph stays as the small kind marker. */}
+                    <Avatar name={who} userId={m.senderId} photoUrl={sender.avatarUrl} size={20} />
                     <span className="flex-1 min-w-0 truncate">{m.body}</span>
-                    <span className="text-[10px] text-white/30 shrink-0">{who} · {m.kind === 'dm' ? 'DM' : 'Team'}</span>
+                    <span className="text-[10px] text-white/30 shrink-0 inline-flex items-center gap-1">
+                      <Icon className="w-3 h-3" />{who} · {m.kind === 'dm' ? 'DM' : 'Team'}
+                    </span>
                   </button>
                 );
               })}
@@ -2433,7 +2513,8 @@ function CommandPalette() {
    SIDEBAR
 ================================================================================= */
 function Sidebar() {
-  const { view, setView, tasks, meId, chatUnread, dmUnread, canManageMembers, isGuest } = useApp();
+  const { view, setView, tasks, meId, chatUnread, dmUnread, canManageMembers, isGuest, personOf, openProfile } = useApp();
+  const me = personOf(meId);
 
   const counts = useMemo(() => {
     const open = tasks.filter(t => t.status !== 'done');
@@ -2511,6 +2592,22 @@ function Sidebar() {
             </div>
           )}
         </div>
+
+        {/* You, anchored at the bottom — the second way into your own profile besides the top-bar avatar.
+            `me` is null until the roster loads; render nothing rather than a flash of placeholder identity. */}
+        {me && (
+          <button onClick={() => openProfile(meId)} title="Your profile"
+            className="mt-2 w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-left border border-transparent hover:bg-white/[0.04]">
+            <Avatar name={me.name} userId={meId} photoUrl={me.avatarUrl} size={30} />
+            <div className="min-w-0 leading-tight">
+              <div className="text-[12px] font-medium text-white/85 truncate flex items-center gap-1">
+                {me.statusEmoji && <span aria-hidden="true">{me.statusEmoji}</span>}
+                <span className="truncate">{me.name}</span>
+              </div>
+              <div className="text-[10px] text-white/35 truncate">{me.statusText || 'View your profile'}</div>
+            </div>
+          </button>
+        )}
       </div>
     </aside>
   );
@@ -2621,7 +2718,9 @@ function notifVisual(type, light) {
 
 function NotificationToast({ n, light, onOpen, onDismiss }) {
   const { id } = n;
+  const { resolveAssignee } = useApp();
   const tv = notifVisual(n.type, light);
+  const actor = n.actorId ? resolveAssignee(n.actorId) : null;   // null for system notices (due_soon/overdue)
   const [leaving, setLeaving] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => {
@@ -2635,9 +2734,19 @@ function NotificationToast({ n, light, onOpen, onDismiss }) {
     <button onClick={() => onOpen(n)}
       className={cx('pointer-events-auto flex items-start gap-2.5 w-full text-left px-3.5 py-3 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl hover:border-white/20 transition-colors',
         leaving ? 'animate-[fadeSlideOut_.18s_ease_forwards]' : 'animate-[slideUp_.2s_ease]')}>
-      <span className="mt-0.5 w-7 h-7 rounded-lg border flex items-center justify-center shrink-0"
-        style={{ background: tv.hex + '1f', borderColor: tv.hex + '55' }}>
-        <tv.Icon className="w-3.5 h-3.5" style={{ color: tv.hex }} />
+      <span className="mt-0.5 shrink-0 relative">
+        {actor
+          ? <Avatar name={actor.label} userId={n.actorId} photoUrl={actor.avatarUrl} size={28} />
+          : <span className="w-7 h-7 rounded-lg border flex items-center justify-center"
+              style={{ background: tv.hex + '1f', borderColor: tv.hex + '55' }}>
+              <tv.Icon className="w-3.5 h-3.5" style={{ color: tv.hex }} />
+            </span>}
+        {actor && (
+          <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center border"
+            style={{ background: light ? '#ffffff' : '#0f1017', borderColor: light ? '#e5e7eb' : 'rgba(255,255,255,0.12)' }}>
+            <tv.Icon className="w-2 h-2" style={{ color: tv.hex }} />
+          </span>
+        )}
       </span>
       <span className="min-w-0 flex-1">
         <span className="block text-[11px] font-semibold text-white/90">{n.title || 'New notification'}</span>
@@ -2648,7 +2757,7 @@ function NotificationToast({ n, light, onOpen, onDismiss }) {
 }
 
 function NotificationBell() {
-  const { session, tasks, setEditingTask, theme, currentWorkspaceId, setView, setDmActiveConv, view, dmActiveConv } = useApp();
+  const { session, tasks, setEditingTask, theme, currentWorkspaceId, setView, setDmActiveConv, view, dmActiveConv, resolveAssignee } = useApp();
   const userId = session?.user?.id;
   const light = theme === 'light';
   // Refs so the realtime subscribe callback (set up once) sees which DM is currently open.
@@ -2883,12 +2992,27 @@ function NotificationBell() {
                         exitingNotifIds.has(n.id) && 'animate-[fadeSlideOut_.18s_ease_forwards]')}>
                       <button onClick={() => handleOpen(n)}
                         className="min-w-0 flex-1 text-left flex items-start gap-2.5 pl-3 pr-1 py-2.5">
-                        {(() => { const tv = notifVisual(n.type, light); return (
+                        {(() => {
+                          const tv = notifVisual(n.type, light);
+                          // A face answers WHO did it; the type glyph rides along as a corner badge to keep
+                          // WHAT. due_soon/overdue are system-generated (actor_id is null) -> glyph only.
+                          const actor = n.actorId ? resolveAssignee(n.actorId) : null;
+                          return (
                           <span className="relative mt-0.5 shrink-0">
-                            <tv.Icon className="w-4 h-4" style={{ color: tv.hex }} />
+                            {actor
+                              ? <Avatar name={actor.label} userId={n.actorId} photoUrl={actor.avatarUrl} size={28} />
+                              : <span className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: light ? `${tv.hex}1f` : `${tv.hex}22` }}>
+                                  <tv.Icon className="w-4 h-4" style={{ color: tv.hex }} />
+                                </span>}
+                            {actor && (
+                              <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center border"
+                                style={{ background: light ? '#ffffff' : '#0f1017', borderColor: light ? '#e5e7eb' : 'rgba(255,255,255,0.12)' }}>
+                                <tv.Icon className="w-2 h-2" style={{ color: tv.hex }} />
+                              </span>
+                            )}
                             {!n.read && <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full" style={{ background: light ? '#7c3aed' : '#a78bfa', boxShadow: `0 0 6px ${light ? 'rgba(124,58,237,0.45)' : 'rgba(167,139,250,0.7)'}` }} />}
                           </span>
-                        ); })()}
+                          ); })()}
                         <span className="min-w-0 flex-1">
                           <span className={cx('block text-xs leading-snug', n.read ? 'text-white/55' : 'text-white/90')}>{n.message}</span>
                           <span className="block mt-0.5 text-[10px] text-white/35">{timeAgo(n.createdAt)}</span>
@@ -3421,15 +3545,27 @@ function TopBar() {
           </button>
           <NotificationBell />
           <div className="relative">
-            <IconButton icon={Settings} label="Settings" onClick={() => setMenuOpen(o => !o)} />
+            {/* The account menu trigger IS your avatar (the near-universal convention). Nothing is lost:
+                settings, theme, export/import, plans and sign-out all still live inside this menu. */}
+            <button onClick={() => setMenuOpen(o => !o)} aria-label="Account and settings" aria-expanded={menuOpen}
+              className="rounded-full focus:outline-none focus-visible:ring-1 focus-visible:ring-violet-400/60 hover:opacity-80 transition-opacity">
+              <Avatar name={currentMember?.display_name || currentMember?.email} userId={meId} photoUrl={currentMember?.avatar_url} size={28} />
+            </button>
             {menuOpen && (
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setMenuOpen(false)} />
                 <div className="absolute right-0 top-11 z-40 w-64 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1.5">
                   {currentMember && (
-                    <div className="px-3 py-2.5 border-b border-white/5">
-                      <div className="text-xs font-medium text-white/90 truncate">{currentMember.email}</div>
-                      <div className="text-[10px] text-white/40 mt-0.5 capitalize">{myRole || currentMember.role} · <span className="text-violet-300/80 normal-case">{entitlements.plan.name}</span></div>
+                    <div className="px-3 py-2.5 border-b border-white/5 flex items-start gap-2.5">
+                      <Avatar name={currentMember.display_name || currentMember.email} userId={meId} photoUrl={currentMember.avatar_url} size={32} />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-medium text-white/90 truncate">
+                          {currentMember.status_emoji && <span className="mr-1">{currentMember.status_emoji}</span>}
+                          {currentMember.display_name || currentMember.email}
+                        </div>
+                        <div className="text-[10px] text-white/40 mt-0.5 capitalize truncate">{myRole || currentMember.role} · <span className="text-violet-300/80 normal-case">{entitlements.plan.name}</span></div>
+                        <div className="text-[10px] text-white/30 mt-0.5 truncate normal-case">{currentMember.status_text || currentMember.email}</div>
+                      </div>
                     </div>
                   )}
                   <MenuItem icon={theme === 'dark' ? Sun : Moon} onClick={() => { setTheme(theme === 'dark' ? 'light' : 'dark'); setMenuOpen(false); }}>Switch to {theme === 'dark' ? 'light' : 'dark'}</MenuItem>
@@ -3585,6 +3721,107 @@ function ProfileModal({ onClose }) {
           </div>
         </div>
       </div>
+    </>,
+    document.body
+  );
+}
+/**
+ * Wraps identity content (an avatar, a name, or both) in a keyboard-accessible control that opens that
+ * person's ProfileView. Falls back to a plain <span> when there's nobody to open (an unassigned chip, a
+ * former member), so callers never have to branch. stopPropagation by default: most identity surfaces sit
+ * inside something else clickable (a task card, a conversation row), and opening a profile must not also
+ * trigger that. NB: never render this INSIDE another <button> — that's invalid DOM; restructure the parent
+ * into sibling buttons instead (see the DM conversation row).
+ */
+function PersonButton({ personId, children, className, title }) {
+  const { openProfile } = useApp();
+  if (!personId) return <span className={cx('inline-flex items-center', className)}>{children}</span>;
+  return (
+    <button type="button" title={title || 'View profile'}
+      onClick={e => { e.stopPropagation(); e.preventDefault(); openProfile(personId); }}
+      className={cx('inline-flex items-center rounded-md hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-violet-400/60 transition-opacity', className)}>
+      {children}
+    </button>
+  );
+}
+
+/**
+ * The profile view — the payoff that makes avatar / status / bio mean anything. Opened from any identity
+ * surface via openProfile(id); exactly one instance is mounted (AppShell). Read-only for other people;
+ * your own row gets "Edit profile", which reuses ProfileModal rather than shipping a second editor.
+ *
+ * Data comes from personOf() — i.e. the workspace roster the app already loads, so there is no new fetch
+ * and no new read path. email/bio arrive NULL for a GUEST viewer (workspace_members_list withholds them
+ * server-side) so those rows simply don't render — the guest scoping needs no client logic. Someone who
+ * has left the workspace isn't in the roster at all, hence the explicit former-member state.
+ *
+ * Portaled to <body>, so it can never inherit the per-view [data-theme="light"] rules — it matches the
+ * app's other modals (always dark) and therefore renders identically in both themes.
+ */
+function ProfileView() {
+  const { profileUserId, closeProfile, personOf, startDm } = useApp();
+  const [editing, setEditing] = useState(false);
+  const panelRef = useRef(null);
+  useEffect(() => { if (profileUserId) setTimeout(() => panelRef.current?.focus(), 30); }, [profileUserId]);
+  if (!profileUserId) return null;
+
+  const p = personOf(profileUserId);
+  const close = () => { setEditing(false); closeProfile(); };
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm" onClick={close} />
+      <div className="fixed inset-0 z-[70] flex items-center justify-center p-6 pointer-events-none">
+        <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={p ? `${p.name} profile` : 'Profile'}
+          className="pointer-events-auto w-full max-w-sm rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5 outline-none"
+          style={{ animation: 'slideUp .2s ease' }}
+          onClick={e => e.stopPropagation()}
+          onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } }}>
+
+          {!p ? (
+            <div className="text-center py-4">
+              <Avatar name="" userId={profileUserId} size={72} className="mx-auto mb-3" />
+              <h2 className="text-base font-semibold text-white mb-1">No longer in this workspace</h2>
+              <p className="text-xs text-white/50">This person has left, so their profile isn't available here.</p>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col items-center text-center">
+                <Avatar name={p.name} userId={p.id} photoUrl={p.avatarUrl} size={72} className="mb-3" />
+                <h2 className="text-base font-semibold text-white break-words">{p.name}{p.isSelf && <span className="text-white/40 font-normal"> (you)</span>}</h2>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full border border-white/10 bg-white/5 text-white/60">{p.role}</span>
+                </div>
+                {(p.statusEmoji || p.statusText) && (
+                  <div className="mt-3 inline-flex items-center gap-1.5 max-w-full px-2.5 py-1 rounded-full bg-white/5 border border-white/10">
+                    {p.statusEmoji && <span className="text-sm leading-none">{p.statusEmoji}</span>}
+                    {p.statusText && <span className="text-xs text-white/70 truncate">{p.statusText}</span>}
+                  </div>
+                )}
+                {p.bio && <p className="mt-3 text-xs text-white/60 leading-relaxed whitespace-pre-wrap break-words">{p.bio}</p>}
+                {p.email && <p className="mt-3 text-[11px] text-white/35 break-all">{p.email}</p>}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 mt-5">
+                <button onClick={close}
+                  className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">Close</button>
+                {p.isSelf ? (
+                  <button onClick={() => setEditing(true)}
+                    className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5" />Edit profile
+                  </button>
+                ) : (
+                  <button onClick={() => { startDm?.(p.id)?.catch?.(() => {}); close(); }}
+                    className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5">
+                    <MessageSquare className="w-3.5 h-3.5" />Message
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+      {editing && <ProfileModal onClose={() => setEditing(false)} />}
     </>,
     document.body
   );
@@ -4683,8 +4920,15 @@ function DayDivider({ label }) {
 /** The one avatar in the app. Photo if the user has one, else their initials, else a silhouette —
  *  never an empty circle. The deterministic per-user color still tints the fallback, so a person
  *  stays recognisable at a glance whether or not they've uploaded a photo.
- *  `photoUrl` is inert until the profile-photo work lands; every call site is already wired for it. */
+ *  Photo -> two-letter initials -> silhouette. THEME-AWARE, and it must stay that way: `soft` is a 14%
+ *  tint built for dark surfaces, so `soft` background + `hex` text is unreadable on light. Light mode
+ *  therefore inverts to a solid `hex` fill with near-black text (the same swap AssigneeSelect used to
+ *  hand-roll). Doing it here — rather than per call site — is what lets every avatar in the app be
+ *  light-safe at once. NB: the [data-theme="light"] CSS rules are declared inside per-view <style>
+ *  blocks, so they never reach a portaled modal; theme must be read from context, never assumed. */
 function Avatar({ name, userId, photoUrl, size = 28, className }) {
+  const { theme } = useApp();
+  const light = theme === 'light';
   const c = assigneeColor(userId);
   const [broken, setBroken] = useState(false);
   const initials = initialsFor(name);
@@ -4694,9 +4938,9 @@ function Avatar({ name, userId, photoUrl, size = 28, className }) {
     <span className={cx('rounded-full flex items-center justify-center font-semibold shrink-0 select-none overflow-hidden', className)}
       style={{
         width: size, height: size,
-        background: showPhoto ? 'transparent' : c.soft,
-        color: c.hex,
-        border: `1px solid ${c.hex}33`,
+        background: showPhoto ? 'transparent' : (light ? c.hex : c.soft),
+        color: light ? '#0b0b12' : c.hex,
+        border: `1px solid ${light ? c.hex : c.hex + '33'}`,
         fontSize: Math.round(size * 0.36),
       }}>
       {showPhoto ? (
@@ -4844,7 +5088,9 @@ function MsgBubble({ m, mine, onDelete, onEdit }) {
 /** The scrollable message timeline — sticky day dividers, sender grouping, avatars (both
  *  surfaces), per-message receipts (DM), skeleton loading, empty state, sticky-bottom
  *  autoscroll, and a jump-to-latest button. Shared by the team channel and DM threads. */
-function MessageList({ items, userId, nameOf, loading, empty, onDelete, onEdit, receiptFor, hasMore, onLoadOlder, loadingOlder }) {
+/** Shared by team chat AND DMs — any change here lands in both. `avatarFor(senderId) -> photoUrl` is
+ *  optional so a caller that has no roster handy still renders correct initials. */
+function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelete, onEdit, receiptFor, hasMore, onLoadOlder, loadingOlder }) {
   const scrollRef = useRef(null);
   const atBottomRef = useRef(true);
   const prependAnchorRef = useRef(null);   // 5c: distance-from-bottom captured before an older page prepends
@@ -4911,11 +5157,19 @@ function MessageList({ items, userId, nameOf, loading, empty, onDelete, onEdit, 
               const mine = m.senderId === userId;
               return (
                 <div key={m.id} className={cx('flex gap-2.5', mine && 'flex-row-reverse', firstOfGroup ? 'mt-3' : 'mt-0.5')}>
-                  {!mine && (firstOfGroup ? <MsgAvatar name={nameOf(m.senderId)} userId={m.senderId} /> : <span className="w-7 shrink-0" aria-hidden="true" />)}
+                  {!mine && (firstOfGroup
+                    ? <PersonButton personId={m.senderId} className="shrink-0 self-start" title={`View ${nameOf(m.senderId)}'s profile`}>
+                        <MsgAvatar name={nameOf(m.senderId)} userId={m.senderId} photoUrl={avatarFor?.(m.senderId)} />
+                      </PersonButton>
+                    : <span className="w-7 shrink-0" aria-hidden="true" />)}
                   <div className={cx('flex flex-col min-w-0 max-w-[78%]', mine ? 'items-end' : 'items-start')}>
                     {firstOfGroup && (
                       <div className={cx('flex items-baseline gap-2 mb-1 px-0.5', mine && 'flex-row-reverse')}>
-                        {!mine && <span className="text-[12px] font-semibold text-white/80">{nameOf(m.senderId)}</span>}
+                        {!mine && (
+                          <PersonButton personId={m.senderId} className="text-[12px] font-semibold text-white/80 hover:text-white">
+                            {nameOf(m.senderId)}
+                          </PersonButton>
+                        )}
                         <span className="text-[10px] text-white/35 tabular-nums">{clockTime(m.createdAt)}</span>
                       </div>
                     )}
@@ -4981,6 +5235,10 @@ function TypingStrip({ label }) {
  *  recording bar, and a visible send-failure + Retry affordance. Presentational — the view
  *  owns recording + send state and passes handlers down. */
 function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, onStartRecording, onStopRecording, micError, canVoice, onUpgradeVoice, placeholder, mentionMembers, meId }) {
+  // personOf (not resolveAssignee) — the latter labels yourself 'Me', which would render every
+  // photo-less self-avatar as "M". The composer face should carry your real initials.
+  const { personOf } = useApp();
+  const me = personOf(meId);
   const [text, setText] = useState('');
   const [mentions, setMentions] = useState([]);
   const [sending, setSending] = useState(false);
@@ -5027,6 +5285,9 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
           </div>
         ) : (
           <div className="flex items-end gap-2">
+            {/* Your own face, so the composer reads as "you, about to speak" and matches the bubbles above.
+                Hidden on narrow screens — the textarea needs the width more than the affordance. */}
+            {me && <Avatar name={me.name} userId={meId} photoUrl={me.avatarUrl} size={28} className="hidden sm:flex mb-1 shrink-0" />}
             <MentionTextarea textareaRef={taRef} value={text} onChange={setText} onMentionsChange={setMentions}
               members={mentionMembers} meId={meId} onEnter={submit} onTyping={onTyping} onBlur={() => onStopTyping?.()} rows={1}
               placeholder={placeholder}
@@ -5250,16 +5511,35 @@ function ChatView() {
       `}</style>
       <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2.5 shrink-0">
         <span className="w-7 h-7 rounded-lg bg-violet-500/15 border border-violet-500/25 flex items-center justify-center text-violet-300 text-sm font-semibold shrink-0">#</span>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold text-white/90 leading-tight">Team chat</div>
           <div className="text-[10px] text-white/35 leading-tight">Everyone in this workspace</div>
         </div>
+        {/* Facepile: shows WHO "everyone" actually is. Overlapped and capped at 4 + a "+N"; each face opens
+            that person's profile. No ring separator — Avatar's own border does it and stays theme-safe. */}
+        {members.length > 0 && (
+          <div className="hidden sm:flex items-center shrink-0 pl-2">
+            {members.slice(0, 4).map((m, i) => (
+              <PersonButton key={m.userId} personId={m.userId} className={cx('rounded-full', i > 0 && '-ml-2')}
+                title={`View ${m.displayName || m.email}'s profile`}>
+                <Avatar name={m.displayName || m.email} userId={m.userId} photoUrl={m.avatarUrl} size={24} />
+              </PersonButton>
+            ))}
+            {members.length > 4 && (
+              <span className="-ml-2 w-6 h-6 rounded-full bg-white/10 border border-white/10 text-[9px] font-semibold text-white/60 flex items-center justify-center">
+                +{members.length - 4}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       <MessageList
         items={items}
         userId={userId}
         nameOf={nameOf}
+        // `people` is members.list() (select('*')), so it already carries avatar_url — no extra fetch.
+        avatarFor={(id) => people[id]?.avatar_url}
         loading={loading}
         hasMore={hasMore}
         onLoadOlder={loadOlder}
@@ -5341,12 +5621,16 @@ function DirectMessagesView() {
               <div className="absolute right-0 top-9 z-40 w-56 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1.5" style={{ animation: 'slideUp .15s ease' }}>
                 <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-white/35">Message someone</div>
                 {peers.map(m => {
-                  const a = resolveAssignee(m.userId);
                   return (
                     <button key={m.userId} onClick={() => onPick(m.userId)}
                       className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/80 hover:bg-white/5 hover:text-white transition-colors">
-                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: a.hex }} />
-                      <span className="truncate">{m.displayName || m.email}</span>
+                      {/* Deliberately NOT a PersonButton: this row's job is "start a DM" and it is already
+                          a <button>. A profile button inside it would be invalid DOM and fight the picker. */}
+                      <Avatar name={m.displayName || m.email} userId={m.userId} photoUrl={m.avatarUrl} size={20} />
+                      <span className="truncate">
+                        {m.statusEmoji && <span className="mr-1">{m.statusEmoji}</span>}
+                        {m.displayName || m.email}
+                      </span>
                     </button>
                   );
                 })}
@@ -5365,13 +5649,21 @@ function DirectMessagesView() {
           const a = resolveAssignee(c.peerId);
           const selected = c.id === dmActiveConv;
           return (
-            <button key={c.id} onClick={() => setDmActiveConv(c.id)}
-              className={cx('w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors',
+            /* Two SIBLING buttons, not nested: the row already means "open this conversation", so the
+               avatar's "open profile" must be its own control beside it (a <button> inside a <button> is
+               invalid DOM). Same restructure Bundle 2 used for the notification rows. */
+            <div key={c.id}
+              className={cx('w-full flex items-center gap-2.5 px-3 py-2.5 transition-colors',
                 selected ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]')}>
-              <Avatar name={a.label === 'Me' ? 'You' : a.label} userId={c.peerId} photoUrl={a.avatarUrl} size={32} />
-              <span className="flex-1 min-w-0">
+              <PersonButton personId={c.peerId} className="shrink-0" title={a.label === 'Me' ? 'Your profile' : `View ${a.label}'s profile`}>
+                <Avatar name={a.label === 'Me' ? 'You' : a.label} userId={c.peerId} photoUrl={a.avatarUrl} size={32} />
+              </PersonButton>
+              <button onClick={() => setDmActiveConv(c.id)} className="flex-1 min-w-0 text-left">
                 <span className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-medium text-white/85 truncate">{a.label === 'Me' ? 'You' : a.label}</span>
+                  <span className="text-sm font-medium text-white/85 truncate">
+                    {a.statusEmoji && <span className="mr-1">{a.statusEmoji}</span>}
+                    {a.label === 'Me' ? 'You' : a.label}
+                  </span>
                   <span className="text-[10px] text-white/35 shrink-0">{c.preview ? timeAgo(c.lastAt) : ''}</span>
                 </span>
                 <span className="flex items-center justify-between gap-2">
@@ -5380,8 +5672,8 @@ function DirectMessagesView() {
                     <span className="shrink-0 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-rose-50 text-[9px] font-bold leading-none flex items-center justify-center">{c.unread > 9 ? '9+' : c.unread}</span>
                   )}
                 </span>
-              </span>
-            </button>
+              </button>
+            </div>
           );
         })}
       </div>
@@ -5555,8 +5847,10 @@ function DmThread({ conversationId, peerId, onBack }) {
     const seen = isSeen(m.createdAt);
     return (
       <div className="mt-0.5 px-1 flex items-center gap-1 text-[10px]" title={seen ? 'Seen' : 'Sent'}>
+        {/* Seen shows the peer's face (the Messenger convention) — it reads faster than a tick and it's
+            unambiguous about WHO saw it. Sent keeps the plain tick: nobody has seen it yet. */}
         {seen
-          ? <><CheckCheck className="w-3.5 h-3.5 text-violet-400" /><span className="text-violet-400/80">Seen</span></>
+          ? <><Avatar name={peerName} userId={peerId} photoUrl={peer.avatarUrl} size={14} /><span className="text-violet-400/80">Seen</span></>
           : <><Check className="w-3 h-3 text-white/35" /><span className="text-white/35">Sent</span></>}
       </div>
     );
@@ -5666,17 +5960,27 @@ function DmThread({ conversationId, peerId, onBack }) {
     <div className="flex flex-col h-full">
       <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2.5 shrink-0">
         <button onClick={onBack} className="lg:hidden text-white/50 hover:text-white/80 -ml-1"><ChevronRight className="w-4 h-4 rotate-180" /></button>
-        <MsgAvatar name={peerName} userId={peerId} size={32} />
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-white/90 leading-tight truncate">{isSelf ? 'You' : peerName}</div>
-          <div className="text-[10px] text-white/35 leading-tight">{isSelf ? 'Notes to self' : 'Direct message'}</div>
-        </div>
+        <PersonButton personId={peerId} className="gap-2.5 min-w-0 flex-1" title={isSelf ? 'Your profile' : `View ${peerName}'s profile`}>
+          <MsgAvatar name={peerName} userId={peerId} photoUrl={peer.avatarUrl} size={32} />
+          <div className="min-w-0 text-left">
+            <div className="text-sm font-semibold text-white/90 leading-tight truncate">{isSelf ? 'You' : peerName}</div>
+            {/* The subtitle was a static string; the peer's live status is far more useful here. */}
+            <div className="text-[10px] text-white/35 leading-tight truncate">
+              {isSelf ? 'Notes to self'
+                : (peer.statusText || peer.statusEmoji)
+                  ? <>{peer.statusEmoji && <span className="mr-1">{peer.statusEmoji}</span>}{peer.statusText || 'Direct message'}</>
+                  : 'Direct message'}
+            </div>
+          </div>
+        </PersonButton>
       </div>
 
       <MessageList
         items={items}
         userId={userId}
         nameOf={nameOf}
+        // A thread has exactly two people, so the roster lookup is a ternary — no extra fetch.
+        avatarFor={(id) => (id === userId ? currentMember?.avatar_url : peer.avatarUrl)}
         loading={loading}
         hasMore={hasMore}
         onLoadOlder={loadOlder}
@@ -5686,7 +5990,7 @@ function DmThread({ conversationId, peerId, onBack }) {
         receiptFor={receiptFor}
         empty={(
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-10">
-            <MsgAvatar name={peerName} userId={peerId} size={48} />
+            <MsgAvatar name={peerName} userId={peerId} photoUrl={peer.avatarUrl} size={48} />
             <div className="text-sm font-medium text-white/70">{isSelf ? 'Notes to self' : peerName}</div>
             <div className="text-[12px] text-white/40">{isSelf ? 'Jot down anything you want to remember.' : 'Say hello 👋'}</div>
           </div>
@@ -5905,13 +6209,17 @@ function MembersView() {
             const canModify = !isSelf && !isLastOwner && (myRank >= 3 ? true : (myRank >= 2 ? targetRank < 2 : false));
             return (
               <div key={m.userId} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/[0.02]">
-                <div className="min-w-0 flex items-center gap-2.5">
+                <PersonButton personId={m.userId} className="min-w-0 gap-2.5 flex-1" title={isSelf ? 'Your profile' : `View ${m.displayName || m.email}'s profile`}>
                   <Avatar name={m.displayName || m.email} userId={m.userId} photoUrl={m.avatarUrl} size={32} />
-                  <div className="min-w-0">
-                    <div className="text-sm text-white/90 truncate">{m.displayName || m.email}{isSelf && <span className="text-white/40"> (you)</span>}</div>
-                    <div className="text-[11px] text-white/40 truncate">{m.email}</div>
+                  <div className="min-w-0 text-left">
+                    <div className="text-sm text-white/90 truncate">
+                      {m.statusEmoji && <span className="mr-1">{m.statusEmoji}</span>}
+                      {m.displayName || m.email}{isSelf && <span className="text-white/40"> (you)</span>}
+                    </div>
+                    {/* status when they've set one, else the email — the profile view carries both anyway */}
+                    <div className="text-[11px] text-white/40 truncate">{m.statusText || m.email}</div>
                   </div>
-                </div>
+                </PersonButton>
                 <div className="shrink-0 flex items-center gap-2">
                   {!isSelf && (
                     <button onClick={() => startDm(m.userId).catch(() => {})} title={`Message ${m.displayName || m.email}`}
@@ -6125,6 +6433,7 @@ function AppShell() {
       <CommandPalette />
       <TaskModal />
       <UpgradeModal />
+      <ProfileView />
       <PlanPreviewBanner />
     </div>
   );
