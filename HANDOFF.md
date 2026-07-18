@@ -1,49 +1,47 @@
-# HANDOFF — UX batch (part 3) — as of 2026-07-16
+# HANDOFF — UX batch (part 3) — as of 2026-07-18
 
-> Orientation for resuming the UX batch. Everything is on **`feat/ux-batch-part3`** — **nothing is merged
-> to `main`** and (as of this handoff) the batch's DB migrations are **designed + proven but NOT yet applied**.
-> The Supabase DB is safe in the cloud; local code is not (Deep Freeze) — after a wipe follow
+> Orientation for the tail end of the UX batch. **The batch is MERGED and LIVE.** `main` is the
+> production branch (Vercel auto-deploys it); the one open item is the owner's in-browser
+> verification of the profile/avatar system on production. After a Deep Freeze wipe follow
 > [`RESTORE.md`](RESTORE.md) first, then read this.
 
-## Branch topology (nothing merged to `main`)
+## Branch topology (everything merged)
 
 | Branch | What's on it | Status |
 |--------|--------------|--------|
-| **`main`** | production (Vercel auto-deploys from it). Untouched by this batch. | live |
-| **`feat/ux-batch-part3`** | the UX batch — committed work (below) + the pending items 1–5. | working tip |
+| **`main`** | tip **`160ee41`** — merge of `feat/ux-batch-part3` (profile/avatar system). Deployed; see *What's live*. | live |
+| **`feat/ux-batch-part3`** | tip `4ad353f` — fully contained in `main` as of `160ee41`. | merged, can be deleted |
 
-**Committed on the branch** (tip `0c96e41`): waveform voice notes + one default avatar (`9cca0f0`); members
-identity-column lock + orphan-sweep age guard (`2684b6e`); roles-docs correction + committed isolation/role
-proofs (`a4a008a`); guest-can't-board-workspace-tasks fix (`eabdf1f`); DM delete-for-me hides + monotonic read
-cursor + tasks jsonb server-side hardening (`0c96e41`).
+Merge history of the batch: `d6f9960` (2026-07-17) merged the earlier batch state — waveform voice
+notes + default avatar, members identity lock, orphan-sweep age guard, guest board fix, DM
+delete-for-me + monotonic read cursor, tasks jsonb caps, project-delete cascade/unassign RPC,
+profile/avatar DB foundation — plus the perf/scale pass. `160ee41` (2026-07-18) merged the last
+3 commits: `4f0c3c0` (avatars-bucket SELECT-policy fix that unblocked upload, 42501), `58c49fd`
+(status emoji is a picker, not a text field), `4ad353f` (faces everywhere + a profile worth opening).
 
-## The UX batch — items 1–5 (designed + PROVEN via rolled-back proofs; awaiting apply)
+## What's live (verified 2026-07-18)
 
-All DB work was proven with `begin; … rollback;` proofs against the live DB (harness guard + anti-vacuity
-guard + completeness guard; adversarially re-verified). **Nothing applied yet.**
+- Production serves bundle `index-iqnlb6l5.js` — **SHA256-identical** to a local build of `160ee41`,
+  so the deployed code is exactly the merged tree. Site loads; new-code markers (`status_emoji`,
+  `avatar_url`) present in the served bundle.
+- The batch's DB migrations are **applied live AND committed** (the old "designed but NOT applied"
+  status of this file is obsolete): `20260716104604_project_delete_cascade_unassign_rpc`,
+  `20260716110514_members_profile_avatar_display_name_and_avatars_bucket`,
+  `20260716131220_fix_avatars_select_own_unblocks_upload`. Rolled-back proof files for the new
+  surfaces are committed under `supabase/tests/`.
+- Build exit 0; lint baseline **12 errors / 2 warnings** (this supersedes older 31/2 mentions).
 
-1. **Project delete — cascade / unassign** (`public.delete_project` RPC). cascade (delete tasks + project) =
-   **owner-only (rank 3)** + typed-confirm modal; unassign (re-file tasks) = **owner+admin (rank 2)**. Both
-   scoped by `workspace_id` (the cross-tenant guard — shared free-text slugs like `personal`/`other`) AND by
-   `can_see_task` (GATE A — invisible private tasks untouched at every rank); project-existence guard blocks the
-   slug footgun. `projects_delete_admin` kept unchanged (143/143 F10 stays green). **Proof: 29/29** incl. the M8
-   "strip workspace_id → RED" demonstration. (`supabase/tests/project_delete_cascade_rolled_back_proof.sql`)
-2+3. **Profile + avatar + display_name hardening** (one migration, one roster-RPC recreate). Adds
-   `avatar_url`/`bio`/`status_text`/`status_emoji` to `members`; `members_validate_profile` trigger closes the
-   role-impersonation hole on `status_text`, `status_emoji`, and `display_name` (fullwidth/mathematical/
-   zero-width/spacing/literal role words via `private._looks_like_role_title`); `handle_new_user` sanitizes the
-   OAuth-derived name so **signup never fails**; extended `UPDATE` column grant (identity stays locked); roster
-   RPC recreated to expose the new fields (guest still gets NULL email+bio + row-scoping). **Proof: 38/38.**
-   (`supabase/tests/profile_and_avatar_rolled_back_proof.sql`) **Residuals (documented, out of scope):**
-   Cyrillic/Greek confusables + leetspeak (proof W08/W09 assert them allowed); `avatar_url` is https-only and a
-   tracking-pixel residual **until the storage-hosted avatars bucket lands in this batch** (then restricted to
-   the storage host).
-4. **Baseline + ledger-gap files + this HANDOFF** (docs/files only — see *Rebuild gaps* below).
-5. **Permanent proof files** — commit the rolled-back proofs for the new surfaces (project delete, profile,
-   DM hides, …) into `supabase/tests/` so a future change can't silently regress them.
+## PENDING — the one open item
 
-**Agreed apply order** (re-run **48/48** cross-tenant isolation + **143/143** role-boundary after EACH apply):
-**baseline (no-op) → project delete → profile+avatar+display_name recreate → proof files.**
+**Owner's browser verification of the profile/avatar system ON PRODUCTION — especially light
+mode** (the pre-merge check read the CSS; nobody has eyeballed it). Surfaces: ProfileModal
+(open/edit/save, avatar upload/replace/remove, status emoji picker), avatars rendered across task
+cards / comments / chat / DMs / members page, initials fallback for members with no avatar, and
+every new element in light theme.
+
+**Rollback if something is broken:** `git revert -m 1 160ee41 && git push` (parent 1 = `d6f9960`,
+the pre-merge production state). The DB migrations stay — they're additive and the pre-merge app
+never read the new columns.
 
 ## Rebuild gaps (honest — read before trusting a from-scratch rebuild)
 
@@ -76,9 +74,9 @@ the role switch proves nothing; every proof opens with a self-validating harness
 
 1. [`RESTORE.md`](RESTORE.md): toolchain → clone → git identity/TLS → `npm install` → launch `claude` from inside
    the repo (loads `.mcp.json`) → recreate `.env` → auth the Supabase MCP.
-2. `git checkout feat/ux-batch-part3`. Sanity: `npm run build`, `npm run lint`.
-3. Resume the UX batch: apply items 1–5 in the agreed order once the owner approves, re-running 48/48 + 143/143
-   after each apply. Then the app-side work (project-delete modal + RPC wiring; ProfileModal self-editor +
-   `members.updateProfile`; avatars bucket + storage-hosted avatar wiring).
+2. `git checkout main` (everything is merged). Sanity: `npm run build`, `npm run lint` (expect 12/2).
+3. If the owner's production verification hasn't happened yet, that's the open item (see *PENDING*).
+   If it surfaced breakage, use the rollback above. Otherwise the batch is closed — next work per
+   CLAUDE.md's *Roadmap* (server-side entitlements before billing, auth dashboard hardening).
 
 ## CLAUDE.md is the durable project guide — this HANDOFF is batch-scoped and disposable.
