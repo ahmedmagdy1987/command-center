@@ -866,13 +866,17 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   // Resolve an assignee id -> { id, label, hex, soft, initials } for chips/labels. 'Me' for self,
   // 'Unassigned' (neutral) for null, display name otherwise. Color is deterministic per user id.
   const resolveAssignee = useCallback((assigneeId) => {
-    if (!assigneeId) return { id: null, label: 'Unassigned', hex: UNASSIGNED_STYLE.hex, soft: UNASSIGNED_STYLE.soft, initials: '·', avatarUrl: null, statusEmoji: '', statusText: '' };
+    if (!assigneeId) return { id: null, known: false, label: 'Unassigned', hex: UNASSIGNED_STYLE.hex, soft: UNASSIGNED_STYLE.soft, initials: '·', avatarUrl: null, statusEmoji: '', statusText: '' };
     const m = members.find(x => x.userId === assigneeId);
-    const name = m?.displayName || m?.email || 'Member';
+    // `known: false` = no roster row. For a full member that means the person LEFT ('Former member');
+    // a guest's roster is row-scoped server-side, so for them absence proves nothing — keep 'Member'.
+    // Avatar call sites gate on `known` and pass '' so the SILHOUETTE renders — the old fallback
+    // initialled to "ME", indistinguishable from your own 'Me' disc in the palette/receipts.
+    const name = m?.displayName || m?.email || (isGuest ? 'Member' : 'Former member');
     const c = assigneeColor(assigneeId);
-    return { id: assigneeId, label: assigneeId === userId ? 'Me' : name, hex: c.hex, soft: c.soft, initials: initialsOf(name),
+    return { id: assigneeId, known: !!m, label: assigneeId === userId ? 'Me' : name, hex: c.hex, soft: c.soft, initials: initialsOf(name),
       avatarUrl: m?.avatarUrl || null, statusEmoji: m?.statusEmoji || '', statusText: m?.statusText || '' };
-  }, [members, userId]);
+  }, [members, userId, isGuest]);
 
   /**
    * The ONE identity lookup every surface uses: a roster row -> a renderable person. Returns null for
@@ -1049,7 +1053,7 @@ function AssigneeChip({ assigneeId, showLabel = true, size = 'sm' }) {
   return (
     <span className={cx('inline-flex items-center gap-1 rounded-full font-medium tracking-wide pl-0.5', dims, showLabel ? (size === 'sm' ? 'pr-2' : 'pr-2.5') : 'pr-0.5')}
       style={{ background: light ? `${a.hex}1f` : a.soft, color: light ? '#0b0b12' : a.hex, border: `1px solid ${a.hex}33` }}>
-      <Avatar name={a.id ? a.label : ''} userId={a.id} photoUrl={a.avatarUrl} size={face} />
+      <Avatar name={a.known ? a.label : ''} userId={a.id} photoUrl={a.avatarUrl} size={face} />
       {showLabel && a.label}
     </span>
   );
@@ -1307,7 +1311,7 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showAssign
           /* A face, but NOT a PersonButton: the whole card is already a click target for opening the task. */
           <span className="text-[10px] text-white/30 inline-flex items-center gap-1">
             · by
-            <Avatar name={creatorLabel(task.createdBy)} userId={task.createdBy} photoUrl={resolveAssignee(task.createdBy).avatarUrl} size={12} />
+            <Avatar name={resolveAssignee(task.createdBy).known ? creatorLabel(task.createdBy) : ''} userId={task.createdBy} photoUrl={resolveAssignee(task.createdBy).avatarUrl} size={12} />
             {creatorLabel(task.createdBy)}
           </span>
         )}
@@ -1792,7 +1796,7 @@ function TaskModal() {
             <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-white/35">
               <span>Added by</span>
               <PersonButton personId={t.createdBy} className="gap-1.5 min-w-0" title={`View ${creatorLabel(t.createdBy)}'s profile`}>
-                <Avatar name={creatorLabel(t.createdBy)} userId={t.createdBy} photoUrl={cr.avatarUrl} size={16} />
+                <Avatar name={cr.known ? creatorLabel(t.createdBy) : ''} userId={t.createdBy} photoUrl={cr.avatarUrl} size={16} />
                 <span className="text-white/55 hover:text-white/80 truncate">
                   {cr.statusEmoji && <span className="mr-1">{cr.statusEmoji}</span>}
                   {creatorLabel(t.createdBy)}
@@ -2494,7 +2498,7 @@ function CommandPalette() {
                     className={cx('w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm transition-colors',
                       active ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5')}>
                     {/* The face says who; the DM/Team glyph stays as the small kind marker. */}
-                    <Avatar name={who} userId={m.senderId} photoUrl={sender.avatarUrl} size={20} />
+                    <Avatar name={sender.known ? who : ''} userId={m.senderId} photoUrl={sender.avatarUrl} size={20} />
                     <span className="flex-1 min-w-0 truncate">{m.body}</span>
                     <span className="text-[10px] text-white/30 shrink-0 inline-flex items-center gap-1">
                       <Icon className="w-3 h-3" />{who} · {m.kind === 'dm' ? 'DM' : 'Team'}
@@ -2738,14 +2742,14 @@ function NotificationToast({ n, light, onOpen, onDismiss }) {
         leaving ? 'animate-[fadeSlideOut_.18s_ease_forwards]' : 'animate-[slideUp_.2s_ease]')}>
       <span className="mt-0.5 shrink-0 relative">
         {actor
-          ? <Avatar name={actor.label} userId={n.actorId} photoUrl={actor.avatarUrl} size={28} />
+          ? <Avatar name={actor.known ? actor.label : ''} userId={n.actorId} photoUrl={actor.avatarUrl} size={28} />
           : <span className="w-7 h-7 rounded-lg border flex items-center justify-center"
               style={{ background: tv.hex + '1f', borderColor: tv.hex + '55' }}>
               <tv.Icon className="w-3.5 h-3.5" style={{ color: tv.hex }} />
             </span>}
         {actor && (
           <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center border"
-            style={{ background: light ? '#ffffff' : '#0f1017', borderColor: light ? '#e5e7eb' : 'rgba(255,255,255,0.12)' }}>
+            style={{ background: light ? '#ffffff' : '#0f1017', borderColor: light ? '#d1d5db' : 'rgba(255,255,255,0.12)' }}>
             <tv.Icon className="w-2 h-2" style={{ color: tv.hex }} />
           </span>
         )}
@@ -3002,13 +3006,13 @@ function NotificationBell() {
                           return (
                           <span className="relative mt-0.5 shrink-0">
                             {actor
-                              ? <Avatar name={actor.label} userId={n.actorId} photoUrl={actor.avatarUrl} size={28} />
+                              ? <Avatar name={actor.known ? actor.label : ''} userId={n.actorId} photoUrl={actor.avatarUrl} size={28} />
                               : <span className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: light ? `${tv.hex}1f` : `${tv.hex}22` }}>
                                   <tv.Icon className="w-4 h-4" style={{ color: tv.hex }} />
                                 </span>}
                             {actor && (
                               <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center border"
-                                style={{ background: light ? '#ffffff' : '#0f1017', borderColor: light ? '#e5e7eb' : 'rgba(255,255,255,0.12)' }}>
+                                style={{ background: light ? '#ffffff' : '#0f1017', borderColor: light ? '#d1d5db' : 'rgba(255,255,255,0.12)' }}>
                                 <tv.Icon className="w-2 h-2" style={{ color: tv.hex }} />
                               </span>
                             )}
@@ -3609,7 +3613,8 @@ function TopBar() {
  * (so useState initializers prefill from the freshly-loaded currentMember — no set-state-in-effect). Writes
  * via membersApi.updateProfile; the server validates (role-title impersonation, length, storage-hosted
  * avatar) so a rejection surfaces inline. Avatar uploads to the caller's own folder in the public avatars
- * bucket and stores the resulting public URL. refreshCurrentMember() re-syncs the top bar after saving.
+ * bucket and stores the resulting public URL. Saving re-syncs the top bar (refreshCurrentMember) AND the
+ * workspace roster (refreshMembers) so every identity surface reflects the edit immediately.
  */
 /** Status emojis offered by the profile picker. Every entry is verified against the server's emoji-only
  *  rule (members_validate_profile: no letters/digits, no letter-like symbols — checked live, 32/32 accept),
@@ -3618,7 +3623,8 @@ const STATUS_EMOJIS = ['🟢','🟡','🔴','🔵','⚪','🔥','☕','🎯','�
   '🧠','⏳','🌴','🏖️','🤒','🚗','🍕','🌙','⚡','✨','🎉','👀','💬','📚','🏃','😴'];
 
 function ProfileModal({ onClose }) {
-  const { currentMember, refreshCurrentMember } = useApp();
+  const { currentMember, refreshCurrentMember, refreshMembers, theme } = useApp();
+  const light = theme === 'light';
   const [displayName, setDisplayName] = useState(() => currentMember?.display_name || '');
   const [statusText, setStatusText] = useState(() => currentMember?.status_text || '');
   const [statusEmoji, setStatusEmoji] = useState(() => currentMember?.status_emoji || '');
@@ -3643,7 +3649,10 @@ function ProfileModal({ onClose }) {
     setErr(''); setBusy(true);
     try {
       await membersApi.updateProfile({ displayName, statusText, statusEmoji, bio, avatarUrl });
-      await refreshCurrentMember?.();
+      // BOTH refreshes: currentMember drives only the top bar; every roster-driven surface (sidebar
+      // card, chat facepile, DM list, Members page, comment headers, the profile card itself) reads
+      // the workspace roster, which without refreshMembers() kept the old name/photo until a reload.
+      await Promise.all([refreshCurrentMember?.(), refreshMembers?.()]);
       onClose();
     } catch (e) {
       setErr(e?.message || 'Could not save your profile.');
@@ -3653,8 +3662,11 @@ function ProfileModal({ onClose }) {
 
   return createPortal(
     <>
-      <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
+      {/* z-[80]: ProfileModal must layer ABOVE ProfileView (z-[70]) — "Edit profile" inside the profile
+          card mounts this as a sibling body portal, and at the old z-[60] the editor painted invisibly
+          BEHIND the card (clicking seemed to do nothing while focus sat in the hidden panel). */}
+      <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[80] flex items-center justify-center p-6 pointer-events-none">
         <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Edit profile"
           className="pointer-events-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5 outline-none max-h-[85vh] overflow-y-auto"
           style={{ animation: 'slideUp .2s ease' }}
@@ -3683,7 +3695,7 @@ function ProfileModal({ onClose }) {
           <div className="flex gap-2 mb-2">
             <button type="button" onClick={() => setEmojiOpen(o => !o)} aria-expanded={emojiOpen} aria-label="Pick a status emoji"
               className={cx('w-14 h-9 rounded-xl border flex items-center justify-center text-base transition-colors',
-                emojiOpen ? 'border-violet-400/50 bg-violet-500/10' : 'border-white/10 bg-white/5 hover:bg-white/10')}>
+                emojiOpen ? 'border-violet-400/50 bg-violet-500/20' : 'border-white/10 bg-white/5 hover:bg-white/10')}>
               {statusEmoji || <Plus className="w-3.5 h-3.5 text-white/40" />}
             </button>
             <input value={statusText} onChange={e => setStatusText(e.target.value)} maxLength={80} placeholder="What are you up to?" aria-label="Status text"
@@ -3692,12 +3704,14 @@ function ProfileModal({ onClose }) {
           {/* An INLINE grid, not a floating popover: the modal panel is overflow-y-auto, which would clip an
               absolutely-positioned one. Picking is the only input path — the server accepts emoji only, so a
               free-text field was never a valid way to set this. */}
+          {/* Theme-aware like Avatar: bg-black/30 read as a dark slab once the light overrides turned
+              the modal panel white, and the white-alpha hover was invisible on it. */}
           {emojiOpen && (
-            <div className="mb-3 p-2 rounded-xl border border-white/10 bg-black/30">
+            <div className={cx('mb-3 p-2 rounded-xl border border-white/10', light ? 'bg-black/5' : 'bg-black/30')}>
               <div className="grid grid-cols-8 gap-1">
                 {STATUS_EMOJIS.map(em => (
                   <button key={em} type="button" onClick={() => { setStatusEmoji(em); setEmojiOpen(false); }} aria-label={`Status emoji ${em}`}
-                    className={cx('h-8 rounded-lg text-base hover:bg-white/10 transition-colors',
+                    className={cx('h-8 rounded-lg text-base transition-colors', light ? 'hover:bg-black/10' : 'hover:bg-white/10',
                       statusEmoji === em && 'bg-violet-500/20 ring-1 ring-violet-400/50')}>{em}</button>
                 ))}
               </div>
@@ -3754,21 +3768,31 @@ function PersonButton({ personId, children, className, title }) {
  *
  * Data comes from personOf() — i.e. the workspace roster the app already loads, so there is no new fetch
  * and no new read path. email/bio arrive NULL for a GUEST viewer (workspace_members_list withholds them
- * server-side) so those rows simply don't render — the guest scoping needs no client logic. Someone who
- * has left the workspace isn't in the roster at all, hence the explicit former-member state.
+ * server-side) so those rows simply don't render — the guest scoping needs no client logic. A missing
+ * roster row means different things by viewer: for a member/admin/owner the roster is complete, so the
+ * person has LEFT; for a GUEST the roster is row-scoped server-side (self + task co-participants + DM
+ * peers), so an ACTIVE member can be absent — that gets the "limited" state, never a false "has left".
  *
- * Portaled to <body>, so it can never inherit the per-view [data-theme="light"] rules — it matches the
- * app's other modals (always dark) and therefore renders identically in both themes.
+ * Portaled to <body> — which does NOT keep it dark: data-theme is stamped on <html> and AppShell's
+ * global [data-theme="light"] overrides match portaled nodes too, so in light mode this panel renders
+ * LIGHT like every other modal. (An earlier comment here claimed the opposite; it was wrong.)
  */
 function ProfileView() {
-  const { profileUserId, closeProfile, personOf, startDm } = useApp();
+  const { profileUserId, closeProfile, personOf, startDm, isGuest } = useApp();
   const [editing, setEditing] = useState(false);
+  const [dmErr, setDmErr] = useState('');
   const panelRef = useRef(null);
+  // dmErr needs no reset here: the backdrop makes closing (which resets it) the only way to switch profiles.
   useEffect(() => { if (profileUserId) setTimeout(() => panelRef.current?.focus(), 30); }, [profileUserId]);
   if (!profileUserId) return null;
 
   const p = personOf(profileUserId);
-  const close = () => { setEditing(false); closeProfile(); };
+  const close = () => { setEditing(false); setDmErr(''); closeProfile(); };
+  const message = async () => {
+    setDmErr('');
+    try { await startDm?.(p.id); close(); }   // success navigates to the thread; only then close
+    catch (e) { reportError(e, 'dms.start from profile'); setDmErr("Couldn't start the conversation. Please try again."); }
+  };
 
   return createPortal(
     <>
@@ -3781,10 +3805,16 @@ function ProfileView() {
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } }}>
 
           {!p ? (
+            /* Guest viewers get a row-scoped roster, so "not in MY roster" ≠ "has left" — claiming
+               "no longer in this workspace" about an active admin was simply false. */
             <div className="text-center py-4">
               <Avatar name="" userId={profileUserId} size={72} className="mx-auto mb-3" />
-              <h2 className="text-base font-semibold text-white mb-1">No longer in this workspace</h2>
-              <p className="text-xs text-white/50">This person has left, so their profile isn't available here.</p>
+              <h2 className="text-base font-semibold text-white mb-1">{isGuest ? 'Profile unavailable' : 'No longer in this workspace'}</h2>
+              <p className="text-xs text-white/50">
+                {isGuest
+                  ? 'As a guest you can see full profiles only for people on your tasks or in your direct messages.'
+                  : "This person has left, so their profile isn't available here."}
+              </p>
             </div>
           ) : (
             <>
@@ -3804,6 +3834,8 @@ function ProfileView() {
                 {p.email && <p className="mt-3 text-[11px] text-white/35 break-all">{p.email}</p>}
               </div>
 
+              {dmErr && <p className="mt-3 text-xs text-rose-300 text-center break-words">{dmErr}</p>}
+
               <div className="flex items-center justify-end gap-2 mt-5">
                 <button onClick={close}
                   className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">Close</button>
@@ -3813,7 +3845,9 @@ function ProfileView() {
                     <User className="w-3.5 h-3.5" />Edit profile
                   </button>
                 ) : (
-                  <button onClick={() => { startDm?.(p.id)?.catch?.(logCaught('dms.start from profile')); close(); }}
+                  /* Failure keeps the card OPEN with an inline error — the old handler closed
+                     immediately and swallowed the rejection, so a failed start looked like a no-op. */
+                  <button onClick={message}
                     className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5">
                     <MessageSquare className="w-3.5 h-3.5" />Message
                   </button>
@@ -4928,10 +4962,11 @@ function DayDivider({ label }) {
  *  stays recognisable at a glance whether or not they've uploaded a photo.
  *  Photo -> two-letter initials -> silhouette. THEME-AWARE, and it must stay that way: `soft` is a 14%
  *  tint built for dark surfaces, so `soft` background + `hex` text is unreadable on light. Light mode
- *  therefore inverts to a solid `hex` fill with near-black text (the same swap AssigneeSelect used to
- *  hand-roll). Doing it here — rather than per call site — is what lets every avatar in the app be
- *  light-safe at once. NB: the [data-theme="light"] CSS rules are declared inside per-view <style>
- *  blocks, so they never reach a portaled modal; theme must be read from context, never assumed. */
+ *  therefore swaps to a soft hex tint with near-black text (a solid `hex` fill was tried first and read
+ *  as a wall of loud color discs). Doing it here — rather than per call site — is what lets every avatar
+ *  in the app be light-safe at once. NB on mechanism: inline styles are unaffected by the global
+ *  [data-theme="light"] override sheet either way, so theme is read from context — but do NOT repeat the
+ *  old claim that light CSS "never reaches portaled modals"; AppShell's sheet matches portals too. */
 function Avatar({ name, userId, photoUrl, size = 28, className }) {
   const { theme } = useApp();
   const light = theme === 'light';
@@ -4944,9 +4979,11 @@ function Avatar({ name, userId, photoUrl, size = 28, className }) {
     <span className={cx('rounded-full flex items-center justify-center font-semibold shrink-0 select-none overflow-hidden', className)}
       style={{
         width: size, height: size,
-        background: showPhoto ? 'transparent' : (light ? c.hex : c.soft),
+        // Light fallback: a SOFT tint + near-black text, not the former full-saturation disc — a board
+        // of solid color circles read louder than any content. Border keeps the identity hue at 35%.
+        background: showPhoto ? 'transparent' : (light ? c.hex + '26' : c.soft),
         color: light ? '#0b0b12' : c.hex,
-        border: `1px solid ${light ? c.hex : c.hex + '33'}`,
+        border: `1px solid ${light ? c.hex + '59' : c.hex + '33'}`,
         fontSize: Math.round(size * 0.36),
       }}>
       {showPhoto ? (
@@ -5662,7 +5699,7 @@ function DirectMessagesView() {
               className={cx('w-full flex items-center gap-2.5 px-3 py-2.5 transition-colors',
                 selected ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]')}>
               <PersonButton personId={c.peerId} className="shrink-0" title={a.label === 'Me' ? 'Your profile' : `View ${a.label}'s profile`}>
-                <Avatar name={a.label === 'Me' ? 'You' : a.label} userId={c.peerId} photoUrl={a.avatarUrl} size={32} />
+                <Avatar name={a.known ? (a.label === 'Me' ? 'You' : a.label) : ''} userId={c.peerId} photoUrl={a.avatarUrl} size={32} />
               </PersonButton>
               <button onClick={() => setDmActiveConv(c.id)} className="flex-1 min-w-0 text-left">
                 <span className="flex items-center justify-between gap-2">
@@ -5856,7 +5893,7 @@ function DmThread({ conversationId, peerId, onBack }) {
         {/* Seen shows the peer's face (the Messenger convention) — it reads faster than a tick and it's
             unambiguous about WHO saw it. Sent keeps the plain tick: nobody has seen it yet. */}
         {seen
-          ? <><Avatar name={peerName} userId={peerId} photoUrl={peer.avatarUrl} size={14} /><span className="text-violet-400/80">Seen</span></>
+          ? <><Avatar name={peer.known ? peerName : ''} userId={peerId} photoUrl={peer.avatarUrl} size={14} /><span className="text-violet-400/80">Seen</span></>
           : <><Check className="w-3 h-3 text-white/35" /><span className="text-white/35">Sent</span></>}
       </div>
     );
@@ -5967,7 +6004,7 @@ function DmThread({ conversationId, peerId, onBack }) {
       <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2.5 shrink-0">
         <button onClick={onBack} className="lg:hidden text-white/50 hover:text-white/80 -ml-1"><ChevronRight className="w-4 h-4 rotate-180" /></button>
         <PersonButton personId={peerId} className="gap-2.5 min-w-0 flex-1" title={isSelf ? 'Your profile' : `View ${peerName}'s profile`}>
-          <MsgAvatar name={peerName} userId={peerId} photoUrl={peer.avatarUrl} size={32} />
+          <MsgAvatar name={peer.known ? peerName : ''} userId={peerId} photoUrl={peer.avatarUrl} size={32} />
           <div className="min-w-0 text-left">
             <div className="text-sm font-semibold text-white/90 leading-tight truncate">{isSelf ? 'You' : peerName}</div>
             {/* The subtitle was a static string; the peer's live status is far more useful here. */}
@@ -5996,7 +6033,7 @@ function DmThread({ conversationId, peerId, onBack }) {
         receiptFor={receiptFor}
         empty={(
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-10">
-            <MsgAvatar name={peerName} userId={peerId} photoUrl={peer.avatarUrl} size={48} />
+            <MsgAvatar name={peer.known ? peerName : ''} userId={peerId} photoUrl={peer.avatarUrl} size={48} />
             <div className="text-sm font-medium text-white/70">{isSelf ? 'Notes to self' : peerName}</div>
             <div className="text-[12px] text-white/40">{isSelf ? 'Jot down anything you want to remember.' : 'Say hello 👋'}</div>
           </div>
@@ -6005,8 +6042,10 @@ function DmThread({ conversationId, peerId, onBack }) {
 
       {!isSelf && <TypingStrip label={shownTyping} />}
 
+      {/* meId: the "you, about to speak" composer avatar — ChatView passed it, DMs didn't (shipped inconsistency). */}
       <Composer
         placeholder={isSelf ? 'Write a note to yourself…' : `Message ${peerName}…  (Enter to send)`}
+        meId={userId}
         onSubmitText={sendText}
         onTyping={isSelf ? undefined : signalTyping}
         onStopTyping={isSelf ? undefined : stopTyping}
@@ -6363,7 +6402,7 @@ function AppShell() {
         /* Accent TEXT: dark-mode accents are bright (readable on dark) but wash out on light-tinted
            surfaces — mention pills, the recurrence preview chip, badges, links, the DM "Seen" tick,
            and error text. Darken them for light mode (the heroes are re-exempted below). */
-        [data-theme="light"] .text-violet-100, [data-theme="light"] .text-violet-200, [data-theme="light"] .text-violet-300, [data-theme="light"] .text-violet-400, [data-theme="light"] .text-violet-300\\/70, [data-theme="light"] .text-violet-300\\/80, [data-theme="light"] .text-violet-200\\/90, [data-theme="light"] .text-violet-200\\/80, [data-theme="light"] .text-violet-100\\/90 { color: #6d28d9 !important; }
+        [data-theme="light"] .text-violet-100, [data-theme="light"] .text-violet-200, [data-theme="light"] .text-violet-300, [data-theme="light"] .text-violet-400, [data-theme="light"] .text-violet-400\\/80, [data-theme="light"] .text-violet-300\\/70, [data-theme="light"] .text-violet-300\\/80, [data-theme="light"] .text-violet-200\\/90, [data-theme="light"] .text-violet-200\\/80, [data-theme="light"] .text-violet-100\\/90 { color: #6d28d9 !important; }
         [data-theme="light"] .text-emerald-200, [data-theme="light"] .text-emerald-300, [data-theme="light"] .text-emerald-400, [data-theme="light"] .text-emerald-300\\/80 { color: #047857 !important; }
         [data-theme="light"] .text-amber-100, [data-theme="light"] .text-amber-200, [data-theme="light"] .text-amber-300 { color: #b45309 !important; }
         [data-theme="light"] .text-sky-300, [data-theme="light"] .text-sky-400 { color: #0369a1 !important; }
@@ -6377,12 +6416,19 @@ function AppShell() {
         [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-200, [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-300, [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-400 { color: #c4b5fd !important; }
         [data-theme="light"] .border-white\\/5, [data-theme="light"] .border-white\\/10, [data-theme="light"] .border-white\\/\\[0\\.06\\], [data-theme="light"] .border-white\\/\\[0\\.08\\] { border-color: rgba(0,0,0,0.08) !important; }
         [data-theme="light"] .bg-white\\/\\[0\\.04\\], [data-theme="light"] .bg-white\\/\\[0\\.03\\], [data-theme="light"] .bg-white\\/\\[0\\.02\\], [data-theme="light"] .bg-white\\/\\[0\\.015\\], [data-theme="light"] .bg-white\\/\\[0\\.005\\], [data-theme="light"] .bg-white\\/5 { background: rgba(0,0,0,0.025) !important; }
-        [data-theme="light"] .bg-white\\/\\[0\\.08\\], [data-theme="light"] .bg-white\\/10 { background: rgba(0,0,0,0.06) !important; }
+        [data-theme="light"] .bg-white\\/\\[0\\.08\\], [data-theme="light"] .bg-white\\/\\[0\\.06\\], [data-theme="light"] .bg-white\\/10 { background: rgba(0,0,0,0.06) !important; }
         /* Dropdown active-row + mention-pill accent: a legible violet in light mode (the plain white-alpha wash was near-invisible). */
         [data-theme="light"] .bg-violet-500\\/25, [data-theme="light"] .bg-violet-500\\/20 { background: rgba(124,58,237,0.16) !important; }
         [data-theme="light"] .search-input { background: #ffffff !important; border-color: rgba(0,0,0,0.12) !important; color: #17181c !important; }
         [data-theme="light"] .search-input::placeholder { color: rgba(0,0,0,0.4) !important; }
-        [data-theme="light"] .hover\\:bg-white\\/5:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.04\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.06\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.07\\]:hover, [data-theme="light"] .hover\\:bg-white\\/10:hover { background: rgba(0,0,0,0.04) !important; }
+        [data-theme="light"] .hover\\:bg-white\\/5:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.03\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.04\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.06\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.07\\]:hover, [data-theme="light"] .hover\\:bg-white\\/10:hover { background: rgba(0,0,0,0.04) !important; }
+        /* Post-merge light gaps (2026-07-18): the @mention pill's hover had no light rule (the !important
+           base swallowed it — hover did nothing); the selected-emoji ring was a washed-out pale violet;
+           and hover:text-white(/80) hovers were dead because only their base classes were remapped. */
+        [data-theme="light"] .hover\\:bg-violet-500\\/30:hover { background: rgba(124,58,237,0.3) !important; }
+        [data-theme="light"] .ring-violet-400\\/50 { --tw-ring-color: rgba(109,40,217,0.55) !important; }
+        [data-theme="light"] .hover\\:text-white\\/80:hover { color: #17181c !important; }
+        [data-theme="light"] .hover\\:text-white:hover { color: #17181c !important; }
 
         /* Action buttons — keep dark-on-light for "New" button */
         [data-theme="light"] .bg-white { background: #17181c !important; color: #ffffff !important; }
