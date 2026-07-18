@@ -230,7 +230,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   // All members of the CURRENT workspace ([{userId, displayName, email, role}]) — for the assignee
   // picker + member-aware views/labels. Loaded per workspace via the workspace_members_list RPC.
   const [members, setMembers] = useState([]);
-  const [membersReloadKey, setMembersReloadKey] = useState(0);   // bump to re-fetch the roster (after a role change)
+  const rosterWsRef = useRef(null);   // which workspace `members` belongs to (guards stale refresh results)
   // Tasks mid-exit-animation (id present -> the card renders its fade/slide-out before actual removal).
   const [exitingIds, setExitingIds] = useState(() => new Set());
   // Project cards mid-exit-animation (same two-phase pattern as tasks).
@@ -426,13 +426,15 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   useEffect(() => {
     if (!currentWorkspaceId) return;
     let on = true;
+    rosterWsRef.current = currentWorkspaceId;
     workspaceMembersApi.listForWorkspace(currentWorkspaceId)
       .then(m => { if (on) setMembers(m); })
       .catch(e => reportError(e, 'workspace.members'));
     // Clear on switch/unmount so a workspace change can't briefly show the prior workspace's roster
-    // (mirrors the tasks/projects reset in the data-load effect).
+    // (mirrors the tasks/projects reset in the data-load effect). In-place reloads go through
+    // refreshMembers below, which REPLACES the roster without ever blanking it.
     return () => { on = false; setMembers([]); };
-  }, [currentWorkspaceId, membersReloadKey]);
+  }, [currentWorkspaceId]);
 
   useEffect(() => {
     if (!currentWorkspaceId) return;
@@ -856,12 +858,24 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   const isGuest = myRole === 'guest';
   const canManageMembers = isOwner || isAdmin;   // owner+admin manage members/invites/roles
 
-  // Reload the current workspace's roster (after a role change / removal) AND the caller's own
-  // memberships (so myRole / canManageMembers update if they changed their own role).
+  // Reload the current workspace's roster (after a role change / removal / profile edit) AND the
+  // caller's own memberships (so myRole / canManageMembers update if they changed their own role).
+  // STALE-WHILE-REFETCHING, not blank-then-fetch: the old reload-key approach re-ran the roster
+  // effect, whose cleanup emptied `members` for the whole round-trip — every identity surface
+  // degraded to silhouettes / 'Former member' (permanently, if the fetch failed). It also resolves
+  // only AFTER the roster is actually updated, so callers like ProfileModal.save can await real
+  // propagation. rosterWsRef drops a late result that lands after a workspace switch.
   const refreshMembers = useCallback(async () => {
-    setMembersReloadKey(k => k + 1);
-    try { setMemberships(await workspaceMembersApi.listMine()); } catch (e) { reportError(e, 'memberships.refresh'); }
-  }, []);
+    const ws = currentWorkspaceId;
+    try {
+      const [roster, mine] = await Promise.all([
+        ws ? workspaceMembersApi.listForWorkspace(ws) : Promise.resolve(null),
+        workspaceMembersApi.listMine(),
+      ]);
+      if (roster && rosterWsRef.current === ws) setMembers(roster);
+      setMemberships(mine);
+    } catch (e) { reportError(e, 'memberships.refresh'); }
+  }, [currentWorkspaceId]);
 
   // Resolve an assignee id -> { id, label, hex, soft, initials } for chips/labels. 'Me' for self,
   // 'Unassigned' (neutral) for null, display name otherwise. Color is deterministic per user id.
@@ -1260,10 +1274,12 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showAssign
 
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-center gap-2 min-w-0 flex-1">
+          {/* Unchecked ring via border-white/20 (class, not inline rgba): same 20% white in dark, but the
+              light sheet remaps the CLASS to visible black-alpha — inline stayed white-on-white in light. */}
           <button
             onClick={(e) => { e.stopPropagation(); updateTask(task.id, { status: done ? 'inbox' : 'done' }); }}
-            className="shrink-0 w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all"
-            style={{ borderColor: done ? priority.hex : 'rgba(255,255,255,0.2)', background: done ? priority.hex : 'transparent' }}
+            className="shrink-0 w-4 h-4 rounded-full border-2 border-white/20 flex items-center justify-center transition-all"
+            style={{ borderColor: done ? priority.hex : undefined, background: done ? priority.hex : 'transparent' }}
           >
             {done && <Check className="w-2.5 h-2.5" style={{ color: '#0a0b11' }} strokeWidth={3} />}
           </button>
@@ -1891,8 +1907,8 @@ function TaskModal() {
               {t.subtasks.map((s, i) => (
                 <div key={s.id} className="flex items-center gap-2 group">
                   <button onClick={() => canEditTask && toggleSubtask(t.id, s.id)} disabled={!canEditTask} aria-pressed={s.done}
-                    className={cx('shrink-0 w-4 h-4 rounded border-2 flex items-center justify-center transition-all', !canEditTask && 'cursor-default')}
-                    style={{ borderColor: s.done ? priority.hex : 'rgba(255,255,255,0.2)', background: s.done ? priority.hex : 'transparent' }}>
+                    className={cx('shrink-0 w-4 h-4 rounded border-2 border-white/20 flex items-center justify-center transition-all', !canEditTask && 'cursor-default')}
+                    style={{ borderColor: s.done ? priority.hex : undefined, background: s.done ? priority.hex : 'transparent' }}>
                     {s.done && <Check className="w-2.5 h-2.5" style={{ color: '#0a0b11' }} strokeWidth={3} />}
                   </button>
                   <div className={cx('flex-1 text-sm', s.done ? 'text-white/40 line-through' : 'text-white/85')}>{s.title}</div>
@@ -1978,7 +1994,10 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field', di
     const id = v === 'me' ? meId : v;
     const c = assigneeColor(id);
     const r = resolveAssignee(id);
-    return { id, hex: c.hex, soft: c.soft, initials: initialsOf(lbl), avatarUrl: r.avatarUrl, statusEmoji: r.statusEmoji };
+    // `known` rides along so the trigger/rows can silhouette a roster-absent assignee (the injected
+    // former-assignee option in TaskModal) instead of initialling the fallback label — the same
+    // known-gate every other avatar call site applies.
+    return { id, hex: c.hex, soft: c.soft, initials: initialsOf(lbl), avatarUrl: r.avatarUrl, statusEmoji: r.statusEmoji, known: r.known };
   };
   const current = options.find(([v]) => v === value);
   const curAv = current ? avatarFor(current[0], current[1]) : null;
@@ -2018,7 +2037,7 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field', di
     <>
       <button type="button" ref={btnRef} disabled={disabled} onClick={() => (open ? close() : openMenu())} aria-haspopup="listbox" aria-expanded={open} className={cx(triggerCls, disabled && 'opacity-60 !cursor-default')}>
         {variant === 'filter' && <Filter className="w-3 h-3 text-white/40 shrink-0" />}
-        {curAv && !curAv.all && <Avatar name={curAv.unassigned ? '' : (current ? current[1] : '')} userId={curAv.id} photoUrl={curAv.avatarUrl} size={16} />}
+        {curAv && !curAv.all && <Avatar name={curAv.unassigned || !curAv.known ? '' : (current ? current[1] : '')} userId={curAv.id} photoUrl={curAv.avatarUrl} size={16} />}
         <span className="text-white/40 shrink-0">{label}:</span>
         <span className="text-white/95 font-medium truncate max-w-[140px]">{current ? current[1] : (value || '')}</span>
         <ChevronDown className={cx('w-3 h-3 text-white/40 shrink-0 transition-transform', open && 'rotate-180')} />
@@ -2051,7 +2070,7 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field', di
                     ) : (
                       // Avatar, not a hand-rolled circle: it already does photo -> initials -> silhouette
                       // AND the light-mode swap that used to be duplicated inline right here.
-                      <Avatar name={av.unassigned ? '' : o[1]} userId={av.id} photoUrl={av.avatarUrl} size={20} />
+                      <Avatar name={av.unassigned || !av.known ? '' : o[1]} userId={av.id} photoUrl={av.avatarUrl} size={20} />
                     )}
                     <span className="flex-1 truncate">
                       {/* status helps you pick who's free — but not on the filter, which is a criterion, not a person */}
@@ -3781,17 +3800,31 @@ function ProfileView() {
   const { profileUserId, closeProfile, personOf, startDm, isGuest } = useApp();
   const [editing, setEditing] = useState(false);
   const [dmErr, setDmErr] = useState('');
+  const [dmBusy, setDmBusy] = useState(false);
   const panelRef = useRef(null);
-  // dmErr needs no reset here: the backdrop makes closing (which resets it) the only way to switch profiles.
-  useEffect(() => { if (profileUserId) setTimeout(() => panelRef.current?.focus(), 30); }, [profileUserId]);
+  // Mirrors the CURRENT profile id so a startDm result that lands after Close (or after switching
+  // profiles) is discarded — the component stays mounted across close/reopen, so an unguarded late
+  // setDmErr would resurface as a stale error on the NEXT profile anyone opens.
+  const openIdRef = useRef(null);
+  useEffect(() => {
+    openIdRef.current = profileUserId;
+    if (profileUserId) setTimeout(() => panelRef.current?.focus(), 30);
+  }, [profileUserId]);
   if (!profileUserId) return null;
 
   const p = personOf(profileUserId);
   const close = () => { setEditing(false); setDmErr(''); closeProfile(); };
   const message = async () => {
-    setDmErr('');
-    try { await startDm?.(p.id); close(); }   // success navigates to the thread; only then close
-    catch (e) { reportError(e, 'dms.start from profile'); setDmErr("Couldn't start the conversation. Please try again."); }
+    if (dmBusy) return;   // double-click guard: two racing startDm calls double-navigate + double-fetch
+    setDmBusy(true); setDmErr('');
+    const forId = p.id;
+    try {
+      await startDm?.(forId);                         // success navigates to the thread…
+      if (openIdRef.current === forId) close();       // …close only if this profile is still the open one
+    } catch (e) {
+      reportError(e, 'dms.start from profile');
+      if (openIdRef.current === forId) setDmErr("Couldn't start the conversation. Please try again.");
+    } finally { setDmBusy(false); }
   };
 
   return createPortal(
@@ -3847,9 +3880,9 @@ function ProfileView() {
                 ) : (
                   /* Failure keeps the card OPEN with an inline error — the old handler closed
                      immediately and swallowed the rejection, so a failed start looked like a no-op. */
-                  <button onClick={message}
-                    className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5">
-                    <MessageSquare className="w-3.5 h-3.5" />Message
+                  <button onClick={message} disabled={dmBusy}
+                    className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
+                    <MessageSquare className="w-3.5 h-3.5" />{dmBusy ? 'Opening…' : 'Message'}
                   </button>
                 )}
               </div>
@@ -5731,6 +5764,7 @@ function DirectMessagesView() {
         [data-theme="light"] .cc-chat .bg-violet-500\\/25 { background: rgba(124,58,237,0.16) !important; }
         [data-theme="light"] .cc-chat .border-violet-400\\/30 { border-color: rgba(124,58,237,0.4) !important; }
         [data-theme="light"] .cc-chat .bg-white\\/\\[0\\.05\\] { background: rgba(0,0,0,0.06) !important; }
+        [data-theme="light"] .cc-chat .bg-violet-400\\/70 { background: #7c3aed !important; }
       `}</style>
       {/* List: always shown on lg; on small screens shown only when no thread is open */}
       <aside className={cx('w-full lg:w-80 lg:shrink-0 lg:border-r border-white/5 h-full', active ? 'hidden lg:flex lg:flex-col' : 'flex flex-col')}>
@@ -6415,8 +6449,10 @@ function AppShell() {
         [data-theme="light"] .from-\\[\\#0d2a20\\] .text-emerald-200, [data-theme="light"] .from-\\[\\#0d2a20\\] .text-emerald-300, [data-theme="light"] .from-\\[\\#0d2a20\\] .text-emerald-400 { color: #a7f3d0 !important; }
         [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-200, [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-300, [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-400 { color: #c4b5fd !important; }
         [data-theme="light"] .border-white\\/5, [data-theme="light"] .border-white\\/10, [data-theme="light"] .border-white\\/\\[0\\.06\\], [data-theme="light"] .border-white\\/\\[0\\.08\\] { border-color: rgba(0,0,0,0.08) !important; }
-        [data-theme="light"] .bg-white\\/\\[0\\.04\\], [data-theme="light"] .bg-white\\/\\[0\\.03\\], [data-theme="light"] .bg-white\\/\\[0\\.02\\], [data-theme="light"] .bg-white\\/\\[0\\.015\\], [data-theme="light"] .bg-white\\/\\[0\\.005\\], [data-theme="light"] .bg-white\\/5 { background: rgba(0,0,0,0.025) !important; }
-        [data-theme="light"] .bg-white\\/\\[0\\.08\\], [data-theme="light"] .bg-white\\/\\[0\\.06\\], [data-theme="light"] .bg-white\\/10 { background: rgba(0,0,0,0.06) !important; }
+        [data-theme="light"] .bg-white\\/\\[0\\.03\\], [data-theme="light"] .bg-white\\/\\[0\\.02\\], [data-theme="light"] .bg-white\\/\\[0\\.015\\], [data-theme="light"] .bg-white\\/\\[0\\.01\\], [data-theme="light"] .bg-white\\/\\[0\\.005\\], [data-theme="light"] .bg-white\\/5 { background: rgba(0,0,0,0.025) !important; }
+        /* [0.04] lives in the STRONGER group on purpose: it's the Kanban drag-over fill, and mapping it
+           to the same value as the idle [0.015] made the drop-target highlight literally zero-delta. */
+        [data-theme="light"] .bg-white\\/\\[0\\.08\\], [data-theme="light"] .bg-white\\/\\[0\\.06\\], [data-theme="light"] .bg-white\\/\\[0\\.05\\], [data-theme="light"] .bg-white\\/\\[0\\.04\\], [data-theme="light"] .bg-white\\/10, [data-theme="light"] .bg-white\\/15 { background: rgba(0,0,0,0.06) !important; }
         /* Dropdown active-row + mention-pill accent: a legible violet in light mode (the plain white-alpha wash was near-invisible). */
         [data-theme="light"] .bg-violet-500\\/25, [data-theme="light"] .bg-violet-500\\/20 { background: rgba(124,58,237,0.16) !important; }
         [data-theme="light"] .search-input { background: #ffffff !important; border-color: rgba(0,0,0,0.12) !important; color: #17181c !important; }
@@ -6429,6 +6465,28 @@ function AppShell() {
         [data-theme="light"] .ring-violet-400\\/50 { --tw-ring-color: rgba(109,40,217,0.55) !important; }
         [data-theme="light"] .hover\\:text-white\\/80:hover { color: #17181c !important; }
         [data-theme="light"] .hover\\:text-white:hover { color: #17181c !important; }
+        /* Verified-sweep additions (2026-07-18): remaining unmapped dark-only tokens found by the
+           post-fix audit — surfaces (toast/tooltip), accent-button text, focus affordances, input
+           wells, scrollbars, drag targets, selection states, and alpha steps the base lists missed. */
+        [data-theme="light"] .bg-\\[\\#0f1017\\]\\/90 { background: rgba(255,255,255,0.92) !important; }
+        [data-theme="light"] .bg-black\\/90 { background: #17181c !important; color: #ffffff !important; border-color: rgba(255,255,255,0.15) !important; }
+        [data-theme="light"] .bg-violet-500, [data-theme="light"] .bg-violet-500 .text-white, [data-theme="light"] .bg-rose-500, [data-theme="light"] .bg-rose-500 .text-white, [data-theme="light"] .bg-emerald-500, [data-theme="light"] .bg-emerald-500 .text-white, [data-theme="light"] .from-violet-500, [data-theme="light"] .from-violet-500 .text-white, [data-theme="light"] .from-rose-500, [data-theme="light"] .from-rose-500 .text-white { color: #ffffff !important; }
+        [data-theme="light"] .focus\\:border-violet-400\\/60:focus, [data-theme="light"] .focus\\:border-violet-400\\/50:focus, [data-theme="light"] .focus\\:border-violet-400\\/40:focus { border-color: rgba(109,40,217,0.55) !important; }
+        [data-theme="light"] .focus\\:border-rose-400\\/50:focus { border-color: rgba(190,18,60,0.55) !important; }
+        [data-theme="light"] .focus\\:border-white\\/25:focus { border-color: rgba(0,0,0,0.3) !important; }
+        [data-theme="light"] .bg-black\\/30 { background: rgba(0,0,0,0.05) !important; }
+        [data-theme="light"] .focus\\:bg-black\\/40:focus { background: rgba(0,0,0,0.08) !important; }
+        [data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border: 2px solid transparent; background-clip: padding-box; }
+        [data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); border: 2px solid transparent; background-clip: padding-box; }
+        [data-theme="light"] .border-white\\/25, [data-theme="light"] .border-white\\/30 { border-color: rgba(0,0,0,0.3) !important; }
+        [data-theme="light"] .border-white\\/\\[0\\.04\\], [data-theme="light"] .border-white\\/\\[0\\.07\\] { border-color: rgba(0,0,0,0.08) !important; }
+        [data-theme="light"] .ring-white\\/70 { --tw-ring-color: rgba(0,0,0,0.45) !important; }
+        [data-theme="light"] .hover\\:text-white\\/90:hover { color: #17181c !important; }
+        [data-theme="light"] .hover\\:text-white\\/70:hover { color: #3a3c44 !important; }
+        [data-theme="light"] .focus\\:text-rose-300:focus { color: #be123c !important; }
+        [data-theme="light"] .group:hover .group-hover\\:text-violet-200 { color: #6d28d9 !important; }
+        [data-theme="light"] .hover\\:border-white\\/10:hover, [data-theme="light"] .hover\\:border-white\\/15:hover, [data-theme="light"] .hover\\:border-white\\/20:hover, [data-theme="light"] .hover\\:border-white\\/25:hover { border-color: rgba(0,0,0,0.18) !important; }
+        [data-theme="light"] .hover\\:bg-white\\/\\[0\\.05\\]:hover { background: rgba(0,0,0,0.04) !important; }
 
         /* Action buttons — keep dark-on-light for "New" button */
         [data-theme="light"] .bg-white { background: #17181c !important; color: #ffffff !important; }
