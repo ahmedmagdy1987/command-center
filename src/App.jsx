@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { auth, members } from './lib/api';
+import { reportError, logCaught } from './lib/errors';
 import AuthScreen from './AuthScreen';
 import ResetPasswordScreen from './ResetPasswordScreen';
 import InviteScreen from './InviteScreen';
@@ -68,17 +69,17 @@ export default function App() {
     let cancelled = false;
     members.getCurrent()
       .then(m => { if (!cancelled) setCurrentMember(m); })
-      .catch(() => { /* member info is non-critical, don't break the app */ });
+      .catch(logCaught('members.getCurrent'));   // member info is non-critical, don't break the app
     return () => { cancelled = true; };
   }, [session?.user?.id]);
 
   // Re-fetch the signed-in user's member row (after they edit their own profile) so the top bar reflects it.
   const refreshCurrentMember = useCallback(async () => {
-    try { setCurrentMember(await members.getCurrent()); } catch (e) { console.error('refresh member failed:', e); }
+    try { setCurrentMember(await members.getCurrent()); } catch (e) { reportError(e, 'members.refresh'); }
   }, []);
 
   const handleSignOut = async () => {
-    try { await auth.signOut(); } catch (err) { console.error('Sign out failed:', err); }
+    try { await auth.signOut(); } catch (err) { reportError(err, 'auth.signOut'); }
   };
 
   // Gate ALL routing behind the initial session check, so no auth screen flashes before we know

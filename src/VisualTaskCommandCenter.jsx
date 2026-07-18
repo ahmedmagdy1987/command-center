@@ -17,6 +17,8 @@ import { resolvePlanId, computeEntitlements, getPreviewPlanId, clearPreviewPlan 
 import { FEATURE_META, PLANS } from './lib/plans';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import AuthShell, { AuthBanner, AuthCTA } from './AuthShell';
+import ErrorBoundary from './ErrorBoundary';
+import { reportError, logCaught } from './lib/errors';
 
 /* Route <-> view mapping. Each main view gets its own shareable URL. */
 const VIEW_TO_PATH = {
@@ -316,13 +318,13 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
         const viewing = chatViewRef.current === 'dms' && c.id === dmActiveConvRef.current;
         return { id: c.id, peerId, lastAt: last?.createdAt || c.createdAt, preview: last, unread: viewing ? 0 : (unreadMap.get(c.id) || 0) };
       }).sort((x, y) => new Date(y.lastAt) - new Date(x.lastAt)));
-    } catch (e) { console.error('Failed to load direct messages:', e); }
+    } catch (e) { reportError(e, 'dms.load'); }
   }, [currentWorkspaceId, userId]);
 
   const markDmRead = useCallback(async (conversationId, coverAt) => {
     if (!conversationId) return;
     setDmConversations(prev => prev.map(c => c.id === conversationId ? { ...c, unread: 0 } : c));
-    try { await directMessagesApi.markRead(conversationId, coverAt); } catch (e) { console.error('markDmRead failed:', e); }
+    try { await directMessagesApi.markRead(conversationId, coverAt); } catch (e) { reportError(e, 'dms.markRead'); }
   }, []);
 
   const startDm = useCallback(async (peerId) => {
@@ -375,7 +377,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
         const chosenSlug = ws.find(w => w.id === chosen)?.slug ?? chosen;
         navigate(`${window.location.pathname}?ws=${chosenSlug}`, { replace: true });
       } catch (err) {
-        console.error('Failed to resolve workspace:', err);
+        reportError(err, 'workspace.resolve');
         setSyncStatus('offline');
         setLoading(false);
       }
@@ -397,13 +399,13 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
       setProjects([]);
       setWorkspaceStats(null);
       try {
-        const [t, p, s] = await Promise.all([tasksApi.list(currentWorkspaceId), projectsApi.list(currentWorkspaceId), tasksApi.stats(currentWorkspaceId).catch(() => null)]);
+        const [t, p, s] = await Promise.all([tasksApi.list(currentWorkspaceId), projectsApi.list(currentWorkspaceId), tasksApi.stats(currentWorkspaceId).catch(logCaught('tasks.stats', () => null))]);
         if (!mounted) return;
         setTasks(t);
         setProjects(p);
         setWorkspaceStats(s);
       } catch (err) {
-        console.error('Failed to load:', err);
+        reportError(err, 'workspace.load');
         setSyncStatus('offline');
       } finally {
         if (mounted) setLoading(false);
@@ -416,7 +418,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   // collapses into one aggregate query. The initial load fetches them above; this keeps them current.
   useEffect(() => {
     if (!currentWorkspaceId) return undefined;
-    const t = setTimeout(() => { tasksApi.stats(currentWorkspaceId).then(setWorkspaceStats).catch(() => {}); }, 500);
+    const t = setTimeout(() => { tasksApi.stats(currentWorkspaceId).then(setWorkspaceStats).catch(logCaught('tasks.stats refresh')); }, 500);
     return () => clearTimeout(t);
   }, [currentWorkspaceId, tasks]);
 
@@ -426,7 +428,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
     let on = true;
     workspaceMembersApi.listForWorkspace(currentWorkspaceId)
       .then(m => { if (on) setMembers(m); })
-      .catch(e => console.error('Failed to load workspace members:', e));
+      .catch(e => reportError(e, 'workspace.members'));
     // Clear on switch/unmount so a workspace change can't briefly show the prior workspace's roster
     // (mirrors the tasks/projects reset in the data-load effect).
     return () => { on = false; setMembers([]); };
@@ -459,7 +461,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
     let on = true;
     let lastSeen = null;
     try { lastSeen = localStorage.getItem(`cc_chat_last_seen:${currentWorkspaceId}`); } catch { /* ignore */ }
-    messagesApi.unreadCount(lastSeen, me, currentWorkspaceId).then(n => { if (on) setChatUnread(n); }).catch(() => {});
+    messagesApi.unreadCount(lastSeen, me, currentWorkspaceId).then(n => { if (on) setChatUnread(n); }).catch(logCaught('chat.unreadCount'));
     const unsub = messagesApi.subscribe(({ type, message }) => {
       if (type !== 'INSERT' || !message || !on) return;
       if (message.senderId === me) return;
@@ -510,7 +512,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
       setProjects(p);
       setSyncStatus('live');
     } catch (e) {
-      console.error(`Reconcile (${reason}) failed:`, e);
+      reportError(e, `tasks.reconcile (${reason})`);
       setSyncStatus('offline');
     }
     refreshDms(ws);
@@ -573,7 +575,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
       setTasks(prev => prev.map(t => t.id === optimistic.id ? real : t));
       return real;
     } catch (err) {
-      console.error('Add task failed:', err);
+      reportError(err, 'tasks.add');
       setTasks(prev => prev.filter(t => t.id !== optimistic.id));
       showToast("Couldn't add the task. Please try again.");
     }
@@ -588,11 +590,11 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
     try {
       await tasksApi.update(id, patch);
     } catch (err) {
-      console.error('Update task failed:', err);
+      reportError(err, 'tasks.update');
       // Reconcile within the CURRENT workspace only — a bare list() would pull tasks from every
       // workspace the user belongs to into the active view (RLS-safe, but wrong scope on screen).
       // Also re-sync the open modal so it doesn't keep showing an edit the server rejected.
-      tasksApi.list(currentWorkspaceId).then(fresh => { setTasks(fresh); setEditingTask(et => et ? (fresh.find(t => t.id === et.id) ?? et) : et); }).catch(() => {});
+      tasksApi.list(currentWorkspaceId).then(fresh => { setTasks(fresh); setEditingTask(et => et ? (fresh.find(t => t.id === et.id) ?? et) : et); }).catch(logCaught('tasks.reconcile after failed update'));
       showToast("Couldn't save that change — reverted to the last saved version.");
     }
   }, [currentWorkspaceId, showToast]);
@@ -605,10 +607,10 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
       // Best-effort: remove attachment objects (Storage API) while their metadata rows still exist to
       // authorize it, THEN delete the task (its attachment metadata cascades). The hourly DB sweep is
       // the backstop for any objects the caller couldn't remove (others' uploads, non-admin).
-      attachmentsApi.removeAllForTask(id).catch(() => {}).finally(() => {
+      attachmentsApi.removeAllForTask(id).catch(logCaught('attachments.removeAllForTask')).finally(() => {
         tasksApi.delete(id).catch(err => {
-          console.error('Delete failed:', err);
-          tasksApi.list(currentWorkspaceId).then(setTasks).catch(() => {});   // reconcile with server on failure
+          reportError(err, 'tasks.delete');
+          tasksApi.list(currentWorkspaceId).then(setTasks).catch(logCaught('tasks.reconcile after failed delete'));   // reconcile with server on failure
           showToast("Couldn't delete the task — it's back in the list.");
         });
       });
@@ -630,8 +632,8 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
     try {
       await projectsApi.update(id, patch);
     } catch (err) {
-      console.error('Update project failed:', err);
-      projectsApi.list(currentWorkspaceId).then(p => setProjects(p)).catch(() => {});
+      reportError(err, 'projects.update');
+      projectsApi.list(currentWorkspaceId).then(p => setProjects(p)).catch(logCaught('projects.reconcile after failed update'));
       showToast("Couldn't save the project change — reverted.");
     }
   }, [currentWorkspaceId, showToast]);
@@ -641,7 +643,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   // immediate. mode: 'cascade' (owner: delete tasks too) | 'unassign' (owner+admin: re-file to reassignTo).
   const deleteProject = useCallback((id, mode, reassignTo) => {
     const reconcile = () => Promise.all([tasksApi.list(currentWorkspaceId), projectsApi.list(currentWorkspaceId)])
-      .then(([t, p]) => { setTasks(t); setProjects(p); }).catch(() => {});
+      .then(([t, p]) => { setTasks(t); setProjects(p); }).catch(logCaught('projects.reconcile after delete'));
     const finish = async () => {
       setProjects(p => p.filter(x => x.id !== id));
       setExitingProjectIds(p => { const n = new Set(p); n.delete(id); return n; });
@@ -649,7 +651,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
         await projectsApi.deleteViaRpc(id, currentWorkspaceId, mode, reassignTo);
         await reconcile();
       } catch (err) {
-        console.error('Delete project failed:', err);
+        reportError(err, 'projects.delete');
         await reconcile();
         showToast("Couldn't delete the project — nothing was changed.");
       }
@@ -668,7 +670,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
       const real = await tasksApi.create(copy, currentWorkspaceId);
       setTasks(prev => prev.map(t => t.id === copy.id ? real : t));
     } catch (err) {
-      console.error('Duplicate failed:', err);
+      reportError(err, 'tasks.duplicate');
       setTasks(prev => prev.filter(t => t.id !== copy.id));
     }
   }, [tasks, currentWorkspaceId]);
@@ -689,9 +691,9 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
       setTasks(prev => prev.map(t => t.id === taskId ? { ...t, subtasks: merged } : t));
       setEditingTask(et => (et && et.id === taskId ? { ...et, subtasks: merged } : et));
     } catch (err) {
-      console.error('Subtask update failed:', err);
+      reportError(err, 'tasks.subtasks update');
       // Reconcile to server on failure — including the open modal, which otherwise keeps the stale checklist.
-      tasksApi.list(currentWorkspaceId).then(fresh => { setTasks(fresh); setEditingTask(et => et ? (fresh.find(t => t.id === et.id) ?? et) : et); }).catch(() => {});
+      tasksApi.list(currentWorkspaceId).then(fresh => { setTasks(fresh); setEditingTask(et => et ? (fresh.find(t => t.id === et.id) ?? et) : et); }).catch(logCaught('tasks.reconcile after failed subtask update'));
       showToast("Couldn't save the checklist change — reverted to the server copy.");
     }
   }, [currentWorkspaceId, showToast]);
@@ -775,7 +777,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
       return row;
     });
     try { const created = await tasksApi.bulkInsert(rows, currentWorkspaceId); setTasks(prev => [...created, ...prev]); }
-    catch (err) { console.error('Import failed:', err); showToast("Couldn't import those tasks. Please try again."); }
+    catch (err) { reportError(err, 'tasks.import'); showToast("Couldn't import those tasks. Please try again."); }
   }, [importPreview, currentWorkspaceId, showToast, members]);
 
   const switchWorkspace = useCallback((id) => {
@@ -818,7 +820,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
         catch { return { ...inv, workspaceName: 'a workspace', isExpired: false }; }
       }));
       setPendingInvites(enriched.filter(i => !i.isExpired));
-    } catch (err) { console.error('Failed to load pending invites:', err); }
+    } catch (err) { reportError(err, 'invitations.pending'); }
   }, [userId]);
   useEffect(() => { refreshInvites(); }, [refreshInvites]);
 
@@ -858,7 +860,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   // memberships (so myRole / canManageMembers update if they changed their own role).
   const refreshMembers = useCallback(async () => {
     setMembersReloadKey(k => k + 1);
-    try { setMemberships(await workspaceMembersApi.listMine()); } catch (e) { console.error('refresh memberships failed:', e); }
+    try { setMemberships(await workspaceMembersApi.listMine()); } catch (e) { reportError(e, 'memberships.refresh'); }
   }, []);
 
   // Resolve an assignee id -> { id, label, hex, soft, initials } for chips/labels. 'Me' for self,
@@ -1436,7 +1438,7 @@ function TaskComments({ taskId }) {
     let mounted = true;
     membersApi.list()
       .then(list => { if (mounted) setPeople(Object.fromEntries((list || []).map(m => [m.id, m]))); })
-      .catch(() => {});
+      .catch(logCaught('members.list for comments'));
     return () => { mounted = false; };
   }, []);
 
@@ -1447,7 +1449,7 @@ function TaskComments({ taskId }) {
     setLoading(true);
     commentsApi.list(taskId)
       .then(list => { if (mounted) setItems(list); })
-      .catch(err => console.error('Failed to load comments:', err))
+      .catch(err => reportError(err, 'comments.list'))
       .finally(() => { if (mounted) setLoading(false); });
 
     const unsub = commentsApi.subscribe(taskId, ({ type, comment }) => {
@@ -1479,7 +1481,7 @@ function TaskComments({ taskId }) {
       const created = await commentsApi.add(taskId, body, currentWorkspaceId, mns);
       setItems(prev => prev.some(c => c.id === created.id) ? prev : [...prev, created]);
     } catch (err) {
-      console.error('Failed to add comment:', err);
+      reportError(err, 'comments.add');
       setText(body); // restore on failure
     } finally {
       sendingRef.current = false;
@@ -1493,13 +1495,13 @@ function TaskComments({ taskId }) {
     try {
       const updated = await commentsApi.update(id, body);
       setItems(prev => prev.map(c => c.id === id ? updated : c));
-    } catch (err) { console.error('Failed to edit comment:', err); }
+    } catch (err) { reportError(err, 'comments.edit'); }
   };
 
   const remove = async (id) => {
     setItems(prev => prev.filter(c => c.id !== id));
     try { await commentsApi.remove(id); }
-    catch (err) { console.error('Failed to delete comment:', err); commentsApi.list(taskId).then(setItems).catch(() => {}); }
+    catch (err) { reportError(err, 'comments.delete'); commentsApi.list(taskId).then(setItems).catch(logCaught('comments.reconcile')); }
   };
 
   return (
@@ -1586,7 +1588,7 @@ function AttachmentThumb({ attachment }) {
   useEffect(() => {
     if (!isImg) return;
     let on = true;
-    attachmentsApi.signedUrl(attachment.storagePath, 3600).then(u => { if (on) setUrl(u); }).catch(() => { if (on) setFailed(true); });
+    attachmentsApi.signedUrl(attachment.storagePath, 3600).then(u => { if (on) setUrl(u); }).catch(logCaught('attachments.signedUrl', () => { if (on) setFailed(true); }));
     return () => { on = false; };
   }, [attachment.storagePath, isImg]);
   if (isImg && url && !failed) {
@@ -1612,12 +1614,12 @@ function Attachments({ taskId, canEdit }) {
   const fileRef = useRef(null);
 
   const load = useCallback(() => {
-    attachmentsApi.list(taskId).then(setItems).catch(() => setItems([]));
+    attachmentsApi.list(taskId).then(setItems).catch(logCaught('attachments.list', () => setItems([])));
   }, [taskId]);
   // Guarded mount load — don't setState after unmount / after the taskId changed.
   useEffect(() => {
     let on = true;
-    attachmentsApi.list(taskId).then(l => { if (on) setItems(l); }).catch(() => { if (on) setItems([]); });
+    attachmentsApi.list(taskId).then(l => { if (on) setItems(l); }).catch(logCaught('attachments.list', () => { if (on) setItems([]); }));
     return () => { on = false; };
   }, [taskId]);
 
@@ -2347,7 +2349,7 @@ function CommandPalette() {
     if (!paletteOpen) return;
     let on = true;
     const load = currentWorkspaceId
-      ? directMessagesApi.listRecentMessages(currentWorkspaceId, 500).catch(() => [])
+      ? directMessagesApi.listRecentMessages(currentWorkspaceId, 500).catch(logCaught('dms.recentMessages for palette', () => []))
       : Promise.resolve([]);   // no workspace → empty index (set async so this effect never setState-s synchronously)
     load.then(dm => {
       if (!on) return;
@@ -2365,7 +2367,7 @@ function CommandPalette() {
       if (!paletteOpen || !term || !currentWorkspaceId) { setServerChatMsgs([]); return; }
       messagesApi.search(term, currentWorkspaceId, 6)
         .then(rows => { if (on) setServerChatMsgs(rows.filter(m => m.body && !m.deletedAt).map(m => ({ kind: 'chat', id: m.id, body: m.body, senderId: m.senderId }))); })
-        .catch(() => { if (on) setServerChatMsgs([]); });
+        .catch(logCaught('messages.search', () => { if (on) setServerChatMsgs([]); }));
     }, 200);
     return () => { on = false; clearTimeout(t); };
   }, [q, paletteOpen, currentWorkspaceId]);
@@ -2799,7 +2801,7 @@ function NotificationBell() {
           return [...extras, ...list].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
         });
       })
-      .catch(err => console.error('Failed to load notifications:', err))
+      .catch(err => reportError(err, 'notifications.list'))
       .finally(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
   }, [userId, currentWorkspaceId]);
@@ -2808,7 +2810,7 @@ function NotificationBell() {
   // (new notification, mark-read, clear), debounced so a burst collapses into one count query.
   useEffect(() => {
     if (!userId || !currentWorkspaceId) return undefined;
-    const t = setTimeout(() => { notificationsApi.unreadCount(currentWorkspaceId).then(setServerUnread).catch(() => {}); }, 300);
+    const t = setTimeout(() => { notificationsApi.unreadCount(currentWorkspaceId).then(setServerUnread).catch(logCaught('notifications.unreadCount')); }, 300);
     return () => clearTimeout(t);
   }, [userId, currentWorkspaceId, items]);
 
@@ -2831,7 +2833,7 @@ function NotificationBell() {
       const viewingThisDm = n.type === 'dm_received' && n.refId && n.refId === activeConvRef.current && viewRef.current === 'dms';
       if (viewingThisDm) {
         setItems(prev => prev.some(x => x.id === n.id) ? prev : [{ ...n, read: true }, ...prev]);
-        notificationsApi.markRead(n.id).catch(() => {});
+        notificationsApi.markRead(n.id).catch(logCaught('notifications.markRead'));
         return;
       }
       setItems(prev => prev.some(x => x.id === n.id) ? prev : [n, ...prev]);
@@ -2853,7 +2855,7 @@ function NotificationBell() {
       if (stale.length === 0) return;
       setItems(prev => prev.map(n => (n.type === 'dm_received' && n.refId === dmActiveConv && !n.read) ? { ...n, read: true } : n));
       setToasts(prev => prev.filter(x => !(x.type === 'dm_received' && x.refId === dmActiveConv)));
-      stale.forEach(n => notificationsApi.markRead(n.id).catch(() => {}));
+      stale.forEach(n => notificationsApi.markRead(n.id).catch(logCaught('notifications.markRead stale DM')));
     }, 0);
     return () => { cancelled = true; clearTimeout(t); };
   }, [view, dmActiveConv, items]);
@@ -2868,7 +2870,7 @@ function NotificationBell() {
       const fetched = await tasksApi.getById(taskId);
       if (fetched) setEditingTask(fetched);
     } catch (err) {
-      console.error('Failed to open task from notification:', err);
+      reportError(err, 'notifications.openTask');
     }
   }, [tasks, setEditingTask]);
 
@@ -2878,8 +2880,8 @@ function NotificationBell() {
     if (!n.read) {
       setItems(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
       notificationsApi.markRead(n.id).catch(err => {
-        console.error('markRead failed:', err);
-        notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(() => {}); // reconcile with server on failure
+        reportError(err, 'notifications.markRead');
+        notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(logCaught('notifications.reconcile')); // reconcile with server on failure
       });
     }
     // Deep-link by type: a DM notification opens its thread; everything else (task_assigned /
@@ -2902,8 +2904,8 @@ function NotificationBell() {
     try {
       await notificationsApi.markAllRead(currentWorkspaceId);
     } catch (err) {
-      console.error('markAllRead failed:', err);
-      notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(() => {}); // reconcile with server on failure
+      reportError(err, 'notifications.markAllRead');
+      notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(logCaught('notifications.reconcile')); // reconcile with server on failure
     }
   };
 
@@ -2913,8 +2915,8 @@ function NotificationBell() {
       setItems(p => p.filter(x => x.id !== id));
       setExitingNotifIds(p => { const n = new Set(p); n.delete(id); return n; });
       notificationsApi.delete(id).catch(err => {
-        console.error('Delete notification failed:', err);
-        notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(() => {}); // reconcile with server on failure
+        reportError(err, 'notifications.delete');
+        notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(logCaught('notifications.reconcile')); // reconcile with server on failure
       });
     };
     if (prefersReducedMotion()) { finish(); return; }
@@ -2934,8 +2936,8 @@ function NotificationBell() {
       setItems(prev => prev.filter(x => !idSet.has(x.id)));   // remove only the snapshot; keep anything that streamed in
       setExitingNotifIds(new Set());
       notificationsApi.clearIds(ids, currentWorkspaceId).catch(err => {
-        console.error('Clear all notifications failed:', err);
-        notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(() => {}); // reconcile with server on failure
+        reportError(err, 'notifications.clearAll');
+        notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(logCaught('notifications.reconcile')); // reconcile with server on failure
       });
     };
     if (prefersReducedMotion()) { finish(); return; }
@@ -3454,7 +3456,7 @@ function WorkspaceSwitcher() {
                 <div className="my-1 h-px bg-white/10" />
                 <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-white/35">Invitations</div>
                 {pendingInvites.map(inv => (
-                  <button key={inv.id} onClick={() => { setOpen(false); acceptInvitation(inv.token).catch(err => console.error('accept invite failed:', err)); }}
+                  <button key={inv.id} onClick={() => { setOpen(false); acceptInvitation(inv.token).catch(err => reportError(err, 'invitations.accept')); }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/80 hover:bg-white/5 hover:text-white transition-colors">
                     <span className="w-4 h-4 rounded-md bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center shrink-0"><UserPlus className="w-2.5 h-2.5 text-emerald-300" /></span>
                     <span className="flex-1 text-left truncate">Join {inv.workspaceName}</span>
@@ -3811,7 +3813,7 @@ function ProfileView() {
                     <User className="w-3.5 h-3.5" />Edit profile
                   </button>
                 ) : (
-                  <button onClick={() => { startDm?.(p.id)?.catch?.(() => {}); close(); }}
+                  <button onClick={() => { startDm?.(p.id)?.catch?.(logCaught('dms.start from profile')); close(); }}
                     className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5">
                     <MessageSquare className="w-3.5 h-3.5" />Message
                   </button>
@@ -4511,7 +4513,7 @@ function ProjectsView() {
     let alive = true;
     projectsApi.taskCount(deleteTarget.id, currentWorkspaceId)
       .then(n => { if (alive) setDeleteCount(typeof n === 'number' ? n : 0); })
-      .catch(err => { console.error('project taskCount failed:', err); if (alive) setDeleteCount(-1); });
+      .catch(err => { reportError(err, 'projects.taskCount'); if (alive) setDeleteCount(-1); });
     return () => { alive = false; };
   }, [deleteTarget, currentWorkspaceId]);
 
@@ -4700,9 +4702,13 @@ function ScheduleView() {
 ================================================================================= */
 export default function App({ session, currentMember, onSignOut, refreshCurrentMember }) {
   return (
-    <AppProvider session={session} currentMember={currentMember} onSignOut={onSignOut} refreshCurrentMember={refreshCurrentMember}>
-      <AppShell />
-    </AppProvider>
+    // App-level boundary OUTSIDE the provider: a render throw in AppProvider or the shell shows the
+    // full-screen fallback instead of a white screen. Per-view boundaries live on the routes below.
+    <ErrorBoundary name="app" fullScreen>
+      <AppProvider session={session} currentMember={currentMember} onSignOut={onSignOut} refreshCurrentMember={refreshCurrentMember}>
+        <AppShell />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }
 
@@ -4851,7 +4857,7 @@ function VoiceNote({ path, localUrl, duration, pending }) {
   useEffect(() => {
     if (url || !path) return;
     let on = true;
-    messagesApi.signedUrl(path).then(u => { if (on) setUrl(u); }).catch(() => { if (on) setFailed(true); });
+    messagesApi.signedUrl(path).then(u => { if (on) setUrl(u); }).catch(logCaught('messages.signedUrl', () => { if (on) setFailed(true); }));
     return () => { on = false; };
   }, [path, url]);
   if (failed) return <div className="mt-1 text-[11px] text-rose-300/70">Voice note unavailable</div>;
@@ -5252,7 +5258,7 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
     if (!body || sending) return;
     setSending(true);
     try { await onSubmitText(body, mns); setFailedBody(''); setFailedMentions([]); }
-    catch (e) { console.error('Message send failed:', e); setFailedBody(body); setFailedMentions(mns || []); }
+    catch (e) { reportError(e, 'messages.send'); setFailedBody(body); setFailedMentions(mns || []); }
     finally { setSending(false); }
   };
   const submit = () => { const body = text.trim(); if (!body) return; const mns = mentions; setText(''); setMentions([]); onStopTyping?.(); doSend(body, mns); };
@@ -5356,7 +5362,7 @@ function ChatView() {
   // Sender names from members.
   useEffect(() => {
     let on = true;
-    membersApi.list().then(list => { if (on) setPeople(Object.fromEntries((list || []).map(m => [m.id, m]))); }).catch(() => {});
+    membersApi.list().then(list => { if (on) setPeople(Object.fromEntries((list || []).map(m => [m.id, m]))); }).catch(logCaught('members.list for chat'));
     return () => { on = false; };
   }, []);
 
@@ -5364,7 +5370,7 @@ function ChatView() {
   useEffect(() => {
     if (!currentWorkspaceId) return;
     let on = true;
-    messagesApi.list(200, currentWorkspaceId).then(list => { if (on) { setItems(list); setHasMore(list.length >= 200); } }).catch(e => console.error('Failed to load messages:', e)).finally(() => { if (on) setLoading(false); });
+    messagesApi.list(200, currentWorkspaceId).then(list => { if (on) { setItems(list); setHasMore(list.length >= 200); } }).catch(e => reportError(e, 'messages.list')).finally(() => { if (on) setLoading(false); });
     markChatRead();
     const unsub = messagesApi.subscribe(({ type, message }) => {
       if (!message || !on) return;
@@ -5390,7 +5396,7 @@ function ChatView() {
       const page = await messagesApi.listBefore(oldest.createdAt, 200, currentWorkspaceId);
       if (page.length) setItems(prev => { const seen = new Set(prev.map(m => m.id)); return [...page.filter(m => !seen.has(m.id)), ...prev]; });
       setHasMore(page.length >= 200);
-    } catch (e) { console.error('Load older messages failed:', e); }
+    } catch (e) { reportError(e, 'messages.loadOlder'); }
     finally { loadingOlderRef.current = false; setLoadingOlder(false); }
   }, [items, currentWorkspaceId]);
 
@@ -5452,7 +5458,7 @@ function ChatView() {
             return rest.some(m => m.id === created.id) ? rest : [...rest, created];
           });
         } catch (e) {
-          console.error('Voice send failed:', e);
+          reportError(e, 'messages.voiceSend');
           URL.revokeObjectURL(localUrl);
           setItems(prev => prev.filter(m => m.id !== tempId));
           setMicError('Failed to send voice note.');
@@ -5466,7 +5472,7 @@ function ChatView() {
       signalRecording(true);
       timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
     } catch (e) {
-      console.error('Mic error:', e);
+      reportError(e, 'voice.mic');
       setMicError('Microphone access was denied or unavailable.');
     }
   };
@@ -5485,14 +5491,14 @@ function ChatView() {
   const remove = async (m) => {
     setItems(prev => prev.map(x => x.id === m.id ? { ...x, body: null, audioPath: null, deletedAt: nowISO() } : x));
     try { await messagesApi.softDelete(m); }
-    catch (e) { console.error('Delete failed:', e); messagesApi.list(200, currentWorkspaceId).then(setItems).catch(() => {}); }
+    catch (e) { reportError(e, 'messages.delete'); messagesApi.list(200, currentWorkspaceId).then(setItems).catch(logCaught('messages.reconcile')); }
   };
 
   // Edit own text in place; the DB trigger enforces the 10-minute window + stamps edited_at.
   const edit = async (m, body) => {
     setItems(prev => prev.map(x => x.id === m.id ? { ...x, body, editedAt: nowISO() } : x));
     try { await messagesApi.update(m.id, body); }
-    catch (e) { console.error('Edit failed:', e); messagesApi.list(200, currentWorkspaceId).then(setItems).catch(() => {}); }
+    catch (e) { reportError(e, 'messages.edit'); messagesApi.list(200, currentWorkspaceId).then(setItems).catch(logCaught('messages.reconcile')); }
   };
 
   return (
@@ -5760,7 +5766,7 @@ function DmThread({ conversationId, peerId, onBack }) {
   const refreshReads = useCallback(() => {
     directMessagesApi.reads(conversationId)
       .then(rs => { const p = rs.find(r => r.userId === peerId); setPeerReadAt(p?.lastReadAt || null); })
-      .catch(() => {});
+      .catch(logCaught('dms.reads'));
   }, [conversationId, peerId]);
 
   // Load + subscribe to this thread. (My read cursor is advanced by the latest-message effect below,
@@ -5769,7 +5775,7 @@ function DmThread({ conversationId, peerId, onBack }) {
     let on = true;
     directMessagesApi.listMessages(conversationId, 200)
       .then(list => { if (on) { setItems(list); setHasMore(list.length >= 200); } })
-      .catch(e => console.error('Failed to load DM thread:', e))
+      .catch(e => reportError(e, 'dms.listMessages'))
       .finally(() => { if (on) setLoading(false); });
     refreshReads();
     const unsub = directMessagesApi.subscribeThread(({ type, message }) => {
@@ -5899,7 +5905,7 @@ function DmThread({ conversationId, peerId, onBack }) {
             return rest.some(m => m.id === created.id) ? rest : [...rest, created];
           });
         } catch (e) {
-          console.error('DM voice send failed:', e);
+          reportError(e, 'dms.voiceSend');
           URL.revokeObjectURL(localUrl);
           setItems(prev => prev.filter(m => m.id !== tempId));
           setMicError('Failed to send voice note.');
@@ -5913,7 +5919,7 @@ function DmThread({ conversationId, peerId, onBack }) {
       signalRecording(true);
       timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
     } catch (e) {
-      console.error('Mic error:', e);
+      reportError(e, 'voice.mic');
       setMicError('Microphone access was denied or unavailable.');
     }
   };
@@ -5932,14 +5938,14 @@ function DmThread({ conversationId, peerId, onBack }) {
   const remove = async (m) => {
     setItems(prev => prev.map(x => x.id === m.id ? { ...x, body: null, audioPath: null, deletedAt: nowISO() } : x));
     try { await directMessagesApi.softDelete(m); }
-    catch (e) { console.error('DM delete failed:', e); directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(() => {}); }
+    catch (e) { reportError(e, 'dms.delete'); directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(logCaught('dms.reconcile')); }
   };
 
   // Edit own DM text in place; the DB trigger enforces the 10-minute window + stamps edited_at.
   const edit = async (m, body) => {
     setItems(prev => prev.map(x => x.id === m.id ? { ...x, body, editedAt: nowISO() } : x));
     try { await directMessagesApi.update(m.id, body); }
-    catch (e) { console.error('DM edit failed:', e); directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(() => {}); }
+    catch (e) { reportError(e, 'dms.edit'); directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(logCaught('dms.reconcile')); }
   };
 
   // 5c: fetch the previous page of this thread and prepend it (dedupe by id). Guarded against concurrent runs.
@@ -5952,7 +5958,7 @@ function DmThread({ conversationId, peerId, onBack }) {
       const page = await directMessagesApi.listMessagesBefore(conversationId, oldest.createdAt, 200);
       if (page.length) setItems(prev => { const seen = new Set(prev.map(m => m.id)); return [...page.filter(m => !seen.has(m.id)), ...prev]; });
       setHasMore(page.length >= 200);
-    } catch (e) { console.error('Load older DMs failed:', e); }
+    } catch (e) { reportError(e, 'dms.loadOlder'); }
     finally { loadingOlderRef.current = false; setLoadingOlder(false); }
   }, [items, conversationId]);
 
@@ -6036,7 +6042,7 @@ function OnboardingScreen({ onSignOut }) {
             {pendingInvites.map(inv => (
               <div key={inv.id} className="flex items-center justify-between gap-2">
                 <div className="text-sm text-white/90 truncate">Join <span className="font-semibold">{inv.workspaceName}</span></div>
-                <button onClick={() => acceptInvitation(inv.token).catch(err => console.error('accept invite failed:', err))}
+                <button onClick={() => acceptInvitation(inv.token).catch(err => reportError(err, 'invitations.accept'))}
                   className="shrink-0 h-8 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-semibold active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">Accept</button>
               </div>
             ))}
@@ -6080,7 +6086,7 @@ function MembersView() {
     let alive = true;
     invitationsApi.listForWorkspace(currentWorkspaceId)
       .then(d => { if (alive) setInvites(d); })
-      .catch(e => console.error('load invites failed:', e));
+      .catch(e => reportError(e, 'invitations.list'));
     return () => { alive = false; };
   }, [currentWorkspaceId, canManageMembers, reloadKey]);
 
@@ -6118,7 +6124,7 @@ function MembersView() {
 
   const revoke = async (id) => {
     try { await invitationsApi.revoke(id); reload(); }
-    catch (e) { console.error('revoke failed:', e); }
+    catch (e) { reportError(e, 'invitations.revoke'); }
   };
 
   const pending = invites.filter(i => i.status === 'pending');
@@ -6222,7 +6228,7 @@ function MembersView() {
                 </PersonButton>
                 <div className="shrink-0 flex items-center gap-2">
                   {!isSelf && (
-                    <button onClick={() => startDm(m.userId).catch(() => {})} title={`Message ${m.displayName || m.email}`}
+                    <button onClick={() => startDm(m.userId).catch(logCaught('dms.start from members'))} title={`Message ${m.displayName || m.email}`}
                       className="text-[11px] px-2 h-7 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 inline-flex items-center gap-1 transition-colors">
                       <MessagesSquare className="w-3 h-3" />Message
                     </button>
@@ -6410,17 +6416,20 @@ function AppShell() {
         <main className="flex-1 overflow-y-auto px-4 lg:px-6 py-6 pb-24 lg:pb-10">
           <div className="max-w-[1400px] mx-auto animate-[slideUp_.25s_ease]" key={view}>
             <Routes>
-              <Route path="/" element={<DashboardView />} />
-              <Route path="/kanban" element={<KanbanView />} />
-              <Route path="/priority-matrix" element={<MatrixView />} />
-              <Route path="/projects" element={<ProjectsView />} />
-              <Route path="/schedule" element={<ScheduleView />} />
-              <Route path="/my-tasks" element={<MyTasksView />} />
+              {/* Per-view boundaries: a render throw inside one view shows an inline fallback while the
+                  shell (sidebar/top bar/nav) stays alive. Navigating away unmounts the boundary, so the
+                  next visit always retries fresh. */}
+              <Route path="/" element={<ErrorBoundary name="dashboard"><DashboardView /></ErrorBoundary>} />
+              <Route path="/kanban" element={<ErrorBoundary name="kanban"><KanbanView /></ErrorBoundary>} />
+              <Route path="/priority-matrix" element={<ErrorBoundary name="matrix"><MatrixView /></ErrorBoundary>} />
+              <Route path="/projects" element={<ErrorBoundary name="projects"><ProjectsView /></ErrorBoundary>} />
+              <Route path="/schedule" element={<ErrorBoundary name="schedule"><ScheduleView /></ErrorBoundary>} />
+              <Route path="/my-tasks" element={<ErrorBoundary name="my-tasks"><MyTasksView /></ErrorBoundary>} />
               <Route path="/va-desk" element={<RedirectToMyTasks />} />
-              <Route path="/private" element={<PrivateView />} />
-              <Route path="/chat" element={<ChatView />} />
-              <Route path="/dms" element={<DirectMessagesView />} />
-              <Route path="/members" element={<MembersView />} />
+              <Route path="/private" element={<ErrorBoundary name="private"><PrivateView /></ErrorBoundary>} />
+              <Route path="/chat" element={<ErrorBoundary name="chat"><ChatView /></ErrorBoundary>} />
+              <Route path="/dms" element={<ErrorBoundary name="dms"><DirectMessagesView /></ErrorBoundary>} />
+              <Route path="/members" element={<ErrorBoundary name="members"><MembersView /></ErrorBoundary>} />
               {/* Has a workspace, so onboarding isn't applicable — send it back to the app. */}
               <Route path="/onboarding" element={<Navigate to="/" replace />} />
               <Route path="*" element={<Navigate to="/" replace />} />

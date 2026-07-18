@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Mail, Lock, ArrowRight, Loader2, UserPlus } from 'lucide-react';
 import { auth, invitations as invitationsApi } from './lib/api';
+import { reportError } from './lib/errors';
 import AuthShell, { AuthField, AuthBanner, AuthCTA } from './AuthShell';
 
 /**
@@ -76,7 +77,7 @@ export default function InviteScreen({ session }) {
     }
   };
 
-  const signOut = async () => { try { await auth.signOut(); } catch { /* ignore */ } };
+  const signOut = async () => { try { await auth.signOut(); } catch (e) { reportError(e, 'auth.signOut'); } };
 
   return (
     <AuthShell icon={UserPlus} heading="You're invited" tagline="Join your team on Command Center">
