@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { fromDbTask, toDbTask, sanitizeTask, fromDbNotification, fromDbComment, fromDbMessage, fromDbDmConversation, fromDbDirectMessage, fromDbAttachment, uid } from './sanitize';
+import { reportError, logCaught } from './errors';
 
 /* =================================================================================
    AUTH
@@ -680,7 +681,7 @@ export const messages = {
       .insert(row)
       .select().single();
     if (error) {
-      supabase.storage.from('voice-notes').remove([path]).catch(() => {}); // best-effort cleanup of the orphan object
+      supabase.storage.from('voice-notes').remove([path]).catch(logCaught('storage.voice-notes cleanup')); // best-effort cleanup of the orphan object
       throw error;
     }
     return fromDbMessage(data);
@@ -711,7 +712,7 @@ export const messages = {
       .eq('id', message.id)
       .select().single();
     if (error) throw error;
-    if (message.audioPath) supabase.storage.from('voice-notes').remove([message.audioPath]).catch(() => {}); // best-effort
+    if (message.audioPath) supabase.storage.from('voice-notes').remove([message.audioPath]).catch(logCaught('storage.voice-notes cleanup')); // best-effort
     return fromDbMessage(data);
   },
 
@@ -719,7 +720,7 @@ export const messages = {
   async remove(message) {
     const { error } = await supabase.from('messages').delete().eq('id', message.id);
     if (error) throw error;
-    if (message.audioPath) supabase.storage.from('voice-notes').remove([message.audioPath]).catch(() => {}); // best-effort
+    if (message.audioPath) supabase.storage.from('voice-notes').remove([message.audioPath]).catch(logCaught('storage.voice-notes cleanup')); // best-effort
   },
 
   /** Signed URL for playing a voice note. */
@@ -769,7 +770,7 @@ export const messages = {
         // live read receipts; presenceLabel still filters to typing/recording for the typing strip.
         others.push({ userId: key, name: meta.name || 'Someone', typing: !!meta.typing, recording: !!meta.recording, readAt: meta.readAt || null });
       }
-      try { onOthers(others); } catch (e) { console.error('[presence] callback error:', e); }
+      try { onOthers(others); } catch (e) { reportError(e, 'presence.callback'); }
     };
     channel.on('presence', { event: 'sync' }, emit);
     channel.subscribe((status) => { if (status === 'SUBSCRIBED') channel.track(mine); });
@@ -909,7 +910,7 @@ export const directMessages = {
       .insert({ conversation_id: conversationId, sender_id: session.user.id, audio_path: path, audio_duration_seconds: Math.max(1, Math.round(durationSeconds || 0)) })
       .select().single();
     if (error) {
-      supabase.storage.from('voice-notes').remove([path]).catch(() => {});   // best-effort orphan cleanup
+      supabase.storage.from('voice-notes').remove([path]).catch(logCaught('storage.voice-notes cleanup'));   // best-effort orphan cleanup
       throw error;
     }
     return fromDbDirectMessage(data);
@@ -939,7 +940,7 @@ export const directMessages = {
       .eq('id', message.id)
       .select().single();
     if (error) throw error;
-    if (message.audioPath) supabase.storage.from('voice-notes').remove([message.audioPath]).catch(() => {}); // best-effort
+    if (message.audioPath) supabase.storage.from('voice-notes').remove([message.audioPath]).catch(logCaught('storage.voice-notes cleanup')); // best-effort
     return fromDbDirectMessage(data);
   },
 
@@ -947,7 +948,7 @@ export const directMessages = {
   async remove(message) {
     const { error } = await supabase.from('dm_messages').delete().eq('id', message.id);
     if (error) throw error;
-    if (message.audioPath) supabase.storage.from('voice-notes').remove([message.audioPath]).catch(() => {});
+    if (message.audioPath) supabase.storage.from('voice-notes').remove([message.audioPath]).catch(logCaught('storage.voice-notes cleanup'));
   },
 
   /** Per-workspace subscription (drives the conversation list + unread badge). dm_messages is
@@ -1031,7 +1032,7 @@ export const attachments = {
     const row = { task_id: taskId, uploaded_by: session.user.id, storage_path: path, filename: file.name, mime_type: file.type || null, size_bytes: file.size ?? null };
     const { data, error } = await supabase.from('task_attachments').insert(row).select().single();
     if (error) {
-      supabase.storage.from('task-attachments').remove([path]).catch(() => {});   // best-effort cleanup of the orphan object
+      supabase.storage.from('task-attachments').remove([path]).catch(logCaught('storage.task-attachments cleanup'));   // best-effort cleanup of the orphan object
       throw error;
     }
     return fromDbAttachment(data);
@@ -1059,7 +1060,7 @@ export const attachments = {
    *  metadata rows still exist to authorize it — call BEFORE deleting the task (the rows then cascade).
    *  Objects the caller can't delete (others' uploads, non-admin) are left for the DB orphan sweep. */
   async removeAllForTask(taskId) {
-    const list = await this.list(taskId).catch(() => []);
+    const list = await this.list(taskId).catch(logCaught('attachments.list for removeAll', () => []));
     const paths = list.map(a => a.storagePath).filter(Boolean);
     if (paths.length) await supabase.storage.from('task-attachments').remove(paths);
   },

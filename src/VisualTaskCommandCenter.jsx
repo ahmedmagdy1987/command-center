@@ -17,6 +17,8 @@ import { resolvePlanId, computeEntitlements, getPreviewPlanId, clearPreviewPlan 
 import { FEATURE_META, PLANS } from './lib/plans';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import AuthShell, { AuthBanner, AuthCTA } from './AuthShell';
+import ErrorBoundary from './ErrorBoundary';
+import { reportError, logCaught } from './lib/errors';
 
 /* Route <-> view mapping. Each main view gets its own shareable URL. */
 const VIEW_TO_PATH = {
@@ -228,7 +230,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   // All members of the CURRENT workspace ([{userId, displayName, email, role}]) — for the assignee
   // picker + member-aware views/labels. Loaded per workspace via the workspace_members_list RPC.
   const [members, setMembers] = useState([]);
-  const [membersReloadKey, setMembersReloadKey] = useState(0);   // bump to re-fetch the roster (after a role change)
+  const rosterWsRef = useRef(null);   // which workspace `members` belongs to (guards stale refresh results)
   // Tasks mid-exit-animation (id present -> the card renders its fade/slide-out before actual removal).
   const [exitingIds, setExitingIds] = useState(() => new Set());
   // Project cards mid-exit-animation (same two-phase pattern as tasks).
@@ -316,13 +318,13 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
         const viewing = chatViewRef.current === 'dms' && c.id === dmActiveConvRef.current;
         return { id: c.id, peerId, lastAt: last?.createdAt || c.createdAt, preview: last, unread: viewing ? 0 : (unreadMap.get(c.id) || 0) };
       }).sort((x, y) => new Date(y.lastAt) - new Date(x.lastAt)));
-    } catch (e) { console.error('Failed to load direct messages:', e); }
+    } catch (e) { reportError(e, 'dms.load'); }
   }, [currentWorkspaceId, userId]);
 
   const markDmRead = useCallback(async (conversationId, coverAt) => {
     if (!conversationId) return;
     setDmConversations(prev => prev.map(c => c.id === conversationId ? { ...c, unread: 0 } : c));
-    try { await directMessagesApi.markRead(conversationId, coverAt); } catch (e) { console.error('markDmRead failed:', e); }
+    try { await directMessagesApi.markRead(conversationId, coverAt); } catch (e) { reportError(e, 'dms.markRead'); }
   }, []);
 
   const startDm = useCallback(async (peerId) => {
@@ -375,7 +377,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
         const chosenSlug = ws.find(w => w.id === chosen)?.slug ?? chosen;
         navigate(`${window.location.pathname}?ws=${chosenSlug}`, { replace: true });
       } catch (err) {
-        console.error('Failed to resolve workspace:', err);
+        reportError(err, 'workspace.resolve');
         setSyncStatus('offline');
         setLoading(false);
       }
@@ -397,13 +399,13 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
       setProjects([]);
       setWorkspaceStats(null);
       try {
-        const [t, p, s] = await Promise.all([tasksApi.list(currentWorkspaceId), projectsApi.list(currentWorkspaceId), tasksApi.stats(currentWorkspaceId).catch(() => null)]);
+        const [t, p, s] = await Promise.all([tasksApi.list(currentWorkspaceId), projectsApi.list(currentWorkspaceId), tasksApi.stats(currentWorkspaceId).catch(logCaught('tasks.stats', () => null))]);
         if (!mounted) return;
         setTasks(t);
         setProjects(p);
         setWorkspaceStats(s);
       } catch (err) {
-        console.error('Failed to load:', err);
+        reportError(err, 'workspace.load');
         setSyncStatus('offline');
       } finally {
         if (mounted) setLoading(false);
@@ -416,7 +418,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   // collapses into one aggregate query. The initial load fetches them above; this keeps them current.
   useEffect(() => {
     if (!currentWorkspaceId) return undefined;
-    const t = setTimeout(() => { tasksApi.stats(currentWorkspaceId).then(setWorkspaceStats).catch(() => {}); }, 500);
+    const t = setTimeout(() => { tasksApi.stats(currentWorkspaceId).then(setWorkspaceStats).catch(logCaught('tasks.stats refresh')); }, 500);
     return () => clearTimeout(t);
   }, [currentWorkspaceId, tasks]);
 
@@ -424,13 +426,15 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   useEffect(() => {
     if (!currentWorkspaceId) return;
     let on = true;
+    rosterWsRef.current = currentWorkspaceId;
     workspaceMembersApi.listForWorkspace(currentWorkspaceId)
       .then(m => { if (on) setMembers(m); })
-      .catch(e => console.error('Failed to load workspace members:', e));
+      .catch(e => reportError(e, 'workspace.members'));
     // Clear on switch/unmount so a workspace change can't briefly show the prior workspace's roster
-    // (mirrors the tasks/projects reset in the data-load effect).
+    // (mirrors the tasks/projects reset in the data-load effect). In-place reloads go through
+    // refreshMembers below, which REPLACES the roster without ever blanking it.
     return () => { on = false; setMembers([]); };
-  }, [currentWorkspaceId, membersReloadKey]);
+  }, [currentWorkspaceId]);
 
   useEffect(() => {
     if (!currentWorkspaceId) return;
@@ -459,7 +463,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
     let on = true;
     let lastSeen = null;
     try { lastSeen = localStorage.getItem(`cc_chat_last_seen:${currentWorkspaceId}`); } catch { /* ignore */ }
-    messagesApi.unreadCount(lastSeen, me, currentWorkspaceId).then(n => { if (on) setChatUnread(n); }).catch(() => {});
+    messagesApi.unreadCount(lastSeen, me, currentWorkspaceId).then(n => { if (on) setChatUnread(n); }).catch(logCaught('chat.unreadCount'));
     const unsub = messagesApi.subscribe(({ type, message }) => {
       if (type !== 'INSERT' || !message || !on) return;
       if (message.senderId === me) return;
@@ -510,7 +514,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
       setProjects(p);
       setSyncStatus('live');
     } catch (e) {
-      console.error(`Reconcile (${reason}) failed:`, e);
+      reportError(e, `tasks.reconcile (${reason})`);
       setSyncStatus('offline');
     }
     refreshDms(ws);
@@ -573,7 +577,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
       setTasks(prev => prev.map(t => t.id === optimistic.id ? real : t));
       return real;
     } catch (err) {
-      console.error('Add task failed:', err);
+      reportError(err, 'tasks.add');
       setTasks(prev => prev.filter(t => t.id !== optimistic.id));
       showToast("Couldn't add the task. Please try again.");
     }
@@ -588,11 +592,11 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
     try {
       await tasksApi.update(id, patch);
     } catch (err) {
-      console.error('Update task failed:', err);
+      reportError(err, 'tasks.update');
       // Reconcile within the CURRENT workspace only — a bare list() would pull tasks from every
       // workspace the user belongs to into the active view (RLS-safe, but wrong scope on screen).
       // Also re-sync the open modal so it doesn't keep showing an edit the server rejected.
-      tasksApi.list(currentWorkspaceId).then(fresh => { setTasks(fresh); setEditingTask(et => et ? (fresh.find(t => t.id === et.id) ?? et) : et); }).catch(() => {});
+      tasksApi.list(currentWorkspaceId).then(fresh => { setTasks(fresh); setEditingTask(et => et ? (fresh.find(t => t.id === et.id) ?? et) : et); }).catch(logCaught('tasks.reconcile after failed update'));
       showToast("Couldn't save that change — reverted to the last saved version.");
     }
   }, [currentWorkspaceId, showToast]);
@@ -605,10 +609,10 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
       // Best-effort: remove attachment objects (Storage API) while their metadata rows still exist to
       // authorize it, THEN delete the task (its attachment metadata cascades). The hourly DB sweep is
       // the backstop for any objects the caller couldn't remove (others' uploads, non-admin).
-      attachmentsApi.removeAllForTask(id).catch(() => {}).finally(() => {
+      attachmentsApi.removeAllForTask(id).catch(logCaught('attachments.removeAllForTask')).finally(() => {
         tasksApi.delete(id).catch(err => {
-          console.error('Delete failed:', err);
-          tasksApi.list(currentWorkspaceId).then(setTasks).catch(() => {});   // reconcile with server on failure
+          reportError(err, 'tasks.delete');
+          tasksApi.list(currentWorkspaceId).then(setTasks).catch(logCaught('tasks.reconcile after failed delete'));   // reconcile with server on failure
           showToast("Couldn't delete the task — it's back in the list.");
         });
       });
@@ -630,8 +634,8 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
     try {
       await projectsApi.update(id, patch);
     } catch (err) {
-      console.error('Update project failed:', err);
-      projectsApi.list(currentWorkspaceId).then(p => setProjects(p)).catch(() => {});
+      reportError(err, 'projects.update');
+      projectsApi.list(currentWorkspaceId).then(p => setProjects(p)).catch(logCaught('projects.reconcile after failed update'));
       showToast("Couldn't save the project change — reverted.");
     }
   }, [currentWorkspaceId, showToast]);
@@ -641,7 +645,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   // immediate. mode: 'cascade' (owner: delete tasks too) | 'unassign' (owner+admin: re-file to reassignTo).
   const deleteProject = useCallback((id, mode, reassignTo) => {
     const reconcile = () => Promise.all([tasksApi.list(currentWorkspaceId), projectsApi.list(currentWorkspaceId)])
-      .then(([t, p]) => { setTasks(t); setProjects(p); }).catch(() => {});
+      .then(([t, p]) => { setTasks(t); setProjects(p); }).catch(logCaught('projects.reconcile after delete'));
     const finish = async () => {
       setProjects(p => p.filter(x => x.id !== id));
       setExitingProjectIds(p => { const n = new Set(p); n.delete(id); return n; });
@@ -649,7 +653,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
         await projectsApi.deleteViaRpc(id, currentWorkspaceId, mode, reassignTo);
         await reconcile();
       } catch (err) {
-        console.error('Delete project failed:', err);
+        reportError(err, 'projects.delete');
         await reconcile();
         showToast("Couldn't delete the project — nothing was changed.");
       }
@@ -668,7 +672,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
       const real = await tasksApi.create(copy, currentWorkspaceId);
       setTasks(prev => prev.map(t => t.id === copy.id ? real : t));
     } catch (err) {
-      console.error('Duplicate failed:', err);
+      reportError(err, 'tasks.duplicate');
       setTasks(prev => prev.filter(t => t.id !== copy.id));
     }
   }, [tasks, currentWorkspaceId]);
@@ -689,9 +693,9 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
       setTasks(prev => prev.map(t => t.id === taskId ? { ...t, subtasks: merged } : t));
       setEditingTask(et => (et && et.id === taskId ? { ...et, subtasks: merged } : et));
     } catch (err) {
-      console.error('Subtask update failed:', err);
+      reportError(err, 'tasks.subtasks update');
       // Reconcile to server on failure — including the open modal, which otherwise keeps the stale checklist.
-      tasksApi.list(currentWorkspaceId).then(fresh => { setTasks(fresh); setEditingTask(et => et ? (fresh.find(t => t.id === et.id) ?? et) : et); }).catch(() => {});
+      tasksApi.list(currentWorkspaceId).then(fresh => { setTasks(fresh); setEditingTask(et => et ? (fresh.find(t => t.id === et.id) ?? et) : et); }).catch(logCaught('tasks.reconcile after failed subtask update'));
       showToast("Couldn't save the checklist change — reverted to the server copy.");
     }
   }, [currentWorkspaceId, showToast]);
@@ -775,7 +779,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
       return row;
     });
     try { const created = await tasksApi.bulkInsert(rows, currentWorkspaceId); setTasks(prev => [...created, ...prev]); }
-    catch (err) { console.error('Import failed:', err); showToast("Couldn't import those tasks. Please try again."); }
+    catch (err) { reportError(err, 'tasks.import'); showToast("Couldn't import those tasks. Please try again."); }
   }, [importPreview, currentWorkspaceId, showToast, members]);
 
   const switchWorkspace = useCallback((id) => {
@@ -818,7 +822,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
         catch { return { ...inv, workspaceName: 'a workspace', isExpired: false }; }
       }));
       setPendingInvites(enriched.filter(i => !i.isExpired));
-    } catch (err) { console.error('Failed to load pending invites:', err); }
+    } catch (err) { reportError(err, 'invitations.pending'); }
   }, [userId]);
   useEffect(() => { refreshInvites(); }, [refreshInvites]);
 
@@ -854,23 +858,39 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   const isGuest = myRole === 'guest';
   const canManageMembers = isOwner || isAdmin;   // owner+admin manage members/invites/roles
 
-  // Reload the current workspace's roster (after a role change / removal) AND the caller's own
-  // memberships (so myRole / canManageMembers update if they changed their own role).
+  // Reload the current workspace's roster (after a role change / removal / profile edit) AND the
+  // caller's own memberships (so myRole / canManageMembers update if they changed their own role).
+  // STALE-WHILE-REFETCHING, not blank-then-fetch: the old reload-key approach re-ran the roster
+  // effect, whose cleanup emptied `members` for the whole round-trip — every identity surface
+  // degraded to silhouettes / 'Former member' (permanently, if the fetch failed). It also resolves
+  // only AFTER the roster is actually updated, so callers like ProfileModal.save can await real
+  // propagation. rosterWsRef drops a late result that lands after a workspace switch.
   const refreshMembers = useCallback(async () => {
-    setMembersReloadKey(k => k + 1);
-    try { setMemberships(await workspaceMembersApi.listMine()); } catch (e) { console.error('refresh memberships failed:', e); }
-  }, []);
+    const ws = currentWorkspaceId;
+    try {
+      const [roster, mine] = await Promise.all([
+        ws ? workspaceMembersApi.listForWorkspace(ws) : Promise.resolve(null),
+        workspaceMembersApi.listMine(),
+      ]);
+      if (roster && rosterWsRef.current === ws) setMembers(roster);
+      setMemberships(mine);
+    } catch (e) { reportError(e, 'memberships.refresh'); }
+  }, [currentWorkspaceId]);
 
   // Resolve an assignee id -> { id, label, hex, soft, initials } for chips/labels. 'Me' for self,
   // 'Unassigned' (neutral) for null, display name otherwise. Color is deterministic per user id.
   const resolveAssignee = useCallback((assigneeId) => {
-    if (!assigneeId) return { id: null, label: 'Unassigned', hex: UNASSIGNED_STYLE.hex, soft: UNASSIGNED_STYLE.soft, initials: '·', avatarUrl: null, statusEmoji: '', statusText: '' };
+    if (!assigneeId) return { id: null, known: false, label: 'Unassigned', hex: UNASSIGNED_STYLE.hex, soft: UNASSIGNED_STYLE.soft, initials: '·', avatarUrl: null, statusEmoji: '', statusText: '' };
     const m = members.find(x => x.userId === assigneeId);
-    const name = m?.displayName || m?.email || 'Member';
+    // `known: false` = no roster row. For a full member that means the person LEFT ('Former member');
+    // a guest's roster is row-scoped server-side, so for them absence proves nothing — keep 'Member'.
+    // Avatar call sites gate on `known` and pass '' so the SILHOUETTE renders — the old fallback
+    // initialled to "ME", indistinguishable from your own 'Me' disc in the palette/receipts.
+    const name = m?.displayName || m?.email || (isGuest ? 'Member' : 'Former member');
     const c = assigneeColor(assigneeId);
-    return { id: assigneeId, label: assigneeId === userId ? 'Me' : name, hex: c.hex, soft: c.soft, initials: initialsOf(name),
+    return { id: assigneeId, known: !!m, label: assigneeId === userId ? 'Me' : name, hex: c.hex, soft: c.soft, initials: initialsOf(name),
       avatarUrl: m?.avatarUrl || null, statusEmoji: m?.statusEmoji || '', statusText: m?.statusText || '' };
-  }, [members, userId]);
+  }, [members, userId, isGuest]);
 
   /**
    * The ONE identity lookup every surface uses: a roster row -> a renderable person. Returns null for
@@ -1047,7 +1067,7 @@ function AssigneeChip({ assigneeId, showLabel = true, size = 'sm' }) {
   return (
     <span className={cx('inline-flex items-center gap-1 rounded-full font-medium tracking-wide pl-0.5', dims, showLabel ? (size === 'sm' ? 'pr-2' : 'pr-2.5') : 'pr-0.5')}
       style={{ background: light ? `${a.hex}1f` : a.soft, color: light ? '#0b0b12' : a.hex, border: `1px solid ${a.hex}33` }}>
-      <Avatar name={a.id ? a.label : ''} userId={a.id} photoUrl={a.avatarUrl} size={face} />
+      <Avatar name={a.known ? a.label : ''} userId={a.id} photoUrl={a.avatarUrl} size={face} />
       {showLabel && a.label}
     </span>
   );
@@ -1254,10 +1274,12 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showAssign
 
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-center gap-2 min-w-0 flex-1">
+          {/* Unchecked ring via border-white/20 (class, not inline rgba): same 20% white in dark, but the
+              light sheet remaps the CLASS to visible black-alpha — inline stayed white-on-white in light. */}
           <button
             onClick={(e) => { e.stopPropagation(); updateTask(task.id, { status: done ? 'inbox' : 'done' }); }}
-            className="shrink-0 w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all"
-            style={{ borderColor: done ? priority.hex : 'rgba(255,255,255,0.2)', background: done ? priority.hex : 'transparent' }}
+            className="shrink-0 w-4 h-4 rounded-full border-2 border-white/20 flex items-center justify-center transition-all"
+            style={{ borderColor: done ? priority.hex : undefined, background: done ? priority.hex : 'transparent' }}
           >
             {done && <Check className="w-2.5 h-2.5" style={{ color: '#0a0b11' }} strokeWidth={3} />}
           </button>
@@ -1305,7 +1327,7 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showAssign
           /* A face, but NOT a PersonButton: the whole card is already a click target for opening the task. */
           <span className="text-[10px] text-white/30 inline-flex items-center gap-1">
             · by
-            <Avatar name={creatorLabel(task.createdBy)} userId={task.createdBy} photoUrl={resolveAssignee(task.createdBy).avatarUrl} size={12} />
+            <Avatar name={resolveAssignee(task.createdBy).known ? creatorLabel(task.createdBy) : ''} userId={task.createdBy} photoUrl={resolveAssignee(task.createdBy).avatarUrl} size={12} />
             {creatorLabel(task.createdBy)}
           </span>
         )}
@@ -1436,7 +1458,7 @@ function TaskComments({ taskId }) {
     let mounted = true;
     membersApi.list()
       .then(list => { if (mounted) setPeople(Object.fromEntries((list || []).map(m => [m.id, m]))); })
-      .catch(() => {});
+      .catch(logCaught('members.list for comments'));
     return () => { mounted = false; };
   }, []);
 
@@ -1447,7 +1469,7 @@ function TaskComments({ taskId }) {
     setLoading(true);
     commentsApi.list(taskId)
       .then(list => { if (mounted) setItems(list); })
-      .catch(err => console.error('Failed to load comments:', err))
+      .catch(err => reportError(err, 'comments.list'))
       .finally(() => { if (mounted) setLoading(false); });
 
     const unsub = commentsApi.subscribe(taskId, ({ type, comment }) => {
@@ -1479,7 +1501,7 @@ function TaskComments({ taskId }) {
       const created = await commentsApi.add(taskId, body, currentWorkspaceId, mns);
       setItems(prev => prev.some(c => c.id === created.id) ? prev : [...prev, created]);
     } catch (err) {
-      console.error('Failed to add comment:', err);
+      reportError(err, 'comments.add');
       setText(body); // restore on failure
     } finally {
       sendingRef.current = false;
@@ -1493,13 +1515,13 @@ function TaskComments({ taskId }) {
     try {
       const updated = await commentsApi.update(id, body);
       setItems(prev => prev.map(c => c.id === id ? updated : c));
-    } catch (err) { console.error('Failed to edit comment:', err); }
+    } catch (err) { reportError(err, 'comments.edit'); }
   };
 
   const remove = async (id) => {
     setItems(prev => prev.filter(c => c.id !== id));
     try { await commentsApi.remove(id); }
-    catch (err) { console.error('Failed to delete comment:', err); commentsApi.list(taskId).then(setItems).catch(() => {}); }
+    catch (err) { reportError(err, 'comments.delete'); commentsApi.list(taskId).then(setItems).catch(logCaught('comments.reconcile')); }
   };
 
   return (
@@ -1586,7 +1608,7 @@ function AttachmentThumb({ attachment }) {
   useEffect(() => {
     if (!isImg) return;
     let on = true;
-    attachmentsApi.signedUrl(attachment.storagePath, 3600).then(u => { if (on) setUrl(u); }).catch(() => { if (on) setFailed(true); });
+    attachmentsApi.signedUrl(attachment.storagePath, 3600).then(u => { if (on) setUrl(u); }).catch(logCaught('attachments.signedUrl', () => { if (on) setFailed(true); }));
     return () => { on = false; };
   }, [attachment.storagePath, isImg]);
   if (isImg && url && !failed) {
@@ -1612,12 +1634,12 @@ function Attachments({ taskId, canEdit }) {
   const fileRef = useRef(null);
 
   const load = useCallback(() => {
-    attachmentsApi.list(taskId).then(setItems).catch(() => setItems([]));
+    attachmentsApi.list(taskId).then(setItems).catch(logCaught('attachments.list', () => setItems([])));
   }, [taskId]);
   // Guarded mount load — don't setState after unmount / after the taskId changed.
   useEffect(() => {
     let on = true;
-    attachmentsApi.list(taskId).then(l => { if (on) setItems(l); }).catch(() => { if (on) setItems([]); });
+    attachmentsApi.list(taskId).then(l => { if (on) setItems(l); }).catch(logCaught('attachments.list', () => { if (on) setItems([]); }));
     return () => { on = false; };
   }, [taskId]);
 
@@ -1790,7 +1812,7 @@ function TaskModal() {
             <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-white/35">
               <span>Added by</span>
               <PersonButton personId={t.createdBy} className="gap-1.5 min-w-0" title={`View ${creatorLabel(t.createdBy)}'s profile`}>
-                <Avatar name={creatorLabel(t.createdBy)} userId={t.createdBy} photoUrl={cr.avatarUrl} size={16} />
+                <Avatar name={cr.known ? creatorLabel(t.createdBy) : ''} userId={t.createdBy} photoUrl={cr.avatarUrl} size={16} />
                 <span className="text-white/55 hover:text-white/80 truncate">
                   {cr.statusEmoji && <span className="mr-1">{cr.statusEmoji}</span>}
                   {creatorLabel(t.createdBy)}
@@ -1885,8 +1907,8 @@ function TaskModal() {
               {t.subtasks.map((s, i) => (
                 <div key={s.id} className="flex items-center gap-2 group">
                   <button onClick={() => canEditTask && toggleSubtask(t.id, s.id)} disabled={!canEditTask} aria-pressed={s.done}
-                    className={cx('shrink-0 w-4 h-4 rounded border-2 flex items-center justify-center transition-all', !canEditTask && 'cursor-default')}
-                    style={{ borderColor: s.done ? priority.hex : 'rgba(255,255,255,0.2)', background: s.done ? priority.hex : 'transparent' }}>
+                    className={cx('shrink-0 w-4 h-4 rounded border-2 border-white/20 flex items-center justify-center transition-all', !canEditTask && 'cursor-default')}
+                    style={{ borderColor: s.done ? priority.hex : undefined, background: s.done ? priority.hex : 'transparent' }}>
                     {s.done && <Check className="w-2.5 h-2.5" style={{ color: '#0a0b11' }} strokeWidth={3} />}
                   </button>
                   <div className={cx('flex-1 text-sm', s.done ? 'text-white/40 line-through' : 'text-white/85')}>{s.title}</div>
@@ -1972,7 +1994,10 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field', di
     const id = v === 'me' ? meId : v;
     const c = assigneeColor(id);
     const r = resolveAssignee(id);
-    return { id, hex: c.hex, soft: c.soft, initials: initialsOf(lbl), avatarUrl: r.avatarUrl, statusEmoji: r.statusEmoji };
+    // `known` rides along so the trigger/rows can silhouette a roster-absent assignee (the injected
+    // former-assignee option in TaskModal) instead of initialling the fallback label — the same
+    // known-gate every other avatar call site applies.
+    return { id, hex: c.hex, soft: c.soft, initials: initialsOf(lbl), avatarUrl: r.avatarUrl, statusEmoji: r.statusEmoji, known: r.known };
   };
   const current = options.find(([v]) => v === value);
   const curAv = current ? avatarFor(current[0], current[1]) : null;
@@ -2012,7 +2037,7 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field', di
     <>
       <button type="button" ref={btnRef} disabled={disabled} onClick={() => (open ? close() : openMenu())} aria-haspopup="listbox" aria-expanded={open} className={cx(triggerCls, disabled && 'opacity-60 !cursor-default')}>
         {variant === 'filter' && <Filter className="w-3 h-3 text-white/40 shrink-0" />}
-        {curAv && !curAv.all && <Avatar name={curAv.unassigned ? '' : (current ? current[1] : '')} userId={curAv.id} photoUrl={curAv.avatarUrl} size={16} />}
+        {curAv && !curAv.all && <Avatar name={curAv.unassigned || !curAv.known ? '' : (current ? current[1] : '')} userId={curAv.id} photoUrl={curAv.avatarUrl} size={16} />}
         <span className="text-white/40 shrink-0">{label}:</span>
         <span className="text-white/95 font-medium truncate max-w-[140px]">{current ? current[1] : (value || '')}</span>
         <ChevronDown className={cx('w-3 h-3 text-white/40 shrink-0 transition-transform', open && 'rotate-180')} />
@@ -2045,7 +2070,7 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field', di
                     ) : (
                       // Avatar, not a hand-rolled circle: it already does photo -> initials -> silhouette
                       // AND the light-mode swap that used to be duplicated inline right here.
-                      <Avatar name={av.unassigned ? '' : o[1]} userId={av.id} photoUrl={av.avatarUrl} size={20} />
+                      <Avatar name={av.unassigned || !av.known ? '' : o[1]} userId={av.id} photoUrl={av.avatarUrl} size={20} />
                     )}
                     <span className="flex-1 truncate">
                       {/* status helps you pick who's free — but not on the filter, which is a criterion, not a person */}
@@ -2347,7 +2372,7 @@ function CommandPalette() {
     if (!paletteOpen) return;
     let on = true;
     const load = currentWorkspaceId
-      ? directMessagesApi.listRecentMessages(currentWorkspaceId, 500).catch(() => [])
+      ? directMessagesApi.listRecentMessages(currentWorkspaceId, 500).catch(logCaught('dms.recentMessages for palette', () => []))
       : Promise.resolve([]);   // no workspace → empty index (set async so this effect never setState-s synchronously)
     load.then(dm => {
       if (!on) return;
@@ -2365,7 +2390,7 @@ function CommandPalette() {
       if (!paletteOpen || !term || !currentWorkspaceId) { setServerChatMsgs([]); return; }
       messagesApi.search(term, currentWorkspaceId, 6)
         .then(rows => { if (on) setServerChatMsgs(rows.filter(m => m.body && !m.deletedAt).map(m => ({ kind: 'chat', id: m.id, body: m.body, senderId: m.senderId }))); })
-        .catch(() => { if (on) setServerChatMsgs([]); });
+        .catch(logCaught('messages.search', () => { if (on) setServerChatMsgs([]); }));
     }, 200);
     return () => { on = false; clearTimeout(t); };
   }, [q, paletteOpen, currentWorkspaceId]);
@@ -2492,7 +2517,7 @@ function CommandPalette() {
                     className={cx('w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm transition-colors',
                       active ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5')}>
                     {/* The face says who; the DM/Team glyph stays as the small kind marker. */}
-                    <Avatar name={who} userId={m.senderId} photoUrl={sender.avatarUrl} size={20} />
+                    <Avatar name={sender.known ? who : ''} userId={m.senderId} photoUrl={sender.avatarUrl} size={20} />
                     <span className="flex-1 min-w-0 truncate">{m.body}</span>
                     <span className="text-[10px] text-white/30 shrink-0 inline-flex items-center gap-1">
                       <Icon className="w-3 h-3" />{who} · {m.kind === 'dm' ? 'DM' : 'Team'}
@@ -2736,14 +2761,14 @@ function NotificationToast({ n, light, onOpen, onDismiss }) {
         leaving ? 'animate-[fadeSlideOut_.18s_ease_forwards]' : 'animate-[slideUp_.2s_ease]')}>
       <span className="mt-0.5 shrink-0 relative">
         {actor
-          ? <Avatar name={actor.label} userId={n.actorId} photoUrl={actor.avatarUrl} size={28} />
+          ? <Avatar name={actor.known ? actor.label : ''} userId={n.actorId} photoUrl={actor.avatarUrl} size={28} />
           : <span className="w-7 h-7 rounded-lg border flex items-center justify-center"
               style={{ background: tv.hex + '1f', borderColor: tv.hex + '55' }}>
               <tv.Icon className="w-3.5 h-3.5" style={{ color: tv.hex }} />
             </span>}
         {actor && (
           <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center border"
-            style={{ background: light ? '#ffffff' : '#0f1017', borderColor: light ? '#e5e7eb' : 'rgba(255,255,255,0.12)' }}>
+            style={{ background: light ? '#ffffff' : '#0f1017', borderColor: light ? '#d1d5db' : 'rgba(255,255,255,0.12)' }}>
             <tv.Icon className="w-2 h-2" style={{ color: tv.hex }} />
           </span>
         )}
@@ -2799,7 +2824,7 @@ function NotificationBell() {
           return [...extras, ...list].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
         });
       })
-      .catch(err => console.error('Failed to load notifications:', err))
+      .catch(err => reportError(err, 'notifications.list'))
       .finally(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
   }, [userId, currentWorkspaceId]);
@@ -2808,7 +2833,7 @@ function NotificationBell() {
   // (new notification, mark-read, clear), debounced so a burst collapses into one count query.
   useEffect(() => {
     if (!userId || !currentWorkspaceId) return undefined;
-    const t = setTimeout(() => { notificationsApi.unreadCount(currentWorkspaceId).then(setServerUnread).catch(() => {}); }, 300);
+    const t = setTimeout(() => { notificationsApi.unreadCount(currentWorkspaceId).then(setServerUnread).catch(logCaught('notifications.unreadCount')); }, 300);
     return () => clearTimeout(t);
   }, [userId, currentWorkspaceId, items]);
 
@@ -2831,7 +2856,7 @@ function NotificationBell() {
       const viewingThisDm = n.type === 'dm_received' && n.refId && n.refId === activeConvRef.current && viewRef.current === 'dms';
       if (viewingThisDm) {
         setItems(prev => prev.some(x => x.id === n.id) ? prev : [{ ...n, read: true }, ...prev]);
-        notificationsApi.markRead(n.id).catch(() => {});
+        notificationsApi.markRead(n.id).catch(logCaught('notifications.markRead'));
         return;
       }
       setItems(prev => prev.some(x => x.id === n.id) ? prev : [n, ...prev]);
@@ -2853,7 +2878,7 @@ function NotificationBell() {
       if (stale.length === 0) return;
       setItems(prev => prev.map(n => (n.type === 'dm_received' && n.refId === dmActiveConv && !n.read) ? { ...n, read: true } : n));
       setToasts(prev => prev.filter(x => !(x.type === 'dm_received' && x.refId === dmActiveConv)));
-      stale.forEach(n => notificationsApi.markRead(n.id).catch(() => {}));
+      stale.forEach(n => notificationsApi.markRead(n.id).catch(logCaught('notifications.markRead stale DM')));
     }, 0);
     return () => { cancelled = true; clearTimeout(t); };
   }, [view, dmActiveConv, items]);
@@ -2868,7 +2893,7 @@ function NotificationBell() {
       const fetched = await tasksApi.getById(taskId);
       if (fetched) setEditingTask(fetched);
     } catch (err) {
-      console.error('Failed to open task from notification:', err);
+      reportError(err, 'notifications.openTask');
     }
   }, [tasks, setEditingTask]);
 
@@ -2878,8 +2903,8 @@ function NotificationBell() {
     if (!n.read) {
       setItems(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
       notificationsApi.markRead(n.id).catch(err => {
-        console.error('markRead failed:', err);
-        notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(() => {}); // reconcile with server on failure
+        reportError(err, 'notifications.markRead');
+        notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(logCaught('notifications.reconcile')); // reconcile with server on failure
       });
     }
     // Deep-link by type: a DM notification opens its thread; everything else (task_assigned /
@@ -2902,8 +2927,8 @@ function NotificationBell() {
     try {
       await notificationsApi.markAllRead(currentWorkspaceId);
     } catch (err) {
-      console.error('markAllRead failed:', err);
-      notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(() => {}); // reconcile with server on failure
+      reportError(err, 'notifications.markAllRead');
+      notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(logCaught('notifications.reconcile')); // reconcile with server on failure
     }
   };
 
@@ -2913,8 +2938,8 @@ function NotificationBell() {
       setItems(p => p.filter(x => x.id !== id));
       setExitingNotifIds(p => { const n = new Set(p); n.delete(id); return n; });
       notificationsApi.delete(id).catch(err => {
-        console.error('Delete notification failed:', err);
-        notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(() => {}); // reconcile with server on failure
+        reportError(err, 'notifications.delete');
+        notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(logCaught('notifications.reconcile')); // reconcile with server on failure
       });
     };
     if (prefersReducedMotion()) { finish(); return; }
@@ -2934,8 +2959,8 @@ function NotificationBell() {
       setItems(prev => prev.filter(x => !idSet.has(x.id)));   // remove only the snapshot; keep anything that streamed in
       setExitingNotifIds(new Set());
       notificationsApi.clearIds(ids, currentWorkspaceId).catch(err => {
-        console.error('Clear all notifications failed:', err);
-        notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(() => {}); // reconcile with server on failure
+        reportError(err, 'notifications.clearAll');
+        notificationsApi.list(50, currentWorkspaceId).then(setItems).catch(logCaught('notifications.reconcile')); // reconcile with server on failure
       });
     };
     if (prefersReducedMotion()) { finish(); return; }
@@ -3000,13 +3025,13 @@ function NotificationBell() {
                           return (
                           <span className="relative mt-0.5 shrink-0">
                             {actor
-                              ? <Avatar name={actor.label} userId={n.actorId} photoUrl={actor.avatarUrl} size={28} />
+                              ? <Avatar name={actor.known ? actor.label : ''} userId={n.actorId} photoUrl={actor.avatarUrl} size={28} />
                               : <span className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: light ? `${tv.hex}1f` : `${tv.hex}22` }}>
                                   <tv.Icon className="w-4 h-4" style={{ color: tv.hex }} />
                                 </span>}
                             {actor && (
                               <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center border"
-                                style={{ background: light ? '#ffffff' : '#0f1017', borderColor: light ? '#e5e7eb' : 'rgba(255,255,255,0.12)' }}>
+                                style={{ background: light ? '#ffffff' : '#0f1017', borderColor: light ? '#d1d5db' : 'rgba(255,255,255,0.12)' }}>
                                 <tv.Icon className="w-2 h-2" style={{ color: tv.hex }} />
                               </span>
                             )}
@@ -3454,7 +3479,7 @@ function WorkspaceSwitcher() {
                 <div className="my-1 h-px bg-white/10" />
                 <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-white/35">Invitations</div>
                 {pendingInvites.map(inv => (
-                  <button key={inv.id} onClick={() => { setOpen(false); acceptInvitation(inv.token).catch(err => console.error('accept invite failed:', err)); }}
+                  <button key={inv.id} onClick={() => { setOpen(false); acceptInvitation(inv.token).catch(err => reportError(err, 'invitations.accept')); }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/80 hover:bg-white/5 hover:text-white transition-colors">
                     <span className="w-4 h-4 rounded-md bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center shrink-0"><UserPlus className="w-2.5 h-2.5 text-emerald-300" /></span>
                     <span className="flex-1 text-left truncate">Join {inv.workspaceName}</span>
@@ -3607,7 +3632,8 @@ function TopBar() {
  * (so useState initializers prefill from the freshly-loaded currentMember — no set-state-in-effect). Writes
  * via membersApi.updateProfile; the server validates (role-title impersonation, length, storage-hosted
  * avatar) so a rejection surfaces inline. Avatar uploads to the caller's own folder in the public avatars
- * bucket and stores the resulting public URL. refreshCurrentMember() re-syncs the top bar after saving.
+ * bucket and stores the resulting public URL. Saving re-syncs the top bar (refreshCurrentMember) AND the
+ * workspace roster (refreshMembers) so every identity surface reflects the edit immediately.
  */
 /** Status emojis offered by the profile picker. Every entry is verified against the server's emoji-only
  *  rule (members_validate_profile: no letters/digits, no letter-like symbols — checked live, 32/32 accept),
@@ -3616,7 +3642,8 @@ const STATUS_EMOJIS = ['🟢','🟡','🔴','🔵','⚪','🔥','☕','🎯','�
   '🧠','⏳','🌴','🏖️','🤒','🚗','🍕','🌙','⚡','✨','🎉','👀','💬','📚','🏃','😴'];
 
 function ProfileModal({ onClose }) {
-  const { currentMember, refreshCurrentMember } = useApp();
+  const { currentMember, refreshCurrentMember, refreshMembers, theme } = useApp();
+  const light = theme === 'light';
   const [displayName, setDisplayName] = useState(() => currentMember?.display_name || '');
   const [statusText, setStatusText] = useState(() => currentMember?.status_text || '');
   const [statusEmoji, setStatusEmoji] = useState(() => currentMember?.status_emoji || '');
@@ -3641,7 +3668,10 @@ function ProfileModal({ onClose }) {
     setErr(''); setBusy(true);
     try {
       await membersApi.updateProfile({ displayName, statusText, statusEmoji, bio, avatarUrl });
-      await refreshCurrentMember?.();
+      // BOTH refreshes: currentMember drives only the top bar; every roster-driven surface (sidebar
+      // card, chat facepile, DM list, Members page, comment headers, the profile card itself) reads
+      // the workspace roster, which without refreshMembers() kept the old name/photo until a reload.
+      await Promise.all([refreshCurrentMember?.(), refreshMembers?.()]);
       onClose();
     } catch (e) {
       setErr(e?.message || 'Could not save your profile.');
@@ -3651,8 +3681,11 @@ function ProfileModal({ onClose }) {
 
   return createPortal(
     <>
-      <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
+      {/* z-[80]: ProfileModal must layer ABOVE ProfileView (z-[70]) — "Edit profile" inside the profile
+          card mounts this as a sibling body portal, and at the old z-[60] the editor painted invisibly
+          BEHIND the card (clicking seemed to do nothing while focus sat in the hidden panel). */}
+      <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[80] flex items-center justify-center p-6 pointer-events-none">
         <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Edit profile"
           className="pointer-events-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5 outline-none max-h-[85vh] overflow-y-auto"
           style={{ animation: 'slideUp .2s ease' }}
@@ -3681,7 +3714,7 @@ function ProfileModal({ onClose }) {
           <div className="flex gap-2 mb-2">
             <button type="button" onClick={() => setEmojiOpen(o => !o)} aria-expanded={emojiOpen} aria-label="Pick a status emoji"
               className={cx('w-14 h-9 rounded-xl border flex items-center justify-center text-base transition-colors',
-                emojiOpen ? 'border-violet-400/50 bg-violet-500/10' : 'border-white/10 bg-white/5 hover:bg-white/10')}>
+                emojiOpen ? 'border-violet-400/50 bg-violet-500/20' : 'border-white/10 bg-white/5 hover:bg-white/10')}>
               {statusEmoji || <Plus className="w-3.5 h-3.5 text-white/40" />}
             </button>
             <input value={statusText} onChange={e => setStatusText(e.target.value)} maxLength={80} placeholder="What are you up to?" aria-label="Status text"
@@ -3690,12 +3723,14 @@ function ProfileModal({ onClose }) {
           {/* An INLINE grid, not a floating popover: the modal panel is overflow-y-auto, which would clip an
               absolutely-positioned one. Picking is the only input path — the server accepts emoji only, so a
               free-text field was never a valid way to set this. */}
+          {/* Theme-aware like Avatar: bg-black/30 read as a dark slab once the light overrides turned
+              the modal panel white, and the white-alpha hover was invisible on it. */}
           {emojiOpen && (
-            <div className="mb-3 p-2 rounded-xl border border-white/10 bg-black/30">
+            <div className={cx('mb-3 p-2 rounded-xl border border-white/10', light ? 'bg-black/5' : 'bg-black/30')}>
               <div className="grid grid-cols-8 gap-1">
                 {STATUS_EMOJIS.map(em => (
                   <button key={em} type="button" onClick={() => { setStatusEmoji(em); setEmojiOpen(false); }} aria-label={`Status emoji ${em}`}
-                    className={cx('h-8 rounded-lg text-base hover:bg-white/10 transition-colors',
+                    className={cx('h-8 rounded-lg text-base transition-colors', light ? 'hover:bg-black/10' : 'hover:bg-white/10',
                       statusEmoji === em && 'bg-violet-500/20 ring-1 ring-violet-400/50')}>{em}</button>
                 ))}
               </div>
@@ -3752,21 +3787,45 @@ function PersonButton({ personId, children, className, title }) {
  *
  * Data comes from personOf() — i.e. the workspace roster the app already loads, so there is no new fetch
  * and no new read path. email/bio arrive NULL for a GUEST viewer (workspace_members_list withholds them
- * server-side) so those rows simply don't render — the guest scoping needs no client logic. Someone who
- * has left the workspace isn't in the roster at all, hence the explicit former-member state.
+ * server-side) so those rows simply don't render — the guest scoping needs no client logic. A missing
+ * roster row means different things by viewer: for a member/admin/owner the roster is complete, so the
+ * person has LEFT; for a GUEST the roster is row-scoped server-side (self + task co-participants + DM
+ * peers), so an ACTIVE member can be absent — that gets the "limited" state, never a false "has left".
  *
- * Portaled to <body>, so it can never inherit the per-view [data-theme="light"] rules — it matches the
- * app's other modals (always dark) and therefore renders identically in both themes.
+ * Portaled to <body> — which does NOT keep it dark: data-theme is stamped on <html> and AppShell's
+ * global [data-theme="light"] overrides match portaled nodes too, so in light mode this panel renders
+ * LIGHT like every other modal. (An earlier comment here claimed the opposite; it was wrong.)
  */
 function ProfileView() {
-  const { profileUserId, closeProfile, personOf, startDm } = useApp();
+  const { profileUserId, closeProfile, personOf, startDm, isGuest } = useApp();
   const [editing, setEditing] = useState(false);
+  const [dmErr, setDmErr] = useState('');
+  const [dmBusy, setDmBusy] = useState(false);
   const panelRef = useRef(null);
-  useEffect(() => { if (profileUserId) setTimeout(() => panelRef.current?.focus(), 30); }, [profileUserId]);
+  // Mirrors the CURRENT profile id so a startDm result that lands after Close (or after switching
+  // profiles) is discarded — the component stays mounted across close/reopen, so an unguarded late
+  // setDmErr would resurface as a stale error on the NEXT profile anyone opens.
+  const openIdRef = useRef(null);
+  useEffect(() => {
+    openIdRef.current = profileUserId;
+    if (profileUserId) setTimeout(() => panelRef.current?.focus(), 30);
+  }, [profileUserId]);
   if (!profileUserId) return null;
 
   const p = personOf(profileUserId);
-  const close = () => { setEditing(false); closeProfile(); };
+  const close = () => { setEditing(false); setDmErr(''); closeProfile(); };
+  const message = async () => {
+    if (dmBusy) return;   // double-click guard: two racing startDm calls double-navigate + double-fetch
+    setDmBusy(true); setDmErr('');
+    const forId = p.id;
+    try {
+      await startDm?.(forId);                         // success navigates to the thread…
+      if (openIdRef.current === forId) close();       // …close only if this profile is still the open one
+    } catch (e) {
+      reportError(e, 'dms.start from profile');
+      if (openIdRef.current === forId) setDmErr("Couldn't start the conversation. Please try again.");
+    } finally { setDmBusy(false); }
+  };
 
   return createPortal(
     <>
@@ -3779,10 +3838,16 @@ function ProfileView() {
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } }}>
 
           {!p ? (
+            /* Guest viewers get a row-scoped roster, so "not in MY roster" ≠ "has left" — claiming
+               "no longer in this workspace" about an active admin was simply false. */
             <div className="text-center py-4">
               <Avatar name="" userId={profileUserId} size={72} className="mx-auto mb-3" />
-              <h2 className="text-base font-semibold text-white mb-1">No longer in this workspace</h2>
-              <p className="text-xs text-white/50">This person has left, so their profile isn't available here.</p>
+              <h2 className="text-base font-semibold text-white mb-1">{isGuest ? 'Profile unavailable' : 'No longer in this workspace'}</h2>
+              <p className="text-xs text-white/50">
+                {isGuest
+                  ? 'As a guest you can see full profiles only for people on your tasks or in your direct messages.'
+                  : "This person has left, so their profile isn't available here."}
+              </p>
             </div>
           ) : (
             <>
@@ -3802,6 +3867,8 @@ function ProfileView() {
                 {p.email && <p className="mt-3 text-[11px] text-white/35 break-all">{p.email}</p>}
               </div>
 
+              {dmErr && <p className="mt-3 text-xs text-rose-300 text-center break-words">{dmErr}</p>}
+
               <div className="flex items-center justify-end gap-2 mt-5">
                 <button onClick={close}
                   className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">Close</button>
@@ -3811,9 +3878,11 @@ function ProfileView() {
                     <User className="w-3.5 h-3.5" />Edit profile
                   </button>
                 ) : (
-                  <button onClick={() => { startDm?.(p.id)?.catch?.(() => {}); close(); }}
-                    className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5">
-                    <MessageSquare className="w-3.5 h-3.5" />Message
+                  /* Failure keeps the card OPEN with an inline error — the old handler closed
+                     immediately and swallowed the rejection, so a failed start looked like a no-op. */
+                  <button onClick={message} disabled={dmBusy}
+                    className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
+                    <MessageSquare className="w-3.5 h-3.5" />{dmBusy ? 'Opening…' : 'Message'}
                   </button>
                 )}
               </div>
@@ -4511,7 +4580,7 @@ function ProjectsView() {
     let alive = true;
     projectsApi.taskCount(deleteTarget.id, currentWorkspaceId)
       .then(n => { if (alive) setDeleteCount(typeof n === 'number' ? n : 0); })
-      .catch(err => { console.error('project taskCount failed:', err); if (alive) setDeleteCount(-1); });
+      .catch(err => { reportError(err, 'projects.taskCount'); if (alive) setDeleteCount(-1); });
     return () => { alive = false; };
   }, [deleteTarget, currentWorkspaceId]);
 
@@ -4700,9 +4769,13 @@ function ScheduleView() {
 ================================================================================= */
 export default function App({ session, currentMember, onSignOut, refreshCurrentMember }) {
   return (
-    <AppProvider session={session} currentMember={currentMember} onSignOut={onSignOut} refreshCurrentMember={refreshCurrentMember}>
-      <AppShell />
-    </AppProvider>
+    // App-level boundary OUTSIDE the provider: a render throw in AppProvider or the shell shows the
+    // full-screen fallback instead of a white screen. Per-view boundaries live on the routes below.
+    <ErrorBoundary name="app" fullScreen>
+      <AppProvider session={session} currentMember={currentMember} onSignOut={onSignOut} refreshCurrentMember={refreshCurrentMember}>
+        <AppShell />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }
 
@@ -4851,7 +4924,7 @@ function VoiceNote({ path, localUrl, duration, pending }) {
   useEffect(() => {
     if (url || !path) return;
     let on = true;
-    messagesApi.signedUrl(path).then(u => { if (on) setUrl(u); }).catch(() => { if (on) setFailed(true); });
+    messagesApi.signedUrl(path).then(u => { if (on) setUrl(u); }).catch(logCaught('messages.signedUrl', () => { if (on) setFailed(true); }));
     return () => { on = false; };
   }, [path, url]);
   if (failed) return <div className="mt-1 text-[11px] text-rose-300/70">Voice note unavailable</div>;
@@ -4922,10 +4995,11 @@ function DayDivider({ label }) {
  *  stays recognisable at a glance whether or not they've uploaded a photo.
  *  Photo -> two-letter initials -> silhouette. THEME-AWARE, and it must stay that way: `soft` is a 14%
  *  tint built for dark surfaces, so `soft` background + `hex` text is unreadable on light. Light mode
- *  therefore inverts to a solid `hex` fill with near-black text (the same swap AssigneeSelect used to
- *  hand-roll). Doing it here — rather than per call site — is what lets every avatar in the app be
- *  light-safe at once. NB: the [data-theme="light"] CSS rules are declared inside per-view <style>
- *  blocks, so they never reach a portaled modal; theme must be read from context, never assumed. */
+ *  therefore swaps to a soft hex tint with near-black text (a solid `hex` fill was tried first and read
+ *  as a wall of loud color discs). Doing it here — rather than per call site — is what lets every avatar
+ *  in the app be light-safe at once. NB on mechanism: inline styles are unaffected by the global
+ *  [data-theme="light"] override sheet either way, so theme is read from context — but do NOT repeat the
+ *  old claim that light CSS "never reaches portaled modals"; AppShell's sheet matches portals too. */
 function Avatar({ name, userId, photoUrl, size = 28, className }) {
   const { theme } = useApp();
   const light = theme === 'light';
@@ -4938,9 +5012,11 @@ function Avatar({ name, userId, photoUrl, size = 28, className }) {
     <span className={cx('rounded-full flex items-center justify-center font-semibold shrink-0 select-none overflow-hidden', className)}
       style={{
         width: size, height: size,
-        background: showPhoto ? 'transparent' : (light ? c.hex : c.soft),
+        // Light fallback: a SOFT tint + near-black text, not the former full-saturation disc — a board
+        // of solid color circles read louder than any content. Border keeps the identity hue at 35%.
+        background: showPhoto ? 'transparent' : (light ? c.hex + '26' : c.soft),
         color: light ? '#0b0b12' : c.hex,
-        border: `1px solid ${light ? c.hex : c.hex + '33'}`,
+        border: `1px solid ${light ? c.hex + '59' : c.hex + '33'}`,
         fontSize: Math.round(size * 0.36),
       }}>
       {showPhoto ? (
@@ -5252,7 +5328,7 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
     if (!body || sending) return;
     setSending(true);
     try { await onSubmitText(body, mns); setFailedBody(''); setFailedMentions([]); }
-    catch (e) { console.error('Message send failed:', e); setFailedBody(body); setFailedMentions(mns || []); }
+    catch (e) { reportError(e, 'messages.send'); setFailedBody(body); setFailedMentions(mns || []); }
     finally { setSending(false); }
   };
   const submit = () => { const body = text.trim(); if (!body) return; const mns = mentions; setText(''); setMentions([]); onStopTyping?.(); doSend(body, mns); };
@@ -5356,7 +5432,7 @@ function ChatView() {
   // Sender names from members.
   useEffect(() => {
     let on = true;
-    membersApi.list().then(list => { if (on) setPeople(Object.fromEntries((list || []).map(m => [m.id, m]))); }).catch(() => {});
+    membersApi.list().then(list => { if (on) setPeople(Object.fromEntries((list || []).map(m => [m.id, m]))); }).catch(logCaught('members.list for chat'));
     return () => { on = false; };
   }, []);
 
@@ -5364,7 +5440,7 @@ function ChatView() {
   useEffect(() => {
     if (!currentWorkspaceId) return;
     let on = true;
-    messagesApi.list(200, currentWorkspaceId).then(list => { if (on) { setItems(list); setHasMore(list.length >= 200); } }).catch(e => console.error('Failed to load messages:', e)).finally(() => { if (on) setLoading(false); });
+    messagesApi.list(200, currentWorkspaceId).then(list => { if (on) { setItems(list); setHasMore(list.length >= 200); } }).catch(e => reportError(e, 'messages.list')).finally(() => { if (on) setLoading(false); });
     markChatRead();
     const unsub = messagesApi.subscribe(({ type, message }) => {
       if (!message || !on) return;
@@ -5390,7 +5466,7 @@ function ChatView() {
       const page = await messagesApi.listBefore(oldest.createdAt, 200, currentWorkspaceId);
       if (page.length) setItems(prev => { const seen = new Set(prev.map(m => m.id)); return [...page.filter(m => !seen.has(m.id)), ...prev]; });
       setHasMore(page.length >= 200);
-    } catch (e) { console.error('Load older messages failed:', e); }
+    } catch (e) { reportError(e, 'messages.loadOlder'); }
     finally { loadingOlderRef.current = false; setLoadingOlder(false); }
   }, [items, currentWorkspaceId]);
 
@@ -5452,7 +5528,7 @@ function ChatView() {
             return rest.some(m => m.id === created.id) ? rest : [...rest, created];
           });
         } catch (e) {
-          console.error('Voice send failed:', e);
+          reportError(e, 'messages.voiceSend');
           URL.revokeObjectURL(localUrl);
           setItems(prev => prev.filter(m => m.id !== tempId));
           setMicError('Failed to send voice note.');
@@ -5466,7 +5542,7 @@ function ChatView() {
       signalRecording(true);
       timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
     } catch (e) {
-      console.error('Mic error:', e);
+      reportError(e, 'voice.mic');
       setMicError('Microphone access was denied or unavailable.');
     }
   };
@@ -5485,14 +5561,14 @@ function ChatView() {
   const remove = async (m) => {
     setItems(prev => prev.map(x => x.id === m.id ? { ...x, body: null, audioPath: null, deletedAt: nowISO() } : x));
     try { await messagesApi.softDelete(m); }
-    catch (e) { console.error('Delete failed:', e); messagesApi.list(200, currentWorkspaceId).then(setItems).catch(() => {}); }
+    catch (e) { reportError(e, 'messages.delete'); messagesApi.list(200, currentWorkspaceId).then(setItems).catch(logCaught('messages.reconcile')); }
   };
 
   // Edit own text in place; the DB trigger enforces the 10-minute window + stamps edited_at.
   const edit = async (m, body) => {
     setItems(prev => prev.map(x => x.id === m.id ? { ...x, body, editedAt: nowISO() } : x));
     try { await messagesApi.update(m.id, body); }
-    catch (e) { console.error('Edit failed:', e); messagesApi.list(200, currentWorkspaceId).then(setItems).catch(() => {}); }
+    catch (e) { reportError(e, 'messages.edit'); messagesApi.list(200, currentWorkspaceId).then(setItems).catch(logCaught('messages.reconcile')); }
   };
 
   return (
@@ -5656,7 +5732,7 @@ function DirectMessagesView() {
               className={cx('w-full flex items-center gap-2.5 px-3 py-2.5 transition-colors',
                 selected ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]')}>
               <PersonButton personId={c.peerId} className="shrink-0" title={a.label === 'Me' ? 'Your profile' : `View ${a.label}'s profile`}>
-                <Avatar name={a.label === 'Me' ? 'You' : a.label} userId={c.peerId} photoUrl={a.avatarUrl} size={32} />
+                <Avatar name={a.known ? (a.label === 'Me' ? 'You' : a.label) : ''} userId={c.peerId} photoUrl={a.avatarUrl} size={32} />
               </PersonButton>
               <button onClick={() => setDmActiveConv(c.id)} className="flex-1 min-w-0 text-left">
                 <span className="flex items-center justify-between gap-2">
@@ -5688,6 +5764,7 @@ function DirectMessagesView() {
         [data-theme="light"] .cc-chat .bg-violet-500\\/25 { background: rgba(124,58,237,0.16) !important; }
         [data-theme="light"] .cc-chat .border-violet-400\\/30 { border-color: rgba(124,58,237,0.4) !important; }
         [data-theme="light"] .cc-chat .bg-white\\/\\[0\\.05\\] { background: rgba(0,0,0,0.06) !important; }
+        [data-theme="light"] .cc-chat .bg-violet-400\\/70 { background: #7c3aed !important; }
       `}</style>
       {/* List: always shown on lg; on small screens shown only when no thread is open */}
       <aside className={cx('w-full lg:w-80 lg:shrink-0 lg:border-r border-white/5 h-full', active ? 'hidden lg:flex lg:flex-col' : 'flex flex-col')}>
@@ -5760,7 +5837,7 @@ function DmThread({ conversationId, peerId, onBack }) {
   const refreshReads = useCallback(() => {
     directMessagesApi.reads(conversationId)
       .then(rs => { const p = rs.find(r => r.userId === peerId); setPeerReadAt(p?.lastReadAt || null); })
-      .catch(() => {});
+      .catch(logCaught('dms.reads'));
   }, [conversationId, peerId]);
 
   // Load + subscribe to this thread. (My read cursor is advanced by the latest-message effect below,
@@ -5769,7 +5846,7 @@ function DmThread({ conversationId, peerId, onBack }) {
     let on = true;
     directMessagesApi.listMessages(conversationId, 200)
       .then(list => { if (on) { setItems(list); setHasMore(list.length >= 200); } })
-      .catch(e => console.error('Failed to load DM thread:', e))
+      .catch(e => reportError(e, 'dms.listMessages'))
       .finally(() => { if (on) setLoading(false); });
     refreshReads();
     const unsub = directMessagesApi.subscribeThread(({ type, message }) => {
@@ -5850,7 +5927,7 @@ function DmThread({ conversationId, peerId, onBack }) {
         {/* Seen shows the peer's face (the Messenger convention) — it reads faster than a tick and it's
             unambiguous about WHO saw it. Sent keeps the plain tick: nobody has seen it yet. */}
         {seen
-          ? <><Avatar name={peerName} userId={peerId} photoUrl={peer.avatarUrl} size={14} /><span className="text-violet-400/80">Seen</span></>
+          ? <><Avatar name={peer.known ? peerName : ''} userId={peerId} photoUrl={peer.avatarUrl} size={14} /><span className="text-violet-400/80">Seen</span></>
           : <><Check className="w-3 h-3 text-white/35" /><span className="text-white/35">Sent</span></>}
       </div>
     );
@@ -5899,7 +5976,7 @@ function DmThread({ conversationId, peerId, onBack }) {
             return rest.some(m => m.id === created.id) ? rest : [...rest, created];
           });
         } catch (e) {
-          console.error('DM voice send failed:', e);
+          reportError(e, 'dms.voiceSend');
           URL.revokeObjectURL(localUrl);
           setItems(prev => prev.filter(m => m.id !== tempId));
           setMicError('Failed to send voice note.');
@@ -5913,7 +5990,7 @@ function DmThread({ conversationId, peerId, onBack }) {
       signalRecording(true);
       timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
     } catch (e) {
-      console.error('Mic error:', e);
+      reportError(e, 'voice.mic');
       setMicError('Microphone access was denied or unavailable.');
     }
   };
@@ -5932,14 +6009,14 @@ function DmThread({ conversationId, peerId, onBack }) {
   const remove = async (m) => {
     setItems(prev => prev.map(x => x.id === m.id ? { ...x, body: null, audioPath: null, deletedAt: nowISO() } : x));
     try { await directMessagesApi.softDelete(m); }
-    catch (e) { console.error('DM delete failed:', e); directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(() => {}); }
+    catch (e) { reportError(e, 'dms.delete'); directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(logCaught('dms.reconcile')); }
   };
 
   // Edit own DM text in place; the DB trigger enforces the 10-minute window + stamps edited_at.
   const edit = async (m, body) => {
     setItems(prev => prev.map(x => x.id === m.id ? { ...x, body, editedAt: nowISO() } : x));
     try { await directMessagesApi.update(m.id, body); }
-    catch (e) { console.error('DM edit failed:', e); directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(() => {}); }
+    catch (e) { reportError(e, 'dms.edit'); directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(logCaught('dms.reconcile')); }
   };
 
   // 5c: fetch the previous page of this thread and prepend it (dedupe by id). Guarded against concurrent runs.
@@ -5952,7 +6029,7 @@ function DmThread({ conversationId, peerId, onBack }) {
       const page = await directMessagesApi.listMessagesBefore(conversationId, oldest.createdAt, 200);
       if (page.length) setItems(prev => { const seen = new Set(prev.map(m => m.id)); return [...page.filter(m => !seen.has(m.id)), ...prev]; });
       setHasMore(page.length >= 200);
-    } catch (e) { console.error('Load older DMs failed:', e); }
+    } catch (e) { reportError(e, 'dms.loadOlder'); }
     finally { loadingOlderRef.current = false; setLoadingOlder(false); }
   }, [items, conversationId]);
 
@@ -5961,7 +6038,7 @@ function DmThread({ conversationId, peerId, onBack }) {
       <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2.5 shrink-0">
         <button onClick={onBack} className="lg:hidden text-white/50 hover:text-white/80 -ml-1"><ChevronRight className="w-4 h-4 rotate-180" /></button>
         <PersonButton personId={peerId} className="gap-2.5 min-w-0 flex-1" title={isSelf ? 'Your profile' : `View ${peerName}'s profile`}>
-          <MsgAvatar name={peerName} userId={peerId} photoUrl={peer.avatarUrl} size={32} />
+          <MsgAvatar name={peer.known ? peerName : ''} userId={peerId} photoUrl={peer.avatarUrl} size={32} />
           <div className="min-w-0 text-left">
             <div className="text-sm font-semibold text-white/90 leading-tight truncate">{isSelf ? 'You' : peerName}</div>
             {/* The subtitle was a static string; the peer's live status is far more useful here. */}
@@ -5990,7 +6067,7 @@ function DmThread({ conversationId, peerId, onBack }) {
         receiptFor={receiptFor}
         empty={(
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-10">
-            <MsgAvatar name={peerName} userId={peerId} photoUrl={peer.avatarUrl} size={48} />
+            <MsgAvatar name={peer.known ? peerName : ''} userId={peerId} photoUrl={peer.avatarUrl} size={48} />
             <div className="text-sm font-medium text-white/70">{isSelf ? 'Notes to self' : peerName}</div>
             <div className="text-[12px] text-white/40">{isSelf ? 'Jot down anything you want to remember.' : 'Say hello 👋'}</div>
           </div>
@@ -5999,8 +6076,10 @@ function DmThread({ conversationId, peerId, onBack }) {
 
       {!isSelf && <TypingStrip label={shownTyping} />}
 
+      {/* meId: the "you, about to speak" composer avatar — ChatView passed it, DMs didn't (shipped inconsistency). */}
       <Composer
         placeholder={isSelf ? 'Write a note to yourself…' : `Message ${peerName}…  (Enter to send)`}
+        meId={userId}
         onSubmitText={sendText}
         onTyping={isSelf ? undefined : signalTyping}
         onStopTyping={isSelf ? undefined : stopTyping}
@@ -6036,7 +6115,7 @@ function OnboardingScreen({ onSignOut }) {
             {pendingInvites.map(inv => (
               <div key={inv.id} className="flex items-center justify-between gap-2">
                 <div className="text-sm text-white/90 truncate">Join <span className="font-semibold">{inv.workspaceName}</span></div>
-                <button onClick={() => acceptInvitation(inv.token).catch(err => console.error('accept invite failed:', err))}
+                <button onClick={() => acceptInvitation(inv.token).catch(err => reportError(err, 'invitations.accept'))}
                   className="shrink-0 h-8 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-semibold active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">Accept</button>
               </div>
             ))}
@@ -6080,7 +6159,7 @@ function MembersView() {
     let alive = true;
     invitationsApi.listForWorkspace(currentWorkspaceId)
       .then(d => { if (alive) setInvites(d); })
-      .catch(e => console.error('load invites failed:', e));
+      .catch(e => reportError(e, 'invitations.list'));
     return () => { alive = false; };
   }, [currentWorkspaceId, canManageMembers, reloadKey]);
 
@@ -6118,7 +6197,7 @@ function MembersView() {
 
   const revoke = async (id) => {
     try { await invitationsApi.revoke(id); reload(); }
-    catch (e) { console.error('revoke failed:', e); }
+    catch (e) { reportError(e, 'invitations.revoke'); }
   };
 
   const pending = invites.filter(i => i.status === 'pending');
@@ -6222,7 +6301,7 @@ function MembersView() {
                 </PersonButton>
                 <div className="shrink-0 flex items-center gap-2">
                   {!isSelf && (
-                    <button onClick={() => startDm(m.userId).catch(() => {})} title={`Message ${m.displayName || m.email}`}
+                    <button onClick={() => startDm(m.userId).catch(logCaught('dms.start from members'))} title={`Message ${m.displayName || m.email}`}
                       className="text-[11px] px-2 h-7 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 inline-flex items-center gap-1 transition-colors">
                       <MessagesSquare className="w-3 h-3" />Message
                     </button>
@@ -6357,7 +6436,7 @@ function AppShell() {
         /* Accent TEXT: dark-mode accents are bright (readable on dark) but wash out on light-tinted
            surfaces — mention pills, the recurrence preview chip, badges, links, the DM "Seen" tick,
            and error text. Darken them for light mode (the heroes are re-exempted below). */
-        [data-theme="light"] .text-violet-100, [data-theme="light"] .text-violet-200, [data-theme="light"] .text-violet-300, [data-theme="light"] .text-violet-400, [data-theme="light"] .text-violet-300\\/70, [data-theme="light"] .text-violet-300\\/80, [data-theme="light"] .text-violet-200\\/90, [data-theme="light"] .text-violet-200\\/80, [data-theme="light"] .text-violet-100\\/90 { color: #6d28d9 !important; }
+        [data-theme="light"] .text-violet-100, [data-theme="light"] .text-violet-200, [data-theme="light"] .text-violet-300, [data-theme="light"] .text-violet-400, [data-theme="light"] .text-violet-400\\/80, [data-theme="light"] .text-violet-300\\/70, [data-theme="light"] .text-violet-300\\/80, [data-theme="light"] .text-violet-200\\/90, [data-theme="light"] .text-violet-200\\/80, [data-theme="light"] .text-violet-100\\/90 { color: #6d28d9 !important; }
         [data-theme="light"] .text-emerald-200, [data-theme="light"] .text-emerald-300, [data-theme="light"] .text-emerald-400, [data-theme="light"] .text-emerald-300\\/80 { color: #047857 !important; }
         [data-theme="light"] .text-amber-100, [data-theme="light"] .text-amber-200, [data-theme="light"] .text-amber-300 { color: #b45309 !important; }
         [data-theme="light"] .text-sky-300, [data-theme="light"] .text-sky-400 { color: #0369a1 !important; }
@@ -6370,13 +6449,44 @@ function AppShell() {
         [data-theme="light"] .from-\\[\\#0d2a20\\] .text-emerald-200, [data-theme="light"] .from-\\[\\#0d2a20\\] .text-emerald-300, [data-theme="light"] .from-\\[\\#0d2a20\\] .text-emerald-400 { color: #a7f3d0 !important; }
         [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-200, [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-300, [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-400 { color: #c4b5fd !important; }
         [data-theme="light"] .border-white\\/5, [data-theme="light"] .border-white\\/10, [data-theme="light"] .border-white\\/\\[0\\.06\\], [data-theme="light"] .border-white\\/\\[0\\.08\\] { border-color: rgba(0,0,0,0.08) !important; }
-        [data-theme="light"] .bg-white\\/\\[0\\.04\\], [data-theme="light"] .bg-white\\/\\[0\\.03\\], [data-theme="light"] .bg-white\\/\\[0\\.02\\], [data-theme="light"] .bg-white\\/\\[0\\.015\\], [data-theme="light"] .bg-white\\/\\[0\\.005\\], [data-theme="light"] .bg-white\\/5 { background: rgba(0,0,0,0.025) !important; }
-        [data-theme="light"] .bg-white\\/\\[0\\.08\\], [data-theme="light"] .bg-white\\/10 { background: rgba(0,0,0,0.06) !important; }
+        [data-theme="light"] .bg-white\\/\\[0\\.03\\], [data-theme="light"] .bg-white\\/\\[0\\.02\\], [data-theme="light"] .bg-white\\/\\[0\\.015\\], [data-theme="light"] .bg-white\\/\\[0\\.01\\], [data-theme="light"] .bg-white\\/\\[0\\.005\\], [data-theme="light"] .bg-white\\/5 { background: rgba(0,0,0,0.025) !important; }
+        /* [0.04] lives in the STRONGER group on purpose: it's the Kanban drag-over fill, and mapping it
+           to the same value as the idle [0.015] made the drop-target highlight literally zero-delta. */
+        [data-theme="light"] .bg-white\\/\\[0\\.08\\], [data-theme="light"] .bg-white\\/\\[0\\.06\\], [data-theme="light"] .bg-white\\/\\[0\\.05\\], [data-theme="light"] .bg-white\\/\\[0\\.04\\], [data-theme="light"] .bg-white\\/10, [data-theme="light"] .bg-white\\/15 { background: rgba(0,0,0,0.06) !important; }
         /* Dropdown active-row + mention-pill accent: a legible violet in light mode (the plain white-alpha wash was near-invisible). */
         [data-theme="light"] .bg-violet-500\\/25, [data-theme="light"] .bg-violet-500\\/20 { background: rgba(124,58,237,0.16) !important; }
         [data-theme="light"] .search-input { background: #ffffff !important; border-color: rgba(0,0,0,0.12) !important; color: #17181c !important; }
         [data-theme="light"] .search-input::placeholder { color: rgba(0,0,0,0.4) !important; }
-        [data-theme="light"] .hover\\:bg-white\\/5:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.04\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.06\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.07\\]:hover, [data-theme="light"] .hover\\:bg-white\\/10:hover { background: rgba(0,0,0,0.04) !important; }
+        [data-theme="light"] .hover\\:bg-white\\/5:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.03\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.04\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.06\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.07\\]:hover, [data-theme="light"] .hover\\:bg-white\\/10:hover { background: rgba(0,0,0,0.04) !important; }
+        /* Post-merge light gaps (2026-07-18): the @mention pill's hover had no light rule (the !important
+           base swallowed it — hover did nothing); the selected-emoji ring was a washed-out pale violet;
+           and hover:text-white(/80) hovers were dead because only their base classes were remapped. */
+        [data-theme="light"] .hover\\:bg-violet-500\\/30:hover { background: rgba(124,58,237,0.3) !important; }
+        [data-theme="light"] .ring-violet-400\\/50 { --tw-ring-color: rgba(109,40,217,0.55) !important; }
+        [data-theme="light"] .hover\\:text-white\\/80:hover { color: #17181c !important; }
+        [data-theme="light"] .hover\\:text-white:hover { color: #17181c !important; }
+        /* Verified-sweep additions (2026-07-18): remaining unmapped dark-only tokens found by the
+           post-fix audit — surfaces (toast/tooltip), accent-button text, focus affordances, input
+           wells, scrollbars, drag targets, selection states, and alpha steps the base lists missed. */
+        [data-theme="light"] .bg-\\[\\#0f1017\\]\\/90 { background: rgba(255,255,255,0.92) !important; }
+        [data-theme="light"] .bg-black\\/90 { background: #17181c !important; color: #ffffff !important; border-color: rgba(255,255,255,0.15) !important; }
+        [data-theme="light"] .bg-violet-500, [data-theme="light"] .bg-violet-500 .text-white, [data-theme="light"] .bg-rose-500, [data-theme="light"] .bg-rose-500 .text-white, [data-theme="light"] .bg-emerald-500, [data-theme="light"] .bg-emerald-500 .text-white, [data-theme="light"] .from-violet-500, [data-theme="light"] .from-violet-500 .text-white, [data-theme="light"] .from-rose-500, [data-theme="light"] .from-rose-500 .text-white { color: #ffffff !important; }
+        [data-theme="light"] .focus\\:border-violet-400\\/60:focus, [data-theme="light"] .focus\\:border-violet-400\\/50:focus, [data-theme="light"] .focus\\:border-violet-400\\/40:focus { border-color: rgba(109,40,217,0.55) !important; }
+        [data-theme="light"] .focus\\:border-rose-400\\/50:focus { border-color: rgba(190,18,60,0.55) !important; }
+        [data-theme="light"] .focus\\:border-white\\/25:focus { border-color: rgba(0,0,0,0.3) !important; }
+        [data-theme="light"] .bg-black\\/30 { background: rgba(0,0,0,0.05) !important; }
+        [data-theme="light"] .focus\\:bg-black\\/40:focus { background: rgba(0,0,0,0.08) !important; }
+        [data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border: 2px solid transparent; background-clip: padding-box; }
+        [data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); border: 2px solid transparent; background-clip: padding-box; }
+        [data-theme="light"] .border-white\\/25, [data-theme="light"] .border-white\\/30 { border-color: rgba(0,0,0,0.3) !important; }
+        [data-theme="light"] .border-white\\/\\[0\\.04\\], [data-theme="light"] .border-white\\/\\[0\\.07\\] { border-color: rgba(0,0,0,0.08) !important; }
+        [data-theme="light"] .ring-white\\/70 { --tw-ring-color: rgba(0,0,0,0.45) !important; }
+        [data-theme="light"] .hover\\:text-white\\/90:hover { color: #17181c !important; }
+        [data-theme="light"] .hover\\:text-white\\/70:hover { color: #3a3c44 !important; }
+        [data-theme="light"] .focus\\:text-rose-300:focus { color: #be123c !important; }
+        [data-theme="light"] .group:hover .group-hover\\:text-violet-200 { color: #6d28d9 !important; }
+        [data-theme="light"] .hover\\:border-white\\/10:hover, [data-theme="light"] .hover\\:border-white\\/15:hover, [data-theme="light"] .hover\\:border-white\\/20:hover, [data-theme="light"] .hover\\:border-white\\/25:hover { border-color: rgba(0,0,0,0.18) !important; }
+        [data-theme="light"] .hover\\:bg-white\\/\\[0\\.05\\]:hover { background: rgba(0,0,0,0.04) !important; }
 
         /* Action buttons — keep dark-on-light for "New" button */
         [data-theme="light"] .bg-white { background: #17181c !important; color: #ffffff !important; }
@@ -6410,17 +6520,20 @@ function AppShell() {
         <main className="flex-1 overflow-y-auto px-4 lg:px-6 py-6 pb-24 lg:pb-10">
           <div className="max-w-[1400px] mx-auto animate-[slideUp_.25s_ease]" key={view}>
             <Routes>
-              <Route path="/" element={<DashboardView />} />
-              <Route path="/kanban" element={<KanbanView />} />
-              <Route path="/priority-matrix" element={<MatrixView />} />
-              <Route path="/projects" element={<ProjectsView />} />
-              <Route path="/schedule" element={<ScheduleView />} />
-              <Route path="/my-tasks" element={<MyTasksView />} />
+              {/* Per-view boundaries: a render throw inside one view shows an inline fallback while the
+                  shell (sidebar/top bar/nav) stays alive. Navigating away unmounts the boundary, so the
+                  next visit always retries fresh. */}
+              <Route path="/" element={<ErrorBoundary name="dashboard"><DashboardView /></ErrorBoundary>} />
+              <Route path="/kanban" element={<ErrorBoundary name="kanban"><KanbanView /></ErrorBoundary>} />
+              <Route path="/priority-matrix" element={<ErrorBoundary name="matrix"><MatrixView /></ErrorBoundary>} />
+              <Route path="/projects" element={<ErrorBoundary name="projects"><ProjectsView /></ErrorBoundary>} />
+              <Route path="/schedule" element={<ErrorBoundary name="schedule"><ScheduleView /></ErrorBoundary>} />
+              <Route path="/my-tasks" element={<ErrorBoundary name="my-tasks"><MyTasksView /></ErrorBoundary>} />
               <Route path="/va-desk" element={<RedirectToMyTasks />} />
-              <Route path="/private" element={<PrivateView />} />
-              <Route path="/chat" element={<ChatView />} />
-              <Route path="/dms" element={<DirectMessagesView />} />
-              <Route path="/members" element={<MembersView />} />
+              <Route path="/private" element={<ErrorBoundary name="private"><PrivateView /></ErrorBoundary>} />
+              <Route path="/chat" element={<ErrorBoundary name="chat"><ChatView /></ErrorBoundary>} />
+              <Route path="/dms" element={<ErrorBoundary name="dms"><DirectMessagesView /></ErrorBoundary>} />
+              <Route path="/members" element={<ErrorBoundary name="members"><MembersView /></ErrorBoundary>} />
               {/* Has a workspace, so onboarding isn't applicable — send it back to the app. */}
               <Route path="/onboarding" element={<Navigate to="/" replace />} />
               <Route path="*" element={<Navigate to="/" replace />} />

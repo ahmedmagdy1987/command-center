@@ -26,11 +26,15 @@ alter table public.members
   add column if not exists status_emoji  text;
 
 -- shared homoglyph-normalized role/title check (used by the trigger AND handle_new_user)
+-- ANCHORED since 20260718 (see that migration): the WHOLE folded/stripped value must BE a
+-- role title — optionally 'the'-prefixed, scope-prefixed, or pluralized — never merely
+-- CONTAIN one. Kept in sync with live here so this suite tests the rule that actually ships.
+-- Every blocked-value assertion below uses a BARE role word, so all of them still hold.
 create or replace function private._looks_like_role_title(p_text text) returns boolean
 language sql immutable set search_path to '' as $fn$
   select p_text is not null
     and regexp_replace(lower(normalize(p_text, NFKC)), '[^a-z0-9]', '', 'g')
-          ~ '(owner|admin|administrator|moderator|superadmin|sysadmin|superuser|founder|official|staff|verified)';
+          ~ '^(the)?(workspace|team|site|app|global|super|sys)?(owner|admin|administrator|moderator|superadmin|sysadmin|superuser|founder|official|staff|verified)s?$';
 $fn$;
 revoke all on function private._looks_like_role_title(text) from public, anon, authenticated;
 
