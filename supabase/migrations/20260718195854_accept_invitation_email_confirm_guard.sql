@@ -1,40 +1,31 @@
--- ============================================================================
--- PROPOSED — NOT APPLIED, NOT A LEDGER MIGRATION (2026-07-18)
 -- Invitation defense-in-depth: _accept_invitation rejects unconfirmed emails.
 --
--- Lives in supabase/proposed/ so it survives a Deep Freeze wipe while awaiting
--- (a) the owner's approval and (b) an MCP-enabled session (launch Claude from
--- inside the repo, RESTORE.md §4). On apply, this becomes a real migration file
--- named with the version the remote ledger assigns (list_migrations).
+-- WHY: the whole email-bound invite model trusts that auth.users.email is VERIFIED.
+-- That guarantee rested solely on the dashboard "Confirm email" toggle (verified ON
+-- 2026-07-18 via /auth/v1/settings mailer_autoconfirm:false) — but a toggle can be
+-- flipped. This asserts the invariant in the DB itself.
 --
--- WHY: the whole email-bound invite model trusts that auth.users.email is
--- VERIFIED. That guarantee currently rests on the dashboard "Confirm email"
--- toggle (verified ON on 2026-07-18 via /auth/v1/settings mailer_autoconfirm:false)
--- — but a toggle can be flipped. This asserts the invariant in the DB itself.
---
--- HONEST LIMITATION (decide with eyes open): if "Confirm email" is ever flipped
--- OFF (autoconfirm), GoTrue stamps email_confirmed_at AT SIGNUP without any
--- verification — so this guard alone does NOT block an attacker who signs up
--- with a victim's invited email while autoconfirm is on. What it DOES close:
--- accounts that exist without a confirmed email through any other path
--- (admin-created users, interrupted confirm flows, future auth providers,
+-- HONEST LIMITATION: if "Confirm email" is ever flipped OFF (autoconfirm), GoTrue
+-- stamps email_confirmed_at AT SIGNUP without verification — so this guard alone does
+-- NOT block an attacker who signs up with a victim's invited email while autoconfirm
+-- is on. What it DOES close: accounts existing without a confirmed email through any
+-- other path (admin-created users, interrupted confirm flows, future auth providers,
 -- pre-toggle legacy accounts), and it turns a silent config dependency into an
--- explicit, tested server-side rule. Cheap, real, but not a substitute for
--- keeping Confirm email ON.
+-- explicit, tested server-side rule. Not a substitute for keeping Confirm email ON.
 --
--- PRE-APPLY RECON (MCP session):
---   1. select count(*) from auth.users where email_confirmed_at is null;
---      -> expect 0 (nobody legitimate gets locked out; if >0, review each).
---   2. Read live prosrc of private._accept_invitation; confirm it matches the
---      ledger body (20260602041903) — no out-of-band drift to preserve.
---   3. Re-confirm GET /auth/v1/settings -> mailer_autoconfirm:false.
--- APPLY DISCIPLINE: rolled-back proof green -> owner approval -> apply_migration
---   -> advisors -> 48/48 isolation + 143/143 role regression -> ledger-named
---   migration file -> commit + push.
--- ============================================================================
+-- Body is the 20260602041903 body verbatim plus the guard (marked NEW); invite-as-role
+-- behavior preserved (inv.role is applied).
+--
+-- Proven by a rolled-back 17/17 proof (2026-07-18): RED confirmed an unconfirmed
+-- account accepts today AND gets the membership row; after the fix unconfirmed → 42501
+-- with no membership row and the invite left 'pending'; the guard precedes the token
+-- lookup so a garbage token yields no P0002 validity oracle; confirmed still accepts,
+-- idempotent re-accept works, expired/revoked/wrong-email rejections intact,
+-- unauthenticated still 'not authenticated', invite-as-role preserved (joined as
+-- guest), DEFINER + search_path + authenticated-only EXECUTE survive the replace.
+-- Recon: live body matched the ledger (no drift); 0 pre-existing unconfirmed users,
+-- so no real user is locked out.
 
--- Full CREATE OR REPLACE: the 20260602041903 body verbatim, plus the guard
--- (marked NEW). invite-as-role behavior is preserved (inv.role is applied).
 create or replace function private._accept_invitation(p_token uuid)
 returns public.workspaces language plpgsql security definer set search_path = '' as $$
 declare inv public.invitations; v_email text; v_confirmed timestamptz; ws public.workspaces;
@@ -69,7 +60,7 @@ begin
   return ws;
 end; $$;
 
--- Idempotent replay: re-assert the grants (CREATE OR REPLACE preserves ACLs on
--- an existing function, but a from-zero replay needs them stated).
+-- Idempotent replay: re-assert the grants (CREATE OR REPLACE preserves ACLs on an
+-- existing function, but a from-zero replay needs them stated).
 revoke all on function private._accept_invitation(uuid) from public;
 grant execute on function private._accept_invitation(uuid) to authenticated;

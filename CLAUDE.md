@@ -1,7 +1,8 @@
 # Command Center — project guide for Claude
 
 > Orientation file so any future session is instantly up to speed. Last verified against the
-> live DB on **2026-07-15** — current through `20260715142424` (task_attachment_sweep_age_guard);
+> live DB on **2026-07-18** — current through `20260718195854`
+> (accept_invitation_email_confirm_guard); see *DB pass (2026-07-18)*. Earlier anchor:
 > **task file attachments** shipped 2026-07-12 (see *Task attachments*). Two production bugs were found
 > and fixed on 2026-07-15 — a live self-service **impersonation** hole and an orphan sweep that could
 > **delete live uploads**; see *Bug-fix pass (2026-07-15)*. The
@@ -581,6 +582,55 @@ Files on a task (briefs, deliverables, images, docs). Three DB migrations + a cl
   authorize it) then the row. Client MIME/size/count checks are UX only — the server RLS/bucket is authoritative.
 - **Proven:** feasibility A-E 14/14 (delegation matrix + happy path + outsider blocks); quotas (size, per-task
   20, rate 60 delete-resistant); orphan sweep 5/5; regression isolation 36/36 + role 40/40 + storage 14/14.
+
+## DB pass (2026-07-18) — anchored role-title rule + invite email-confirm guard
+
+Two DB-only migrations, both with the full discipline (recon → rolled-back proof → owner approval →
+apply → advisors → 48/48 + 143/143 regression → ledger-named file → commit). Advisors clean (only the
+accepted `auth_leaked_password_protection` WARN).
+
+- **Anchored role-title matching** (`20260718195827`). `private._looks_like_role_title` SUBSTRING-matched
+  the folded/stripped text, so **any value CONTAINING a role word was rejected** — `staff meeting`,
+  `verified the deploy`, `on official leave`, and the name `Staffan` all failed as "impersonation". The
+  rule is now **ANCHORED** (`^…$`): the WHOLE folded value must BE a role title, optionally
+  `the`-prefixed, scope-prefixed (`workspace|team|site|app|global|super|sys`), or pluralized. The NFKC
+  fold + separator strip are UNCHANGED from `20260716110514`, so every lookalike class still dies:
+  `A D M I N`, fullwidth `ａｄｍｉｎ`, math-bold, zero-width-split, `-- Admin --`, `Workspace Owner`,
+  `The Admin`, `Admins`, `owner.`, `sysadmin`, `superuser`. **Proven 31/31 rolled-back** (3 RED
+  anti-vacuity + RLS-live control + 14 blocked + 7 allowed + 4 e2e through the live trigger + a
+  no-regression scan). The rule is strictly NARROWER than the old one, so no already-stored value can
+  become newly invalid.
+  **→ ACCEPTED WIDENING (ratified, not an oversight):** a role word with a **suffix** now passes —
+  `Admin — Tony`, `Owner | Ops`. Blocking those while allowing `staff meeting` is not expressible in one
+  regex (a leading-anchor rule would re-reject `verified the deploy`). Cyrillic/Greek confusables and
+  leetspeak remain documented residuals, unchanged.
+  **→ Landmine:** `supabase/tests/profile_and_avatar_rolled_back_proof.sql` RE-CREATES this function
+  inside its own transaction. It was updated in the same commit to the anchored body. **If you change
+  this rule again, change it there too** — otherwise that suite silently tests a body that no longer
+  ships. (Its 40 assertions all use BARE role words, so none depended on substring matching.)
+- **Invitation email-confirm guard** (`20260718195854`). `private._accept_invitation` now rejects a
+  caller whose `auth.users.email_confirmed_at IS NULL` (`42501`). The whole invite model is
+  **email-bound**, so its strength rested entirely on the dashboard Confirm-email toggle; this asserts
+  the invariant in the DB. The check runs **before the token is looked at**, so an unconfirmed account
+  gets no `P0002` oracle for token validity. **Proven 17/17 rolled-back** (RED confirmed the gap was
+  live; then unconfirmed→42501 with no membership row and the invite left `pending`; confirmed still
+  accepts; idempotent re-accept, expired/revoked/wrong-email/unauthenticated paths all intact;
+  invite-as-role preserved). 0 pre-existing unconfirmed users, so nobody was locked out.
+  **→ HONEST LIMITATION (unchanged by this):** with autoconfirm ON, GoTrue stamps `email_confirmed_at`
+  at signup without verification, so this guard alone does NOT stop an attacker signing up as the
+  invited email. It closes never-confirmed accounts (admin-created, interrupted flows, future
+  providers, legacy) and makes a silent config dependency explicit. **Keeping Auth → Confirm email = ON
+  is still the real control** (V-1).
+  No app change needed: `InviteScreen.jsx:75` already renders `err.message`, and the guard's message is
+  written to be user-facing.
+
+**Proof-harness notes (reusable, learned live this pass):** an assertion running as `authenticated`
+**cannot INSERT into the temp results table** — either `grant insert on _r to authenticated` (it's
+scratch, nothing asserts on it) or `reset role` before each insert. `invitations` carries
+`invitations_one_pending` (UNIQUE `workspace_id, lower(email)` WHERE `status='pending'`), so a proof
+needing both a pending AND an expired invite for the same email must put them in **different
+workspaces**. And a bare `CREATE OR REPLACE FUNCTION` **cannot run inside a plpgsql `DO` block** — put
+the DDL under test at top level between the RED and GREEN blocks; it still rolls back.
 
 ## Bug-fix pass (2026-07-15) — two production bugs
 
