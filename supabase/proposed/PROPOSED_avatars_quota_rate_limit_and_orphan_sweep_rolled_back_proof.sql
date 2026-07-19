@@ -1,45 +1,36 @@
 -- ============================================================================================
--- ROLLED-BACK PROOF for PROPOSED_avatars_quota_rate_limit_and_orphan_sweep.sql  (38 assertions)
+-- ROLLED-BACK PROOF for PROPOSED_avatars_quota_rate_limit_and_orphan_sweep.sql  (37 assertions)
 -- STATUS: the change under test is NOT APPLIED. This whole file is ONE begin;…rollback; — nothing
 --         here commits, and no apply_migration is involved.
 -- ============================================================================================
 --
 -- ############################################################################################
--- ## THE PROOF FOUND A DEFECT IN THE PROPOSAL. D01 IS A DELIBERATE RED ASSERTION AND IS      ##
--- ## EXPECTED TO FAIL until the proposal is amended. Do NOT delete it to make the run green. ##
--- ##                                                                                          ##
--- ## `private._sweep_orphan_avatars()` AS PROPOSED cannot run at all. It raises                ##
--- ##   42501 "permission denied to set parameter session_replication_role".                    ##
--- ##                                                                                          ##
--- ## ROOT CAUSE (isolated to a 2-line repro, below). The proposal deviates from the shipped    ##
--- ## precedent 20260715142424 by swapping the `SET LOCAL` utility statement for the            ##
--- ## `set_config()` SQL FUNCTION, so it can save and restore the previous value. That swap is  ##
--- ## fatal. `session_replication_role` is a PGC_SUSET parameter, and `set_config()` requests    ##
--- ## the change with `superuser() ? PGC_SUSET : PGC_USERSET`. This project's `postgres` role    ##
--- ## is NOT a superuser (rolsuper=false, rolbypassrls=true), so the request downgrades to       ##
--- ## PGC_USERSET and is refused. The `SET` utility statement takes a different path and is      ##
--- ## permitted to the same role. SECURITY DEFINER does not help: the effective user inside the  ##
--- ## function is the OWNER, which is `postgres`, still not a superuser.                          ##
--- ##                                                                                          ##
--- ## Minimal repro (both run as postgres, identical function shape, one works, one does not):  ##
--- ##   create function f1() returns text language plpgsql security definer set search_path=''  ##
--- ##     as $$ begin set local session_replication_role = replica; return 'OK';                ##
--- ##          exception when others then return sqlstate; end $$;              --> OK          ##
--- ##   create function f2() returns text language plpgsql security definer set search_path=''  ##
--- ##     as $$ begin perform set_config('session_replication_role','replica',true);            ##
--- ##          return 'OK'; exception when others then return sqlstate; end $$;  --> 42501      ##
--- ##                                                                                          ##
--- ## FIX FOR THE PROPOSAL: use the precedent's idiom verbatim —                                 ##
--- ##   set local session_replication_role = replica;  …  set local session_replication_role = origin; ##
--- ## The save/restore the proposal was reaching for is unnecessary anyway: a SET LOCAL made     ##
--- ## inside a function that carries its own SET clause (here `set search_path=''`) is reverted  ##
--- ## automatically when the function exits.                                                     ##
--- ##                                                                                          ##
--- ## D02 applies exactly that one-idiom correction and proves the sweep then works. Every       ##
--- ## sweep assertion (S01-S09) runs against the CORRECTED body, so the sweep DESIGN — the age   ##
--- ## guard, the boundary, per-object suffix matching — is proven sound. The defect is in the    ##
--- ## implementation idiom only, and it is a hard failure, not a subtle one: the cron job would  ##
--- ## have errored on every single run and collected nothing, forever.                           ##
+-- ## HISTORY — THIS PROOF ALREADY CAUGHT ONE REAL DEFECT, AND THE PROPOSAL WAS FIXED.        ##
+-- ##                                                                                         ##
+-- ## The previous run was 37/38. The single failure (then-D01) was NOT a bad assertion — it   ##
+-- ## was a genuine defect in the proposal. `private._sweep_orphan_avatars()` used             ##
+-- ##     perform set_config('session_replication_role','replica', true);                      ##
+-- ## so it could save and restore the prior value. That body RAISES                           ##
+-- ##     42501 "permission denied to set parameter session_replication_role"                  ##
+-- ## on EVERY call. `session_replication_role` is PGC_SUSET; set_config() requests it at       ##
+-- ## `superuser() ? PGC_SUSET : PGC_USERSET`, and this project's `postgres` role is NOT a      ##
+-- ## superuser (rolsuper=false, rolbypassrls=true), so the request downgrades and is refused.  ##
+-- ## SECURITY DEFINER does not help — the effective user inside the function is the owner,     ##
+-- ## which is that same non-superuser postgres. The cron job would have errored every hour     ##
+-- ## forever and collected nothing, silently.                                                 ##
+-- ##                                                                                         ##
+-- ## THE PROPOSAL NOW USES THE SHIPPED PRECEDENT'S IDIOM (20260712124726 / 20260715142424):    ##
+-- ##     set local session_replication_role = replica;  …  set local session_replication_role = origin; ##
+-- ## The SET *utility statement* takes a different permission path and is accepted for this    ##
+-- ## role. The save/restore was dropped as unnecessary: a SET LOCAL made inside a function      ##
+-- ## that carries its own SET clause (this one has `set search_path=''`) reverts automatically  ##
+-- ## when the function exits.                                                                  ##
+-- ##                                                                                         ##
+-- ## CONSEQUENTLY THIS FILE NO LONGER CARRIES A RED DEFECT ASSERTION OR AN INLINE CORRECTION.  ##
+-- ## Section (2) installs the sweep VERBATIM FROM THE PROPOSAL and the proof simply runs it.   ##
+-- ## S00 is the surviving regression guard for that defect: it asserts the sweep — as the       ##
+-- ## proposal actually ships it — EXECUTES. If anyone ever "improves" the idiom back into       ##
+-- ## set_config(), S00 fails again. Every other assertion is unchanged from the 37 that passed. ##
 -- ############################################################################################
 --
 -- WHAT IS PROVEN
@@ -52,7 +43,8 @@
 --       NOTHING: `private._sweep_orphan_avatars` does not exist, no cron job references the bucket,
 --       and the one sweep that DOES exist (task-attachments) leaves it standing. Because the bucket
 --       is public=true, that orphan stays WORLD-READABLE forever.
---   CURE / GREEN (after applying the proposed DDL inside this transaction):
+--   CURE / GREEN (after applying the proposed DDL, verbatim, inside this transaction):
+--     * the sweep AS PROPOSED runs at all (S00 — the fixed defect, guarded against regression).
 --     * the SAME actor performing the SAME action RED accepted is now rejected (C01), and the SAME
 --       orphan RED showed surviving is now collected (S03).
 --     * 12/hr rate limit blocks the 13th AND is DELETE-RESISTANT (the 20260712111044 lesson: the log
@@ -273,54 +265,16 @@ create policy avatars_insert_own on storage.objects for insert to authenticated
     and private.user_avatar_object_count((select auth.uid())) < 20
     and private.avatar_upload_allowed());
 
--- the sweep, EXACTLY as proposed (set_config idiom) — D01 shows this body cannot run
+-- The sweep, EXACTLY as the proposal now ships it: the precedent's SET LOCAL utility statement, no
+-- set_config(), no save/restore. S00 below is the regression guard on this idiom.
 create or replace function private._sweep_orphan_avatars() returns void
 language plpgsql security definer set search_path='' as $fn$
-declare v_prev text;
 begin
-  select current_setting('session_replication_role', true) into v_prev;
-  perform set_config('session_replication_role','replica', true);
+  set local session_replication_role = replica;
 
   delete from storage.objects o
    where o.bucket_id = 'avatars'
      and o.created_at < now() - interval '1 hour'
-     and not exists (
-       select 1 from public.members m
-        where m.avatar_url is not null
-          and right(m.avatar_url, length(o.name)) = o.name);
-
-  perform set_config('session_replication_role', coalesce(v_prev,'origin'), true);
-end; $fn$;
-revoke execute on function private._sweep_orphan_avatars() from public, anon, authenticated;
-
--- ---------------------------------------------------------------------------
--- (2b) D01 — THE DEFECT. Expected to FAIL. See the banner at the top of this file.
--- ---------------------------------------------------------------------------
-do $defect$
-declare v_res text; v_msg text;
-begin
-  begin
-    perform private._sweep_orphan_avatars();
-    v_res := 'ran'; v_msg := '';
-  exception when others then v_res := sqlstate; v_msg := ' ('||sqlerrm||')'; end;
-  insert into _r values (23,
-    'D01 [DEFECT — EXPECTED RED] the sweep AS PROPOSED (set_config idiom) must execute; it raises 42501 permission denied to set parameter session_replication_role',
-    'ran', v_res||v_msg, v_res = 'ran');
-end
-$defect$;
-
--- ---------------------------------------------------------------------------
--- (2c) THE ONE-IDIOM CORRECTION — the precedent's SET LOCAL, verbatim from 20260715142424.
---      Everything else about the sweep is unchanged from the proposal.
--- ---------------------------------------------------------------------------
-create or replace function private._sweep_orphan_avatars() returns void
-language plpgsql security definer set search_path='' as $fn$
-begin
-  set local session_replication_role = replica;  -- bypass storage's direct-delete guard for this GC
-
-  delete from storage.objects o
-   where o.bucket_id = 'avatars'
-     and o.created_at < now() - interval '1 hour'   -- BUG B age guard: never race a live upload
      and not exists (
        select 1 from public.members m
         where m.avatar_url is not null
@@ -551,41 +505,43 @@ begin
        + (select count(*) from storage.objects where bucket_id='avatars' and name=v_red_orphan)
        + (select count(*) from public.members where id in (uS,uY) and avatar_url is not null)
     into v_n;
-  insert into _r values (25,'S01 [ANTI-VACUITY] 6 sweep fixtures + the RED orphan + 2 avatar_url references all exist pre-sweep','9',v_n::text,v_n=9);
+  insert into _r values (23,'S01 [ANTI-VACUITY] 6 sweep fixtures + the RED orphan + 2 avatar_url references all exist pre-sweep','9',v_n::text,v_n=9);
 
   -- ---- S02 mechanism (asserted pre-sweep, while BOTH folder-mates still exist) ----
   select (select count(*) from public.members m where m.avatar_url is not null and right(m.avatar_url,length(n_ref_old))    = n_ref_old)
        - (select count(*) from public.members m where m.avatar_url is not null and right(m.avatar_url,length(n_orphan_old)) = n_orphan_old)
     into v_n;
-  insert into _r values (26,'S02 suffix matching is per-OBJECT: the referenced name matches exactly 1 members row, its SAME-FOLDER neighbour matches 0','1 - 0 = 1',v_n::text,v_n=1);
+  insert into _r values (24,'S02 suffix matching is per-OBJECT: the referenced name matches exactly 1 members row, its SAME-FOLDER neighbour matches 0','1 - 0 = 1',v_n::text,v_n=1);
 
   -- ============================ INVOKE THE SWEEP ONCE ============================
+  -- S00 is the REGRESSION GUARD for the fixed defect: the proposal's own body, unmodified, must run.
+  -- The previous set_config() draft raised 42501 here on every call.
   begin
     perform private._sweep_orphan_avatars();
     v_res := 'ran';
   exception when others then v_res := sqlstate||' ('||sqlerrm||')'; end;
-  insert into _r values (24,'D02 [FIX for D01] with the precedent SET LOCAL idiom (20260715142424) the sweep executes','ran',v_res,v_res='ran');
+  insert into _r values (25,'S00 [REGRESSION GUARD - the fixed defect] the sweep AS PROPOSED (precedent SET LOCAL idiom, 20260715142424) EXECUTES; the set_config() variant raised 42501 here','ran',v_res,v_res='ran');
 
   select count(*) into v_n from storage.objects where bucket_id='avatars' and name=v_red_orphan;
-  insert into _r values (27,'S03 [CURE of R05] the SAME orphan RED showed surviving forever is now COLLECTED','0 (gone)',v_n::text,v_n=0);
+  insert into _r values (26,'S03 [CURE of R05] the SAME orphan RED showed surviving forever is now COLLECTED','0 (gone)',v_n::text,v_n=0);
 
   select count(*) into v_n from storage.objects where bucket_id='avatars' and name=n_ref_old;
-  insert into _r values (28,'S04 a REFERENCED object (2h) survives','1 (kept)',v_n::text,v_n=1);
+  insert into _r values (27,'S04 a REFERENCED object (2h) survives','1 (kept)',v_n::text,v_n=1);
 
   select count(*) into v_n from storage.objects where bucket_id='avatars' and name=n_orphan_old;
-  insert into _r values (29,'S05 [CORE] the folder-level FOOTGUN is avoided: an UNREFERENCED 2h object in the SAME uid folder as a referenced one IS collected','0 (gone)',v_n::text,v_n=0);
+  insert into _r values (28,'S05 [CORE] the folder-level FOOTGUN is avoided: an UNREFERENCED 2h object in the SAME uid folder as a referenced one IS collected','0 (gone)',v_n::text,v_n=0);
 
   select count(*) into v_n from storage.objects where bucket_id='avatars' and name=n_young;
-  insert into _r values (30,'S06 [CORE - BUG B] a 0-second UNREFERENCED object SURVIVES (the user profile modal is still open)','1 (kept)',v_n::text,v_n=1);
+  insert into _r values (29,'S06 [CORE - BUG B] a 0-second UNREFERENCED object SURVIVES (the user profile modal is still open)','1 (kept)',v_n::text,v_n=1);
 
   select count(*) into v_n from storage.objects where bucket_id='avatars' and name=n_59;
-  insert into _r values (31,'S07 age BOUNDARY: 59 minutes (< 1h) survives','1 (kept)',v_n::text,v_n=1);
+  insert into _r values (30,'S07 age BOUNDARY: 59 minutes (< 1h) survives','1 (kept)',v_n::text,v_n=1);
 
   select count(*) into v_n from storage.objects where bucket_id='avatars' and name=n_61;
-  insert into _r values (32,'S08 age BOUNDARY: 61 minutes (> 1h) is collected - the guard delays, it does not disable','0 (gone)',v_n::text,v_n=0);
+  insert into _r values (31,'S08 age BOUNDARY: 61 minutes (> 1h) is collected - the guard delays, it does not disable','0 (gone)',v_n::text,v_n=0);
 
   select count(*) into v_n from storage.objects where bucket_id='avatars' and name=n_ref_5h;
-  insert into _r values (33,'S09 a REFERENCED object is never collected at ANY age (5 hours)','1 (kept)',v_n::text,v_n=1);
+  insert into _r values (32,'S09 a REFERENCED object is never collected at ANY age (5 hours)','1 (kept)',v_n::text,v_n=1);
 
   -- ================= HARDENING POSTURE =================
   -- anon/authenticated are non-superuser and inherit any PUBLIC grant, so "neither has it" also
@@ -599,14 +555,14 @@ begin
         + case when has_table_privilege('authenticated','private.avatar_upload_log','UPDATE') then 1 else 0 end
         + case when has_table_privilege('authenticated','private.avatar_upload_log','DELETE') then 1 else 0 end)
     into v_n;
-  insert into _r values (34,'H01 private.avatar_upload_log: no SELECT/INSERT/UPDATE/DELETE for anon, authenticated or PUBLIC','0 privileges',v_n::text||' privileges',v_n=0);
+  insert into _r values (33,'H01 private.avatar_upload_log: no SELECT/INSERT/UPDATE/DELETE for anon, authenticated or PUBLIC','0 privileges',v_n::text||' privileges',v_n=0);
 
   select count(*) into v_n from pg_proc p join pg_namespace n on n.oid=p.pronamespace
    where n.nspname='private' and p.proname='log_avatar_upload'
      and p.prosecdef and p.proconfig = array['search_path=""']
      and not has_function_privilege('anon', p.oid, 'EXECUTE')
      and not has_function_privilege('authenticated', p.oid, 'EXECUTE');
-  insert into _r values (35,'H02 private.log_avatar_upload(): DEFINER + search_path empty + EXECUTE revoked from anon/authenticated/PUBLIC','1',v_n::text,v_n=1);
+  insert into _r values (34,'H02 private.log_avatar_upload(): DEFINER + search_path empty + EXECUTE revoked from anon/authenticated/PUBLIC','1',v_n::text,v_n=1);
 
   select count(*) into v_n from pg_proc p join pg_namespace n on n.oid=p.pronamespace
    where n.nspname='private'
@@ -614,21 +570,21 @@ begin
      and p.prosecdef and p.proconfig = array['search_path=""']
      and has_function_privilege('authenticated', p.oid, 'EXECUTE')
      and not has_function_privilege('anon', p.oid, 'EXECUTE');
-  insert into _r values (36,'H03 the 3 gate fns: DEFINER + search_path empty + EXECUTE to authenticated ONLY (not anon/PUBLIC)','3',v_n::text,v_n=3);
+  insert into _r values (35,'H03 the 3 gate fns: DEFINER + search_path empty + EXECUTE to authenticated ONLY (not anon/PUBLIC)','3',v_n::text,v_n=3);
 
   select count(*) into v_n from pg_proc p join pg_namespace n on n.oid=p.pronamespace
    where n.nspname='private' and p.proname='_sweep_orphan_avatars'
      and p.prosecdef and p.proconfig = array['search_path=""']
      and not has_function_privilege('anon', p.oid, 'EXECUTE')
      and not has_function_privilege('authenticated', p.oid, 'EXECUTE');
-  insert into _r values (37,'H04 private._sweep_orphan_avatars(): DEFINER + search_path empty + EXECUTE revoked from anon/authenticated/PUBLIC','1',v_n::text,v_n=1);
+  insert into _r values (36,'H04 private._sweep_orphan_avatars(): DEFINER + search_path empty + EXECUTE revoked from anon/authenticated/PUBLIC','1',v_n::text,v_n=1);
 
   select count(*) into v_n from pg_trigger t
     join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace
    where n.nspname='storage' and c.relname='objects' and t.tgname='avatar_upload_log'
      and pg_get_triggerdef(t.oid) like 'CREATE TRIGGER avatar_upload_log AFTER INSERT ON storage.objects%'
      and pg_get_triggerdef(t.oid) like '%bucket_id = ''avatars''%';
-  insert into _r values (38,'H05 the avatar_upload_log trigger is AFTER INSERT on storage.objects, scoped WHEN bucket_id=avatars','1',v_n::text,v_n=1);
+  insert into _r values (37,'H05 the avatar_upload_log trigger is AFTER INSERT on storage.objects, scoped WHEN bucket_id=avatars','1',v_n::text,v_n=1);
 end
 $green$;
 
@@ -639,7 +595,7 @@ do $verdict$
 declare v_n int;
 begin
   select count(*) into v_n from _r;
-  if v_n <> 38 then raise exception 'INCOMPLETE: % assertion rows, expected 38', v_n; end if;
+  if v_n <> 37 then raise exception 'INCOMPLETE: % assertion rows, expected 37', v_n; end if;
   if exists (select 1 from _r where pass is null) then
     raise exception 'NULL pass value - an assertion evaluated to NULL and would have counted as neither';
   end if;

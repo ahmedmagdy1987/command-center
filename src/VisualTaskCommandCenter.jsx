@@ -272,10 +272,18 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   // Minimal app-level toast (transient errors that shouldn't use a native alert) + import-confirm state.
   const [appToasts, setAppToasts] = useState([]);
   const [importPreview, setImportPreview] = useState(null);
-  const showToast = useCallback((message, tone = 'error') => {
+  /**
+   * Transient toast. `action` (optional) is `{ label, onClick }` and renders as a button inside the
+   * toast — added 2026-07-19 so a destructive-but-reversible action can offer UNDO at the moment it
+   * happens, which is the only point the user is still thinking about it. Running the action also
+   * dismisses the toast, so it cannot be clicked twice.
+   */
+  const showToast = useCallback((message, tone = 'error', action = null) => {
     const id = uid();
-    setAppToasts(p => [...p, { id, message, tone }]);
-    setTimeout(() => setAppToasts(p => p.filter(x => x.id !== id)), 4500);
+    setAppToasts(p => [...p, { id, message, tone, action }]);
+    // Longer window when there is an action: 4.5s is fine to READ a message but tight to notice an
+    // Undo, decide, and hit it.
+    setTimeout(() => setAppToasts(p => p.filter(x => x.id !== id)), action ? 8000 : 4500);
   }, []);
   const chatViewRef = useRef(view);
   useEffect(() => { chatViewRef.current = view; }, [view]);
@@ -598,7 +606,9 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
         title: 'New task',
         assigneeId: session?.user?.id ?? null,
         privacy: 'workspace',
-        project: 'other',
+        // Resolved, not hardcoded — see defaultProjectId. `...partial` still wins when the caller
+        // names a project; this is only the fallback for callers that don't.
+        project: defaultProjectId(projects, 'other'),
         status: 'inbox',
         priority: 'medium',
         effort: 'medium',
@@ -621,7 +631,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
       setTasks(prev => prev.filter(t => t.id !== optimistic.id));
       showToast("Couldn't add the task. Please try again.");
     }
-  }, [session, currentWorkspaceId, showToast]);
+  }, [session, currentWorkspaceId, showToast, projects]);
 
   const updateTask = useCallback(async (id, patch) => {
     setTasks(prev => prev.map(t => t.id === id ? {
@@ -1049,6 +1059,13 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
                 tt.tone === 'error' ? 'border-rose-500/25 bg-rose-500/10 text-rose-200' : 'border-white/10 bg-[#0f1017]/90 text-white/80')}>
               {tt.tone === 'error' ? <AlertCircle className="w-4 h-4 shrink-0 mt-px" /> : <Info className="w-4 h-4 shrink-0 mt-px" />}
               <span className="flex-1 break-words">{tt.message}</span>
+              {tt.action && (
+                <button
+                  onClick={() => { setAppToasts(p => p.filter(x => x.id !== tt.id)); tt.action.onClick?.(); }}
+                  className="shrink-0 font-semibold underline underline-offset-2 text-violet-300 hover:text-violet-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70 rounded px-0.5">
+                  {tt.action.label}
+                </button>
+              )}
               <button onClick={() => setAppToasts(p => p.filter(x => x.id !== tt.id))} aria-label="Dismiss"
                 className="shrink-0 opacity-60 hover:opacity-100 transition-opacity"><X className="w-3.5 h-3.5" /></button>
             </div>
@@ -1067,6 +1084,28 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
    SHARED UI PRIMITIVES
 ================================================================================= */
 const cx = (...xs) => xs.filter(Boolean).join(' ');
+
+/**
+ * The project id a NEW task should default to, resolved against the workspace's REAL projects.
+ *
+ * Never hardcode a seed id. `tasks.project` is free text with NO foreign key (see CLAUDE.md,
+ * Bundle 3), so an id that does not resolve is accepted silently and the task renders with no
+ * project chip — unfiled, with nothing to indicate anything went wrong. The seed ids 'other' and
+ * 'personal' were assumed to exist everywhere and DO NOT: checked live 2026-07-19, no workspace has
+ * 'other' and two of three lack 'personal'.
+ *
+ * Prefers `preferred` when it genuinely exists (so a workspace that DOES still have the seed project
+ * keeps its familiar default), then either seed, then simply the first project. Returns '' only when
+ * the workspace has no projects at all — the caller must handle that, because there is no honest
+ * default in that case.
+ */
+const defaultProjectId = (projects, preferred) => {
+  const has = (id) => !!id && (projects || []).some(p => p.id === id);
+  if (has(preferred)) return preferred;
+  if (has('other')) return 'other';
+  if (has('personal')) return 'personal';
+  return (projects || [])[0]?.id || '';
+};
 
 // Respect the user's reduced-motion preference (skip exit animations + their delays entirely).
 const prefersReducedMotion = () => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -2170,12 +2209,16 @@ function QuickAdd() {
       // Private view -> Private + personal project.
       setAssigneeId(meId ?? null);
       setPriority('medium');
-      if (view === 'private') { setPrivacy('private'); setProject('personal'); }
-      else { setPrivacy('workspace'); setProject('other'); }
+      // Default project resolved against the workspace's REAL projects — see defaultProjectId. The
+      // old code hardcoded the seed ids 'personal' (private view) and 'other', neither of which
+      // exists in every workspace, so a quick-add could file a task under an id that resolves to
+      // nothing: no chip, no error, effectively unfiled.
+      setPrivacy(view === 'private' ? 'private' : 'workspace');
+      setProject(defaultProjectId(projects, view === 'private' ? 'personal' : 'other'));
     } else {
       setTitle('');
     }
-  }, [quickAddOpen, view, meId]);
+  }, [quickAddOpen, view, meId, projects]);
 
   if (!quickAddOpen) return null;
 
@@ -3056,9 +3099,10 @@ function ConfirmModal({ open, title, message, confirmLabel = 'Delete', confirmDi
  * delete_project RPC, which enforces the rank + workspace + caller-visibility rules server-side.
  * taskCount: null = checking, -1 = error, >=0 = reliable count (from the project_task_count RPC).
  */
-function ProjectDeleteModal({ open, project, taskCount, isOwner, onCancel, onConfirm }) {
+function ProjectDeleteModal({ open, project, projects, taskCount, isOwner, onCancel, onConfirm }) {
   const [mode, setMode] = useState('unassign');   // 'unassign' | 'cascade'
   const [confirmText, setConfirmText] = useState('');
+  const [dest, setDest] = useState('');           // chosen destination project id ('' = not yet chosen)
   const panelRef = useRef(null);
   useEffect(() => { if (open) setTimeout(() => panelRef.current?.focus(), 30); }, [open]);
   if (!open || !project) return null;
@@ -3066,14 +3110,29 @@ function ProjectDeleteModal({ open, project, taskCount, isOwner, onCancel, onCon
   const checking = taskCount === null;
   const errored = taskCount === -1;
   const count = typeof taskCount === 'number' && taskCount > 0 ? taskCount : 0;
-  const reassignTo = project.id === 'other' ? 'personal' : 'other';   // where kept tasks land
+
+  // THE DESTINATION IS NOW CHOSEN, NOT GUESSED. This used to be
+  //     const reassignTo = project.id === 'other' ? 'personal' : 'other';
+  // — a hardcoded SEED id. `tasks.project` is free text with no FK, and the RPC did not validate the
+  // target, so moving tasks to an id that does not resolve silently UNFILED them: the chip just
+  // disappears and nothing errors. Live check 2026-07-19: NO workspace has a project called 'other',
+  // and two of three lack 'personal', so this path was wrong for essentially every project.
+  // Now: real projects only, excluding the one being deleted, defaulting to the first.
+  const candidates = (projects || []).filter(p => p.id !== project.id);
+  const destId = dest && candidates.some(p => p.id === dest) ? dest : (candidates[0]?.id || '');
+  const destName = candidates.find(p => p.id === destId)?.name || '';
+  // With nowhere to move them to, "Keep the tasks" is not offerable. Owners can still cascade; a
+  // non-owner is left with no valid action, and the modal says so rather than failing on confirm.
+  const noDestination = candidates.length === 0;
+
   const cascadeReady = mode !== 'cascade' || confirmText.trim() === (project.name || '').trim();
-  const canConfirm = !checking && !errored && cascadeReady;
+  const unassignReady = mode !== 'unassign' || count === 0 || !!destId;
+  const canConfirm = !checking && !errored && cascadeReady && unassignReady;
   // reset in the close handlers (not an effect) so a reopened modal starts fresh — cascade must always
   // require re-typing the project name — while staying clear of the react-hooks/set-state-in-effect rule.
-  const reset = () => { setMode('unassign'); setConfirmText(''); };
+  const reset = () => { setMode('unassign'); setConfirmText(''); setDest(''); };
   const handleCancel = () => { reset(); onCancel(); };
-  const doConfirm = () => { if (!canConfirm) return; const m = mode, r = reassignTo; reset(); onConfirm(m, r); };
+  const doConfirm = () => { if (!canConfirm) return; const m = mode, r = destId; reset(); onConfirm(m, r); };
 
   return createPortal(
     <>
@@ -3095,10 +3154,31 @@ function ProjectDeleteModal({ open, project, taskCount, isOwner, onCancel, onCon
           {!checking && !errored && count > 0 && (
             <div className="space-y-2 mb-4">
               <p className="text-xs text-white/55">“{project.name}” has {count} task{count === 1 ? '' : 's'}. Choose what happens to them:</p>
-              <label className={cx('flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-colors',
-                mode === 'unassign' ? 'border-violet-400/50 bg-violet-500/10' : 'border-white/10 hover:bg-white/5')}>
-                <input type="radio" name="pdmode" checked={mode === 'unassign'} onChange={() => setMode('unassign')} className="mt-0.5" />
-                <span className="text-xs text-white/80"><span className="font-medium text-white">Keep the tasks</span> — move them to “{reassignTo}”, then delete the project.</span>
+              <label className={cx('flex items-start gap-2.5 p-2.5 rounded-xl border transition-colors',
+                noDestination ? 'border-white/10 opacity-50 cursor-not-allowed'
+                  : cx('cursor-pointer', mode === 'unassign' ? 'border-violet-400/50 bg-violet-500/10' : 'border-white/10 hover:bg-white/5'))}>
+                <input type="radio" name="pdmode" checked={mode === 'unassign'} disabled={noDestination}
+                  onChange={() => setMode('unassign')} className="mt-0.5" />
+                <span className="text-xs text-white/80 min-w-0 flex-1">
+                  <span className="font-medium text-white">Keep the tasks</span>
+                  {noDestination
+                    ? <> — unavailable: this is the only project, so there is nowhere to move them.</>
+                    : <> — move them to another project, then delete “{project.name}”.</>}
+                  {!noDestination && (
+                    <span className="mt-2 flex items-center gap-2">
+                      <span className="text-[11px] text-white/50 shrink-0">Move to</span>
+                      {/* A real picker over the workspace's REAL projects. Rendering it inside the label
+                          is fine — a <select> is not a nested button — but stopPropagation keeps a click
+                          on the dropdown from also toggling the radio underneath it. */}
+                      <select value={destId} onChange={e => { setDest(e.target.value); setMode('unassign'); }}
+                        onClick={e => e.stopPropagation()}
+                        aria-label="Destination project for the kept tasks"
+                        className="flex-1 min-w-0 h-8 px-2 rounded-lg bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-violet-400/50">
+                        {candidates.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    </span>
+                  )}
+                </span>
               </label>
               {isOwner && (
                 <label className={cx('flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-colors',
@@ -3126,7 +3206,13 @@ function ProjectDeleteModal({ open, project, taskCount, isOwner, onCancel, onCon
                 !canConfirm ? 'bg-white/10 text-white/40 cursor-not-allowed'
                   : mode === 'cascade' ? 'bg-rose-500 hover:bg-rose-400' : 'bg-violet-500 hover:bg-violet-400')}>
               <Trash2 className="w-3.5 h-3.5" />
-              {count > 0 && mode === 'cascade' ? `Delete project + ${count} task${count === 1 ? '' : 's'}` : 'Delete project'}
+              {/* Name the DESTINATION in the button, so the irreversible action states where the tasks
+                  are actually going rather than leaving it to the radio label above. */}
+              {count > 0 && mode === 'cascade'
+                ? `Delete project + ${count} task${count === 1 ? '' : 's'}`
+                : count > 0 && destName
+                  ? `Move ${count} task${count === 1 ? '' : 's'} to “${destName}” & delete`
+                  : 'Delete project'}
             </button>
           </div>
         </div>
@@ -4152,13 +4238,13 @@ function KanbanView() {
 }
 
 function ColumnQuickAdd({ status }) {
-  const { startDraftTask, filters, meId } = useApp();
+  const { startDraftTask, filters, meId, projects } = useApp();
   // "+ Add task" creates a row (status pre-set to this column, defaults from the active filters) and opens
   // the full TaskModal on it; an abandoned empty draft is auto-removed on close (AppProvider.closeEditing).
   const add = () => startDraftTask({
     status,
     assigneeId: filters.assignee === 'me' ? meId : (filters.assignee === 'unassigned' ? null : (filters.assignee !== 'all' ? filters.assignee : meId)),
-    project: filters.project !== 'all' ? filters.project : 'other',
+    project: filters.project !== 'all' ? filters.project : defaultProjectId(projects, 'other'),
     privacy: filters.privacy !== 'all' ? filters.privacy : 'workspace',
   });
   return (
@@ -4567,6 +4653,7 @@ function ProjectsView() {
       <ProjectDeleteModal
         open={!!deleteTarget}
         project={deleteTarget}
+        projects={projects}
         taskCount={deleteCount}
         isOwner={isOwner}
         onCancel={() => { setDeleteTarget(null); setDeleteCount(null); }}
@@ -5648,6 +5735,12 @@ function ChatView() {
     setItems(prev => prev.filter(x => x.id !== m.id));
     try {
       await messagesApi.hide(m.id);
+      setHiddenCount(n => n + 1);
+      // UNDO, offered at the only moment the user is still thinking about it. The DB has supported
+      // this since the migration shipped (message_hides carries a DELETE policy AND a grant), but the
+      // UI never offered it — so "Delete for me" was irreversible in-product. That is the same
+      // "built but not wired" shape the hide feature itself sat in for three days.
+      showToast('Message hidden for you.', 'info', { label: 'Undo', onClick: () => restoreOne(m.id) });
       // NB no badge refresh here, and that is deliberate — it is where team chat legitimately
       // DIVERGES from DmThread.hideForMe, which does call refreshDms. A hide fires no realtime event
       // (message_hides is unpublished), so nothing self-heals; the question is whether anything
@@ -5667,6 +5760,37 @@ function ChatView() {
       showToast("Couldn't hide that message — it's back in the channel.");
       messagesApi.list(200, currentWorkspaceId).then(setItems).catch(logCaught('messages.reconcile'));
     }
+  };
+
+  // ---- Restoring hidden messages -------------------------------------------------------------
+  // `hiddenCount` drives the "N hidden" affordance in the header, so a hide is discoverable and
+  // reversible LATER too — the undo toast only covers the next few seconds.
+  const [hiddenCount, setHiddenCount] = useState(0);
+  useEffect(() => {
+    if (!currentWorkspaceId) return;
+    let on = true;
+    messagesApi.hiddenCount(currentWorkspaceId)
+      .then(n => { if (on) setHiddenCount(n); })
+      .catch(logCaught('messages.hiddenCount'));
+    return () => { on = false; };
+  }, [currentWorkspaceId]);
+
+  // Undo ONE hide (the toast action). Re-reads the thread rather than splicing the message back at a
+  // remembered index: `items` has moved on, and the RPC returns it in the right place by created_at.
+  const restoreOne = async (id) => {
+    try {
+      await messagesApi.unhide(id);
+      setHiddenCount(n => Math.max(0, n - 1));
+      setItems(await messagesApi.list(200, currentWorkspaceId));
+    } catch (e) { reportError(e, 'messages.unhide'); showToast("Couldn't restore that message."); }
+  };
+
+  const restoreAllHidden = async () => {
+    try {
+      await messagesApi.unhideAll(currentWorkspaceId);
+      setHiddenCount(0);
+      setItems(await messagesApi.list(200, currentWorkspaceId));
+    } catch (e) { reportError(e, 'messages.unhideAll'); showToast("Couldn't restore your hidden messages."); }
   };
 
   // ---- Read receipts: each member's avatar sits under the last message they have read ----------
@@ -5767,6 +5891,18 @@ function ChatView() {
           <div className="text-sm font-semibold text-white/90 leading-tight">Team chat</div>
           <div className="text-[10px] text-white/35 leading-tight">Everyone in this workspace</div>
         </div>
+        {/* Hidden-message escape hatch. Without this, "Delete for me" is a one-way door the moment the
+            undo toast expires: the message is gone from every read path (thread, search, unread), so
+            there is no way to even discover it still exists. Only rendered when there is something to
+            restore, so it costs nothing in the common case. */}
+        {hiddenCount > 0 && (
+          <button onClick={restoreAllHidden} type="button"
+            title={`You have hidden ${hiddenCount} message${hiddenCount === 1 ? '' : 's'} in this channel. Restore them?`}
+            className="shrink-0 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-white/10 bg-white/5 text-[11px] text-white/60 hover:text-white/90 hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70 transition-colors">
+            <EyeOff className="w-3 h-3" />
+            {hiddenCount} hidden — restore
+          </button>
+        )}
         {/* Facepile: shows WHO "everyone" actually is. Overlapped and capped at 4 + a "+N"; each face opens
             that person's profile. No ring separator — Avatar's own border does it and stays theme-safe. */}
         {members.length > 0 && (
@@ -6197,6 +6333,10 @@ function DmThread({ conversationId, peerId, onBack }) {
     setItems(prev => prev.filter(x => x.id !== m.id));
     try {
       await directMessagesApi.hide(m.id);
+      setHiddenCount(n => n + 1);
+      // Same undo affordance as team chat. dm_message_hides has carried a DELETE policy + grant since
+      // 20260716000040 and nothing ever called it, so this half of the feature was dead for three days.
+      showToast('Message hidden for you.', 'info', { label: 'Undo', onClick: () => restoreOne(m.id) });
       // dm_message_hides is deliberately OUT of the realtime publication, so nothing tells the
       // conversation list that this thread's preview (and possibly its unread badge) just changed.
       // remove/edit self-heal via the dm_messages UPDATE event; a hide has no such event.
@@ -6211,6 +6351,35 @@ function DmThread({ conversationId, peerId, onBack }) {
       showToast("Couldn't hide that message — it's back in the thread.");
       directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(logCaught('dms.reconcile'));
     }
+  };
+
+  // ---- Restoring hidden messages (the twin of ChatView's) -------------------------------------
+  const [hiddenCount, setHiddenCount] = useState(0);
+  useEffect(() => {
+    if (!conversationId) return;
+    let on = true;
+    directMessagesApi.hiddenCount(conversationId)
+      .then(n => { if (on) setHiddenCount(n); })
+      .catch(logCaught('dms.hiddenCount'));
+    return () => { on = false; };
+  }, [conversationId]);
+
+  const restoreOne = async (id) => {
+    try {
+      await directMessagesApi.unhide(id);
+      setHiddenCount(n => Math.max(0, n - 1));
+      setItems(await directMessagesApi.listMessages(conversationId, 200));
+      refreshDms?.(currentWorkspaceId);   // the preview may change back
+    } catch (e) { reportError(e, 'dms.unhide'); showToast("Couldn't restore that message."); }
+  };
+
+  const restoreAllHidden = async () => {
+    try {
+      await directMessagesApi.unhideAll(conversationId);
+      setHiddenCount(0);
+      setItems(await directMessagesApi.listMessages(conversationId, 200));
+      refreshDms?.(currentWorkspaceId);
+    } catch (e) { reportError(e, 'dms.unhideAll'); showToast("Couldn't restore your hidden messages."); }
   };
 
   // Edit own DM text in place; the DB trigger enforces the 10-minute window + stamps edited_at.
@@ -6251,6 +6420,16 @@ function DmThread({ conversationId, peerId, onBack }) {
             </div>
           </div>
         </PersonButton>
+        {/* Hidden-message escape hatch — the twin of ChatView's. See that one for why a hide needs a
+            way back after the undo toast expires. */}
+        {hiddenCount > 0 && (
+          <button onClick={restoreAllHidden} type="button"
+            title={`You have hidden ${hiddenCount} message${hiddenCount === 1 ? '' : 's'} in this thread. Restore them?`}
+            className="shrink-0 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-white/10 bg-white/5 text-[11px] text-white/60 hover:text-white/90 hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70 transition-colors">
+            <EyeOff className="w-3 h-3" />
+            {hiddenCount} hidden — restore
+          </button>
+        )}
       </div>
 
       <MessageList

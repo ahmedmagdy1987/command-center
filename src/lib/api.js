@@ -681,6 +681,55 @@ export const messages = {
     if (error) throw error;
   },
 
+  /**
+   * UNDO a "delete for me" — drop my hide row so the message comes back into my view.
+   *
+   * The DELETE half of `message_hides` shipped with the migration (policy + grant) and then sat
+   * UNREACHABLE, exactly like dm_message_hides before it: the UI offered hide with no way back, so
+   * "Delete for me" was permanently irreversible in-product even though the database always
+   * supported undo. This is that missing half.
+   *
+   * Deliberately NOT id-scoped-only: `user_id` is pinned here as well as by RLS. Belt and braces on
+   * a delete costs nothing and means a future policy edit cannot silently widen this call.
+   *
+   * ACCEPTED LOCKOUT (from the migration header): a member who hides and is then DEMOTED to guest
+   * cannot unhide, because the DELETE policy carries the same guest gate as INSERT. Harmless — a
+   * guest cannot see team chat at all — and re-promotion restores the ability.
+   */
+  async unhide(messageId) {
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not signed in');
+    const { error } = await supabase
+      .from('message_hides').delete()
+      .eq('message_id', messageId)
+      .eq('user_id', session.user.id);
+    if (error) throw error;
+  },
+
+  /** How many messages I have hidden in this workspace — drives the "N hidden" restore affordance.
+   *  RLS pins message_hides SELECT to my own rows, so this can only ever count mine. */
+  async hiddenCount(workspaceId) {
+    if (!workspaceId) return 0;
+    const { count, error } = await supabase
+      .from('message_hides').select('*', { count: 'exact', head: true })
+      .eq('workspace_id', workspaceId);
+    if (error) throw error;
+    return count || 0;
+  },
+
+  /** Restore every message I have hidden in this workspace. Workspace-scoped and RLS-pinned to me —
+   *  never a bare match-all delete (see the no-bulk-delete landmine in CLAUDE.md). */
+  async unhideAll(workspaceId) {
+    if (!workspaceId) throw new Error('messages.unhideAll requires a workspaceId');
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not signed in');
+    const { error } = await supabase
+      .from('message_hides').delete()
+      .eq('workspace_id', workspaceId)
+      .eq('user_id', session.user.id);
+    if (error) throw error;
+  },
+
   async sendText(body, workspaceId, mentions) {
     const session = await auth.getSession();
     if (!session) throw new Error('Not authenticated');
@@ -976,6 +1025,41 @@ export const directMessages = {
       .from('dm_message_hides')
       .upsert({ message_id: messageId, user_id: session.user.id },
               { onConflict: 'message_id,user_id', ignoreDuplicates: true });
+    if (error) throw error;
+  },
+
+  /** UNDO a DM "delete for me" — the twin of messages.unhide. See that function for why this half
+   *  existed in the DB (policy + grant, since 20260716000040) but was unreachable until now. */
+  async unhide(messageId) {
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not signed in');
+    const { error } = await supabase
+      .from('dm_message_hides').delete()
+      .eq('message_id', messageId)
+      .eq('user_id', session.user.id);
+    if (error) throw error;
+  },
+
+  /** How many messages I have hidden in one conversation — drives the "N hidden" restore affordance.
+   *  conversation_id is stamped server-side by a trigger, and RLS pins SELECT to my own rows. */
+  async hiddenCount(conversationId) {
+    if (!conversationId) return 0;
+    const { count, error } = await supabase
+      .from('dm_message_hides').select('*', { count: 'exact', head: true })
+      .eq('conversation_id', conversationId);
+    if (error) throw error;
+    return count || 0;
+  },
+
+  /** Restore every message I have hidden in one conversation. Conversation-scoped AND pinned to me. */
+  async unhideAll(conversationId) {
+    if (!conversationId) throw new Error('directMessages.unhideAll requires a conversationId');
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not signed in');
+    const { error } = await supabase
+      .from('dm_message_hides').delete()
+      .eq('conversation_id', conversationId)
+      .eq('user_id', session.user.id);
     if (error) throw error;
   },
 
