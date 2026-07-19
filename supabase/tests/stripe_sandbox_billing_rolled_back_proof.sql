@@ -13,6 +13,20 @@ create temp table billing_proof_results (
   detail text
 );
 
+-- THIS GRANT IS WHY THE SUITE RUNS AT ALL. Without it the file aborts on its first assertion recorded
+-- from an impersonated session with:
+--     ERROR: 42501: permission denied for table billing_proof_results
+-- because pg_temp.record_result() is SECURITY INVOKER, so while a phase is running under
+-- `set local role authenticated` the INSERT into this scratch table is executed AS authenticated —
+-- which owns no privilege on a table created by `postgres`. The suite has been SILENTLY UN-RUNNABLE
+-- since it was written; it was never caught because a failed execute_sql looks like tooling noise
+-- rather than a red suite. (Found 2026-07-19 by re-running every suite in supabase/tests/.)
+-- The scratch table holds only assertion bookkeeping — nothing asserts ON it — so granting INSERT
+-- weakens no control. This is the documented house fix; the alternative is `reset role` before every
+-- record_result call, which is far more invasive and easy to forget.
+grant insert on billing_proof_results to authenticated;
+grant usage, select on sequence billing_proof_results_id_seq to authenticated;
+
 create or replace function pg_temp.record_result(p_label text, p_ok boolean, p_detail text default null)
 returns void
 language plpgsql

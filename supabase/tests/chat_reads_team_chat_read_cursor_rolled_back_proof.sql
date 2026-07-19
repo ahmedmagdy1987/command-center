@@ -110,11 +110,41 @@ begin
   end if;
 end $harness$;
 
--- ============================================================ RED-1 — the feature is absent today
-insert into _r values (1,'RED: no team-chat read cursor exists','both absent',
-  'chat_reads='||coalesce(to_regclass('public.chat_reads')::text,'absent')||
-  ' message_reads='||coalesce(to_regclass('public.message_reads')::text,'absent'),
-  to_regclass('public.chat_reads') is null and to_regclass('public.message_reads') is null);
+-- ============================================================ REWIND — recreate the PRE-MIGRATION state
+-- This file has TWO lifecycles, and they conflict. BEFORE 20260719134628 was applied it demonstrated a
+-- missing feature; now that the migration is LIVE it has to serve as a re-runnable REGRESSION suite.
+-- The RED phase below performs the PK-vacate attack — and the now-live chat_reads_lock_identity trigger
+-- rejects it with 42501, which aborts the whole transaction and takes the entire suite with it. That is
+-- not hypothetical: it is exactly what happened on the first post-apply re-run, where this file scored
+-- no assertions at all rather than failing gracefully.
+--
+-- So REWIND first: drop the control under test, transaction-locally, so RED can still demonstrate the
+-- disease against a faithful copy of the pre-migration rules. DDL PART 2 puts it back and GREEN
+-- re-proves the cure. Everything here is inside the enclosing transaction and is undone by the final
+-- rollback; dropping a TRIGGER takes a brief lock on chat_reads and never touches a row.
+--
+-- The old assertion here ("no team-chat read cursor exists") was a HISTORICAL claim — true only until
+-- the migration landed, and permanently false afterwards. Its evidentiary job is done and recorded in
+-- the migration header and commit 33a0429. It is replaced by an anti-vacuity control that is true in
+-- BOTH worlds and actually guards the RED below.
+do $rewind$
+begin
+  if to_regclass('public.chat_reads') is not null then
+    execute 'drop trigger if exists chat_reads_lock_identity on public.chat_reads';
+  end if;
+end $rewind$;
+
+-- Anti-vacuity for RED-2: if the rewind silently failed, the vacate would be BLOCKED and RED-2 would
+-- fail for entirely the wrong reason (or abort the run). Assert the rewound state explicitly.
+-- `tgrelid = to_regclass(...)` is null-safe: on a database where the table does not exist yet the
+-- comparison matches nothing, so the lock is vacuously absent and the pre-apply run still works.
+insert into _r values (1,'REWIND: identity lock is absent, so RED-2 can demonstrate the bypass','absent',
+  coalesce((select string_agg(t.tgname,',') from pg_trigger t
+             where t.tgrelid = to_regclass('public.chat_reads')
+               and not t.tgisinternal and t.tgname = 'chat_reads_lock_identity'),'absent'),
+  not exists (select 1 from pg_trigger t
+               where t.tgrelid = to_regclass('public.chat_reads')
+                 and not t.tgisinternal and t.tgname = 'chat_reads_lock_identity'));
 
 -- ============================================================ DDL PART 1 (everything but the lock)
 create table if not exists public.chat_reads (

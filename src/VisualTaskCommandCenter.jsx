@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, createContext, useContext } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, useId, createContext, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import {
   LayoutDashboard, KanbanSquare, Grid3x3, FolderKanban, CalendarDays, Lock, UserCog,
-  Plus, Search, Command, Sun, Moon, Download, Upload, RefreshCw, X, Check,
+  Plus, Search, Command, Sun, Moon, Download, Upload, X, Check,
   Clock, AlertCircle, Flag, Link2, Trash2, Copy, ChevronRight, ChevronDown, ChevronUp,
   CheckCircle2, Calendar, Zap, Timer, MoreHorizontal, Edit3, Filter,
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
@@ -272,10 +272,18 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   // Minimal app-level toast (transient errors that shouldn't use a native alert) + import-confirm state.
   const [appToasts, setAppToasts] = useState([]);
   const [importPreview, setImportPreview] = useState(null);
-  const showToast = useCallback((message, tone = 'error') => {
+  /**
+   * Transient toast. `action` (optional) is `{ label, onClick }` and renders as a button inside the
+   * toast — added 2026-07-19 so a destructive-but-reversible action can offer UNDO at the moment it
+   * happens, which is the only point the user is still thinking about it. Running the action also
+   * dismisses the toast, so it cannot be clicked twice.
+   */
+  const showToast = useCallback((message, tone = 'error', action = null) => {
     const id = uid();
-    setAppToasts(p => [...p, { id, message, tone }]);
-    setTimeout(() => setAppToasts(p => p.filter(x => x.id !== id)), 4500);
+    setAppToasts(p => [...p, { id, message, tone, action }]);
+    // Longer window when there is an action: 4.5s is fine to READ a message but tight to notice an
+    // Undo, decide, and hit it.
+    setTimeout(() => setAppToasts(p => p.filter(x => x.id !== id)), action ? 8000 : 4500);
   }, []);
   const chatViewRef = useRef(view);
   useEffect(() => { chatViewRef.current = view; }, [view]);
@@ -598,7 +606,9 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
         title: 'New task',
         assigneeId: session?.user?.id ?? null,
         privacy: 'workspace',
-        project: 'other',
+        // Resolved, not hardcoded — see defaultProjectId. `...partial` still wins when the caller
+        // names a project; this is only the fallback for callers that don't.
+        project: defaultProjectId(projects, 'other'),
         status: 'inbox',
         priority: 'medium',
         effort: 'medium',
@@ -621,7 +631,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
       setTasks(prev => prev.filter(t => t.id !== optimistic.id));
       showToast("Couldn't add the task. Please try again.");
     }
-  }, [session, currentWorkspaceId, showToast]);
+  }, [session, currentWorkspaceId, showToast, projects]);
 
   const updateTask = useCallback(async (id, patch) => {
     setTasks(prev => prev.map(t => t.id === id ? {
@@ -1049,6 +1059,13 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
                 tt.tone === 'error' ? 'border-rose-500/25 bg-rose-500/10 text-rose-200' : 'border-white/10 bg-[#0f1017]/90 text-white/80')}>
               {tt.tone === 'error' ? <AlertCircle className="w-4 h-4 shrink-0 mt-px" /> : <Info className="w-4 h-4 shrink-0 mt-px" />}
               <span className="flex-1 break-words">{tt.message}</span>
+              {tt.action && (
+                <button
+                  onClick={() => { setAppToasts(p => p.filter(x => x.id !== tt.id)); tt.action.onClick?.(); }}
+                  className="shrink-0 font-semibold underline underline-offset-2 text-violet-300 hover:text-violet-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70 rounded px-0.5">
+                  {tt.action.label}
+                </button>
+              )}
               <button onClick={() => setAppToasts(p => p.filter(x => x.id !== tt.id))} aria-label="Dismiss"
                 className="shrink-0 opacity-60 hover:opacity-100 transition-opacity"><X className="w-3.5 h-3.5" /></button>
             </div>
@@ -1067,6 +1084,28 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
    SHARED UI PRIMITIVES
 ================================================================================= */
 const cx = (...xs) => xs.filter(Boolean).join(' ');
+
+/**
+ * The project id a NEW task should default to, resolved against the workspace's REAL projects.
+ *
+ * Never hardcode a seed id. `tasks.project` is free text with NO foreign key (see CLAUDE.md,
+ * Bundle 3), so an id that does not resolve is accepted silently and the task renders with no
+ * project chip — unfiled, with nothing to indicate anything went wrong. The seed ids 'other' and
+ * 'personal' were assumed to exist everywhere and DO NOT: checked live 2026-07-19, no workspace has
+ * 'other' and two of three lack 'personal'.
+ *
+ * Prefers `preferred` when it genuinely exists (so a workspace that DOES still have the seed project
+ * keeps its familiar default), then either seed, then simply the first project. Returns '' only when
+ * the workspace has no projects at all — the caller must handle that, because there is no honest
+ * default in that case.
+ */
+const defaultProjectId = (projects, preferred) => {
+  const has = (id) => !!id && (projects || []).some(p => p.id === id);
+  if (has(preferred)) return preferred;
+  if (has('other')) return 'other';
+  if (has('personal')) return 'personal';
+  return (projects || [])[0]?.id || '';
+};
 
 // Respect the user's reduced-motion preference (skip exit animations + their delays entirely).
 const prefersReducedMotion = () => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1108,7 +1147,14 @@ function AssigneeChip({ assigneeId, showLabel = true, size = 'sm' }) {
     <span className={cx('inline-flex items-center gap-1 rounded-full font-medium tracking-wide pl-0.5', dims, showLabel ? (size === 'sm' ? 'pr-2' : 'pr-2.5') : 'pr-0.5')}
       style={{ background: light ? `${a.hex}1f` : a.soft, color: light ? '#0b0b12' : a.hex, border: `1px solid ${a.hex}33` }}>
       <Avatar name={a.known ? a.label : ''} userId={a.id} photoUrl={a.avatarUrl} size={face} />
-      {showLabel && a.label}
+      {/* When the label is hidden the chip is a BARE avatar — and every branch of Avatar is
+          aria-hidden (photo alt="", initials, silhouette), so without this the assignee is announced
+          as nothing at all and an assigned task is indistinguishable from an unassigned one. That
+          regressed on 2026-07-19: aria-hidden was added to Avatar's initials branch on the claim that
+          "every call site pairs it with a real name", which was true of the other three call sites but
+          NOT of this one. sr-only rather than a title/aria-label on the span: the chip sits inside a
+          clickable task card, and a title here would also fire as a mouse tooltip over the card. */}
+      {showLabel ? a.label : <span className="sr-only">{`Assigned to ${a.label}`}</span>}
     </span>
   );
 }
@@ -1325,7 +1371,6 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showAssign
           </button>
           <PriorityDot priority={task.priority} />
           {isPrivate && <span title="Private: visible only to the creator and assignee"><Lock className="w-3 h-3 text-white/40 shrink-0" /></span>}
-          {isRecurring(task.recurring) && <RefreshCw className="w-3 h-3 text-white/30 shrink-0" />}
           {task.blocked && <PauseCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
         </div>
         {showAssignee && <AssigneeChip assigneeId={task.assigneeId} showLabel={!compact} size="sm" />}
@@ -1805,13 +1850,14 @@ function Attachments({ taskId, canEdit }) {
 }
 
 function TaskModal() {
-  const { editingTask, setEditingTask, updateTask, deleteTask, duplicateTask, projects, toggleSubtask, addSubtask, removeSubtask, moveSubtask, members, meId, isOwner, isAdmin, resolveAssignee, closeEditing, creatorLabel, requestUpgrade } = useApp();
-  const entitlements = useEntitlements();
+  // `requestUpgrade` + `useEntitlements()` were dropped here on 2026-07-19: TaskModal's ONLY
+  // entitlement gate was the recurringTasks one on the Repeat button, and that feature was removed
+  // (see the RECURRENCE note). Nothing else in this modal is plan-gated.
+  const { editingTask, setEditingTask, updateTask, deleteTask, duplicateTask, projects, toggleSubtask, addSubtask, removeSubtask, moveSubtask, members, meId, isOwner, isAdmin, resolveAssignee, closeEditing, creatorLabel } = useApp();
   const t = editingTask;
   const [newSub, setNewSub] = useState('');
-  const [recurrenceOpen, setRecurrenceOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  useEffect(() => { setNewSub(''); setRecurrenceOpen(false); }, [editingTask?.id]);
+  useEffect(() => { setNewSub(''); }, [editingTask?.id]);
 
   if (!t) return null;
   const set = (patch) => { updateTask(t.id, patch); setEditingTask({ ...t, ...patch }); };
@@ -1833,7 +1879,6 @@ function TaskModal() {
           <div className="flex items-center gap-2 mb-3">
             <AssigneeChip assigneeId={t.assigneeId} />
             {t.privacy === 'private' && <Badge icon={Lock}>Private</Badge>}
-            {isRecurring(t.recurring) && <Badge icon={RefreshCw}>{formatRecurrence(t.recurring) || 'Repeats'}</Badge>}
             {!canEditTask && <Badge icon={Info}>Read-only</Badge>}
             <div className="flex-1" />
             <IconButton icon={Copy} label="Duplicate" onClick={() => { duplicateTask(t.id); setEditingTask(null); }} />
@@ -1883,21 +1928,7 @@ function TaskModal() {
             <ToggleChip active={t.urgent} onClick={() => set({ urgent: !t.urgent })} icon={Zap} label="Urgent" color="#fb923c" disabled={!canEditTask} />
             <ToggleChip active={t.important} onClick={() => set({ important: !t.important })} icon={Flag} label="Important" color="#a78bfa" disabled={!canEditTask} />
             <ToggleChip active={t.blocked} onClick={() => set({ blocked: !t.blocked })} icon={PauseCircle} label="Blocked" color="#f43f5e" disabled={!canEditTask} />
-            <button onClick={() => entitlements.can('recurringTasks') ? setRecurrenceOpen(true) : requestUpgrade('recurringTasks')} type="button" disabled={!canEditTask}
-              className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-default',
-                isRecurring(t.recurring) ? 'text-white' : cx('text-white/50 border-white/10 bg-white/5', canEditTask && 'hover:bg-white/10'))}
-              style={isRecurring(t.recurring) ? { background: '#34d39922', borderColor: '#34d39955', color: '#34d399' } : {}}>
-              <RefreshCw className="w-3.5 h-3.5" />
-              {isRecurring(t.recurring) ? formatRecurrence(t.recurring) : 'Repeat'}
-            </button>
           </div>
-
-          {recurrenceOpen && (
-            <RecurrencePicker
-              value={t.recurring}
-              onChange={r => set({ recurring: r })}
-              onClose={() => setRecurrenceOpen(false)} />
-          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -2142,163 +2173,20 @@ function ToggleChip({ active, onClick, icon: Icon, label, color, disabled = fals
 }
 
 /* =================================================================================
-   RECURRENCE
+   RECURRENCE — REMOVED 2026-07-19 (UI only; the tasks.recurring COLUMN is deliberately KEPT).
+   The picker, its helpers (isRecurring/normalizeRecurrence/formatRecurrence/DAY_*), the two badges,
+   and the recurringTasks entitlement gate all lived here. They were removed because the feature had
+   NO BACKEND OF ANY KIND: no DB function, trigger or cron job ever read tasks.recurring, so not one
+   occurrence was ever generated. Five live tasks had carried active daily/weekly rules since
+   2026-04-26 and had produced nothing. It was also advertised on every pricing tier — and an
+   advertised feature that does not exist is worse than a missing one, so the UI and the claim went
+   together. sanitize.js still round-trips the column, so every existing rule is preserved verbatim
+   for a future BUILD; nothing was migrated away and nothing was lost.
+   TO BUILD IT FOR REAL: a pg_cron spawner is the natural shape (the project already runs two jobs;
+   DUE_DATE_REMINDERS.md is the closest precedent). The open design questions are timezone/DST, what
+   completing one occurrence means for the series, and edit-series vs edit-occurrence — and it must
+   not spawn a backlog for rules that have been idle for months.
 ================================================================================= */
-const DAY_LABELS = ['S','M','T','W','T','F','S'];
-const DAY_NAMES_FULL = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-
-function isRecurring(r) {
-  if (!r || r === 'none') return false;
-  if (typeof r === 'string') return true;
-  if (typeof r === 'object') return true;
-  return false;
-}
-
-function normalizeRecurrence(r) {
-  if (!r || r === 'none') return null;
-  if (r === 'weekly') return { interval: 1, unit: 'week', daysOfWeek: [], ends: { type: 'never' } };
-  if (typeof r === 'object') {
-    return {
-      interval: r.interval || 1,
-      unit: r.unit || 'week',
-      daysOfWeek: Array.isArray(r.daysOfWeek) ? r.daysOfWeek : [],
-      ends: r.ends || { type: 'never' },
-    };
-  }
-  return null;
-}
-
-function formatRecurrence(r) {
-  const n = normalizeRecurrence(r);
-  if (!n) return null;
-  const unitMap = { day: 'day', week: 'week', month: 'month', year: 'year' };
-  const unit = unitMap[n.unit] || n.unit;
-  let s = n.interval === 1 ? `Every ${unit}` : `Every ${n.interval} ${unit}s`;
-  if (n.unit === 'week' && n.daysOfWeek.length > 0 && n.daysOfWeek.length < 7) {
-    const days = [...n.daysOfWeek].sort().map(d => DAY_NAMES_FULL[d]).join(', ');
-    s += ` on ${days}`;
-  }
-  if (n.ends?.type === 'on' && n.ends.date) {
-    s += `, until ${new Date(n.ends.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
-  } else if (n.ends?.type === 'after' && n.ends.count) {
-    s += `, ${n.ends.count} times`;
-  }
-  return s;
-}
-
-function RecurrencePicker({ value, onChange, onClose }) {
-  const initial = normalizeRecurrence(value) || { interval: 1, unit: 'week', daysOfWeek: [new Date().getDay()], ends: { type: 'never' } };
-  const [r, setR] = useState(initial);
-
-  const toggleDay = (i) => setR(p => ({
-    ...p,
-    daysOfWeek: p.daysOfWeek.includes(i)
-      ? p.daysOfWeek.filter(d => d !== i)
-      : [...p.daysOfWeek, i].sort(),
-  }));
-
-  const setEnds = (ends) => setR(p => ({ ...p, ends }));
-
-  const todayIso = (() => { const d = new Date(); d.setHours(12,0,0,0); return d.toISOString(); })();
-
-  return (
-    <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-[fadeIn_.15s_ease]" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="w-full max-w-sm bg-[#0f1017] rounded-2xl border border-white/10 p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold text-white font-display">Repeat</h3>
-          <button onClick={onClose} className="text-white/50 hover:text-white transition-colors"><X className="w-4 h-4" /></button>
-        </div>
-
-        <div>
-          <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5">Repeats every</div>
-          <div className="flex gap-2">
-            <input type="number" min="1" value={r.interval}
-              onChange={e => setR(p => ({ ...p, interval: Math.max(1, parseInt(e.target.value) || 1) }))}
-              className="w-20 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-violet-400/40" />
-            <SelectPill label="Unit" value={r.unit}
-              options={[['day','day'],['week','week'],['month','month'],['year','year']]}
-              onChange={v => setR(p => ({ ...p, unit: v }))} />
-          </div>
-        </div>
-
-        {r.unit === 'week' && (
-          <div>
-            <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-2">On these days</div>
-            <div className="flex gap-1.5 justify-between">
-              {DAY_LABELS.map((label, i) => {
-                const active = r.daysOfWeek.includes(i);
-                return (
-                  <button key={i} onClick={() => toggleDay(i)} type="button"
-                    className={cx('w-9 h-9 rounded-full text-xs font-semibold transition-all',
-                      active
-                        ? 'bg-violet-500 text-white shadow-md shadow-violet-500/40'
-                        : 'bg-white/5 text-white/60 hover:bg-white/10 border border-white/10')}>
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        <div>
-          <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-2">Ends</div>
-          <div className="space-y-1.5">
-            <label className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/5 cursor-pointer">
-              <input type="radio" name="ends" checked={r.ends.type === 'never'}
-                onChange={() => setEnds({ type: 'never' })}
-                className="accent-violet-500" />
-              <span className="text-sm text-white/85 flex-1">Never</span>
-            </label>
-            <label className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/5 cursor-pointer">
-              <input type="radio" name="ends" checked={r.ends.type === 'on'}
-                onChange={() => setEnds({ type: 'on', date: r.ends.date || todayIso })}
-                className="accent-violet-500" />
-              <span className="text-sm text-white/85">On</span>
-              <input type="date" disabled={r.ends.type !== 'on'}
-                value={r.ends.type === 'on' && r.ends.date ? r.ends.date.slice(0,10) : ''}
-                onChange={e => setEnds({ type: 'on', date: e.target.value ? new Date(e.target.value + 'T12:00:00').toISOString() : todayIso })}
-                className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-sm text-white/90 outline-none focus:border-violet-400/40 disabled:opacity-40 ml-auto" />
-            </label>
-            <label className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/5 cursor-pointer">
-              <input type="radio" name="ends" checked={r.ends.type === 'after'}
-                onChange={() => setEnds({ type: 'after', count: r.ends.count || 10 })}
-                className="accent-violet-500" />
-              <span className="text-sm text-white/85">After</span>
-              <input type="number" min="1" disabled={r.ends.type !== 'after'}
-                value={r.ends.type === 'after' ? (r.ends.count || 10) : 10}
-                onChange={e => setEnds({ type: 'after', count: Math.max(1, parseInt(e.target.value) || 1) })}
-                className="w-16 bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-sm text-white outline-none focus:border-violet-400/40 disabled:opacity-40 ml-auto" />
-              <span className="text-xs text-white/50">occurrences</span>
-            </label>
-          </div>
-        </div>
-
-        <div className="rounded-lg bg-violet-500/10 border border-violet-500/20 px-3 py-2 text-xs text-violet-200 flex items-center gap-2">
-          <RefreshCw className="w-3.5 h-3.5 shrink-0" />
-          <span className="leading-snug">{formatRecurrence(r) || 'Set repeat schedule'}</span>
-        </div>
-
-        <div className="flex justify-end gap-2 pt-1">
-          {value && isRecurring(value) && (
-            <button onClick={() => { onChange(null); onClose(); }} type="button"
-              className="px-3 py-2 text-xs text-rose-300 hover:text-rose-200 transition-colors mr-auto">
-              Remove repeat
-            </button>
-          )}
-          <button onClick={onClose} type="button"
-            className="px-4 py-2 text-xs text-white/70 hover:text-white transition-colors">
-            Cancel
-          </button>
-          <button onClick={() => { onChange(r); onClose(); }} type="button"
-            className="px-4 py-2 text-xs font-semibold rounded-full bg-violet-500 text-white hover:bg-violet-400 transition-colors">
-            Done
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /* =================================================================================
    QUICK ADD
@@ -2321,12 +2209,16 @@ function QuickAdd() {
       // Private view -> Private + personal project.
       setAssigneeId(meId ?? null);
       setPriority('medium');
-      if (view === 'private') { setPrivacy('private'); setProject('personal'); }
-      else { setPrivacy('workspace'); setProject('other'); }
+      // Default project resolved against the workspace's REAL projects — see defaultProjectId. The
+      // old code hardcoded the seed ids 'personal' (private view) and 'other', neither of which
+      // exists in every workspace, so a quick-add could file a task under an id that resolves to
+      // nothing: no chip, no error, effectively unfiled.
+      setPrivacy(view === 'private' ? 'private' : 'workspace');
+      setProject(defaultProjectId(projects, view === 'private' ? 'personal' : 'other'));
     } else {
       setTitle('');
     }
-  }, [quickAddOpen, view, meId]);
+  }, [quickAddOpen, view, meId, projects]);
 
   if (!quickAddOpen) return null;
 
@@ -3207,9 +3099,10 @@ function ConfirmModal({ open, title, message, confirmLabel = 'Delete', confirmDi
  * delete_project RPC, which enforces the rank + workspace + caller-visibility rules server-side.
  * taskCount: null = checking, -1 = error, >=0 = reliable count (from the project_task_count RPC).
  */
-function ProjectDeleteModal({ open, project, taskCount, isOwner, onCancel, onConfirm }) {
+function ProjectDeleteModal({ open, project, projects, taskCount, isOwner, onCancel, onConfirm }) {
   const [mode, setMode] = useState('unassign');   // 'unassign' | 'cascade'
   const [confirmText, setConfirmText] = useState('');
+  const [dest, setDest] = useState('');           // chosen destination project id ('' = not yet chosen)
   const panelRef = useRef(null);
   useEffect(() => { if (open) setTimeout(() => panelRef.current?.focus(), 30); }, [open]);
   if (!open || !project) return null;
@@ -3217,14 +3110,29 @@ function ProjectDeleteModal({ open, project, taskCount, isOwner, onCancel, onCon
   const checking = taskCount === null;
   const errored = taskCount === -1;
   const count = typeof taskCount === 'number' && taskCount > 0 ? taskCount : 0;
-  const reassignTo = project.id === 'other' ? 'personal' : 'other';   // where kept tasks land
+
+  // THE DESTINATION IS NOW CHOSEN, NOT GUESSED. This used to be
+  //     const reassignTo = project.id === 'other' ? 'personal' : 'other';
+  // — a hardcoded SEED id. `tasks.project` is free text with no FK, and the RPC did not validate the
+  // target, so moving tasks to an id that does not resolve silently UNFILED them: the chip just
+  // disappears and nothing errors. Live check 2026-07-19: NO workspace has a project called 'other',
+  // and two of three lack 'personal', so this path was wrong for essentially every project.
+  // Now: real projects only, excluding the one being deleted, defaulting to the first.
+  const candidates = (projects || []).filter(p => p.id !== project.id);
+  const destId = dest && candidates.some(p => p.id === dest) ? dest : (candidates[0]?.id || '');
+  const destName = candidates.find(p => p.id === destId)?.name || '';
+  // With nowhere to move them to, "Keep the tasks" is not offerable. Owners can still cascade; a
+  // non-owner is left with no valid action, and the modal says so rather than failing on confirm.
+  const noDestination = candidates.length === 0;
+
   const cascadeReady = mode !== 'cascade' || confirmText.trim() === (project.name || '').trim();
-  const canConfirm = !checking && !errored && cascadeReady;
+  const unassignReady = mode !== 'unassign' || count === 0 || !!destId;
+  const canConfirm = !checking && !errored && cascadeReady && unassignReady;
   // reset in the close handlers (not an effect) so a reopened modal starts fresh — cascade must always
   // require re-typing the project name — while staying clear of the react-hooks/set-state-in-effect rule.
-  const reset = () => { setMode('unassign'); setConfirmText(''); };
+  const reset = () => { setMode('unassign'); setConfirmText(''); setDest(''); };
   const handleCancel = () => { reset(); onCancel(); };
-  const doConfirm = () => { if (!canConfirm) return; const m = mode, r = reassignTo; reset(); onConfirm(m, r); };
+  const doConfirm = () => { if (!canConfirm) return; const m = mode, r = destId; reset(); onConfirm(m, r); };
 
   return createPortal(
     <>
@@ -3246,10 +3154,31 @@ function ProjectDeleteModal({ open, project, taskCount, isOwner, onCancel, onCon
           {!checking && !errored && count > 0 && (
             <div className="space-y-2 mb-4">
               <p className="text-xs text-white/55">“{project.name}” has {count} task{count === 1 ? '' : 's'}. Choose what happens to them:</p>
-              <label className={cx('flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-colors',
-                mode === 'unassign' ? 'border-violet-400/50 bg-violet-500/10' : 'border-white/10 hover:bg-white/5')}>
-                <input type="radio" name="pdmode" checked={mode === 'unassign'} onChange={() => setMode('unassign')} className="mt-0.5" />
-                <span className="text-xs text-white/80"><span className="font-medium text-white">Keep the tasks</span> — move them to “{reassignTo}”, then delete the project.</span>
+              <label className={cx('flex items-start gap-2.5 p-2.5 rounded-xl border transition-colors',
+                noDestination ? 'border-white/10 opacity-50 cursor-not-allowed'
+                  : cx('cursor-pointer', mode === 'unassign' ? 'border-violet-400/50 bg-violet-500/10' : 'border-white/10 hover:bg-white/5'))}>
+                <input type="radio" name="pdmode" checked={mode === 'unassign'} disabled={noDestination}
+                  onChange={() => setMode('unassign')} className="mt-0.5" />
+                <span className="text-xs text-white/80 min-w-0 flex-1">
+                  <span className="font-medium text-white">Keep the tasks</span>
+                  {noDestination
+                    ? <> — unavailable: this is the only project, so there is nowhere to move them.</>
+                    : <> — move them to another project, then delete “{project.name}”.</>}
+                  {!noDestination && (
+                    <span className="mt-2 flex items-center gap-2">
+                      <span className="text-[11px] text-white/50 shrink-0">Move to</span>
+                      {/* A real picker over the workspace's REAL projects. Rendering it inside the label
+                          is fine — a <select> is not a nested button — but stopPropagation keeps a click
+                          on the dropdown from also toggling the radio underneath it. */}
+                      <select value={destId} onChange={e => { setDest(e.target.value); setMode('unassign'); }}
+                        onClick={e => e.stopPropagation()}
+                        aria-label="Destination project for the kept tasks"
+                        className="flex-1 min-w-0 h-8 px-2 rounded-lg bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-violet-400/50">
+                        {candidates.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    </span>
+                  )}
+                </span>
               </label>
               {isOwner && (
                 <label className={cx('flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-colors',
@@ -3277,7 +3206,13 @@ function ProjectDeleteModal({ open, project, taskCount, isOwner, onCancel, onCon
                 !canConfirm ? 'bg-white/10 text-white/40 cursor-not-allowed'
                   : mode === 'cascade' ? 'bg-rose-500 hover:bg-rose-400' : 'bg-violet-500 hover:bg-violet-400')}>
               <Trash2 className="w-3.5 h-3.5" />
-              {count > 0 && mode === 'cascade' ? `Delete project + ${count} task${count === 1 ? '' : 's'}` : 'Delete project'}
+              {/* Name the DESTINATION in the button, so the irreversible action states where the tasks
+                  are actually going rather than leaving it to the radio label above. */}
+              {count > 0 && mode === 'cascade'
+                ? `Delete project + ${count} task${count === 1 ? '' : 's'}`
+                : count > 0 && destName
+                  ? `Move ${count} task${count === 1 ? '' : 's'} to “${destName}” & delete`
+                  : 'Delete project'}
             </button>
           </div>
         </div>
@@ -4303,13 +4238,13 @@ function KanbanView() {
 }
 
 function ColumnQuickAdd({ status }) {
-  const { startDraftTask, filters, meId } = useApp();
+  const { startDraftTask, filters, meId, projects } = useApp();
   // "+ Add task" creates a row (status pre-set to this column, defaults from the active filters) and opens
   // the full TaskModal on it; an abandoned empty draft is auto-removed on close (AppProvider.closeEditing).
   const add = () => startDraftTask({
     status,
     assigneeId: filters.assignee === 'me' ? meId : (filters.assignee === 'unassigned' ? null : (filters.assignee !== 'all' ? filters.assignee : meId)),
-    project: filters.project !== 'all' ? filters.project : 'other',
+    project: filters.project !== 'all' ? filters.project : defaultProjectId(projects, 'other'),
     privacy: filters.privacy !== 'all' ? filters.privacy : 'workspace',
   });
   return (
@@ -4718,6 +4653,7 @@ function ProjectsView() {
       <ProjectDeleteModal
         open={!!deleteTarget}
         project={deleteTarget}
+        projects={projects}
         taskCount={deleteCount}
         isOwner={isOwner}
         onCancel={() => { setDeleteTarget(null); setDeleteCount(null); }}
@@ -5094,6 +5030,9 @@ function MsgAvatar({ name, userId, photoUrl, size = 28 }) {
 // This client gate is UX only (it hides the actions once stale); the server is authoritative and
 // rejects a late edit/delete that slips through (P0001), after which the caller reconciles.
 const MSG_EDIT_WINDOW_MS = 10 * 60 * 1000;
+// Broadcast when any message menu opens, carrying its menu id; every OTHER open menu closes on hearing
+// it. See the "ONLY ONE MENU OPEN AT A TIME" effect in MsgBubble for why this is an event and not state.
+const MSG_MENU_OPEN_EVENT = 'cc:msg-menu-open';
 
 /** "Dense" = a bubble whose box has no text half-leading to soften the gap to its neighbour: a voice
  *  note (fixed-height control row) or a tombstone. Drives the message-row spacing in MessageList. */
@@ -5115,6 +5054,8 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
   const [draft, setDraft] = useState('');
   const [actable, setActable] = useState(false);   // within the 10-min window — evaluated on menu open
   const btnRef = useRef(null);
+  const menuRef = useRef(null);
+  const menuId = useId();
 
   const deleted = !!m.deletedAt;
   const edited = !!m.editedAt;
@@ -5161,6 +5102,9 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
         : Math.max(8, Math.min(r.top - 6 - h, window.innerHeight - h - 8));
       setPos({ top, left });
     }
+    // Tell every other open menu to close (see the single-open effect). Dispatched BEFORE setMenu so
+    // this bubble's own listener is not yet attached and cannot close the menu we are opening.
+    window.dispatchEvent(new CustomEvent(MSG_MENU_OPEN_EVENT, { detail: menuId }));
     setMenu(true);
   };
 
@@ -5181,6 +5125,51 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [menu]);
+
+  // ONLY ONE MENU OPEN AT A TIME. `menu` is per-bubble local state, so before this every bubble could
+  // have its own menu open simultaneously — Escape then closed only the one whose effect happened to
+  // be mounted, and a stray portal could sit over the thread indefinitely.
+  // A window event rather than lifted state: these bubbles are siblings scattered through a list with
+  // no common owner, and MsgBubble is shared by ChatView and DmThread — lifting `menu` would mean
+  // threading an open-id through MessageList and both callers for no behavioural gain.
+  useEffect(() => {
+    if (!menu) return;
+    const onOtherOpened = (e) => { if (e.detail !== menuId) setMenu(false); };
+    window.addEventListener(MSG_MENU_OPEN_EVENT, onOtherOpened);
+    return () => window.removeEventListener(MSG_MENU_OPEN_EVENT, onOtherOpened);
+  }, [menu, menuId]);
+
+  // MOVE FOCUS INTO THE MENU on open. This is the fix for the real defect: the trigger was
+  // keyboard-reachable (focus-visible) but the ITEMS never were. The menu is portaled to the END of
+  // document.body, so Tab from the trigger went to the NEXT bubble's trigger — reaching "Delete for
+  // me" meant tabbing through the rest of the application. Focus is restored to the trigger on
+  // Escape (above) and on close via the item handlers.
+  // Depends on `pos` too: the portal does not render until pos is set, so focusing on `menu` alone
+  // would run before the items exist.
+  useEffect(() => {
+    if (!menu || !pos) return;
+    const first = menuRef.current?.querySelector('[data-menuitem]');
+    first?.focus();
+  }, [menu, pos]);
+
+  // Roving focus within the menu. Items are real buttons, so Enter/Space already activate them and
+  // Tab still works; this adds the arrow/Home/End conventions a menu is expected to honour.
+  const onMenuKeyDown = (e) => {
+    const items = Array.from(menuRef.current?.querySelectorAll('[data-menuitem]') || []);
+    if (!items.length) return;
+    const i = items.indexOf(document.activeElement);
+    const go = (n) => { e.preventDefault(); items[(n + items.length) % items.length].focus(); };
+    if (e.key === 'ArrowDown') go(i + 1);
+    else if (e.key === 'ArrowUp') go(i - 1);
+    else if (e.key === 'Home') go(0);
+    else if (e.key === 'End') go(items.length - 1);
+  };
+
+  // Close when focus leaves the menu entirely (Tab off the last item, or a click elsewhere).
+  // relatedTarget is null for a click on non-focusable chrome, which is also a leave.
+  const onMenuBlur = (e) => {
+    if (!menuRef.current?.contains(e.relatedTarget)) setMenu(false);
+  };
   const copy = () => { try { navigator.clipboard?.writeText(m.body || ''); } catch { /* ignore */ } setMenu(false); };
   const startEdit = () => { setDraft(m.body || ''); setEditing(true); setMenu(false); };
   const saveEdit = () => {
@@ -5211,25 +5200,27 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
           <div className="fixed inset-0 z-[70]" onClick={() => setMenu(false)} />
           {/* maxHeight + scroll so an extreme viewport degrades gracefully: a `fixed` box with no
               overflow would put the last row off-screen with no way to reach it. */}
-          <div className="fixed z-[71] w-44 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1 overflow-y-auto"
+          <div ref={menuRef} role="menu" aria-label="Message actions"
+            onKeyDown={onMenuKeyDown} onBlur={onMenuBlur}
+            className="fixed z-[71] w-44 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1 overflow-y-auto"
             style={{ top: pos.top, left: pos.left, maxHeight: 'calc(100vh - 16px)', animation: 'slideUp .12s ease' }}>
             {showEdit && (
-              <button onClick={startEdit} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5 whitespace-nowrap">
+              <button onClick={startEdit} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5 whitespace-nowrap">
                 <Edit3 className="w-3.5 h-3.5" />Edit
               </button>
             )}
             {canCopy && (
-              <button onClick={copy} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5 whitespace-nowrap">
+              <button onClick={copy} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5 whitespace-nowrap">
                 <Copy className="w-3.5 h-3.5" />Copy
               </button>
             )}
             {canHide && (
-              <button onClick={() => { setMenu(false); onHide?.(m); }} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5 whitespace-nowrap">
+              <button onClick={() => { setMenu(false); btnRef.current?.focus(); onHide?.(m); }} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5 whitespace-nowrap">
                 <EyeOff className="w-3.5 h-3.5" />Delete for me
               </button>
             )}
             {showDeleteAll && (
-              <button onClick={() => { setMenu(false); onDelete?.(m); }} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-rose-300 hover:bg-rose-500/10 whitespace-nowrap">
+              <button onClick={() => { setMenu(false); btnRef.current?.focus(); onDelete?.(m); }} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-rose-300 hover:bg-rose-500/10 whitespace-nowrap">
                 <Trash2 className="w-3.5 h-3.5" />Delete for everyone
               </button>
             )}
@@ -5518,10 +5509,15 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
               members={mentionMembers} meId={meId} onEnter={submit} onTyping={onTyping} onBlur={() => onStopTyping?.()} rows={1}
               placeholder={placeholder}
               className="max-h-[140px] bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none overflow-y-hidden leading-relaxed" />
+            {/* focus-visible RING, not just the border tint. `focus:outline-none` suppressed the UA
+                ring and the only replacement was a 1px border going white/10 -> violet-400/50: a
+                1.92:1 state change in dark and 2.23:1 in light — effectively invisible, and well under
+                the WCAG 1.4.11 3:1 minimum for a non-text indicator. This was the ONLY
+                `focus:outline-none` in the file with no ring beside it; the other three already pair one. */}
             <button onClick={() => canVoice ? onStartRecording() : onUpgradeVoice?.()} disabled={sending}
               aria-label={canVoice ? 'Record a voice note' : 'Upgrade to unlock voice notes'}
               title={canVoice ? 'Record a voice note' : 'Upgrade to unlock voice notes'}
-              className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white/90 hover:border-white/20 focus:outline-none focus:border-violet-400/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 shrink-0">
+              className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white/90 hover:border-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70 focus:border-violet-400/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 shrink-0">
               {canVoice ? <Mic className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}
             </button>
             <button onClick={submit} disabled={!text.trim() || sending}
@@ -5739,6 +5735,12 @@ function ChatView() {
     setItems(prev => prev.filter(x => x.id !== m.id));
     try {
       await messagesApi.hide(m.id);
+      setHiddenCount(n => n + 1);
+      // UNDO, offered at the only moment the user is still thinking about it. The DB has supported
+      // this since the migration shipped (message_hides carries a DELETE policy AND a grant), but the
+      // UI never offered it — so "Delete for me" was irreversible in-product. That is the same
+      // "built but not wired" shape the hide feature itself sat in for three days.
+      showToast('Message hidden for you.', 'info', { label: 'Undo', onClick: () => restoreOne(m.id) });
       // NB no badge refresh here, and that is deliberate — it is where team chat legitimately
       // DIVERGES from DmThread.hideForMe, which does call refreshDms. A hide fires no realtime event
       // (message_hides is unpublished), so nothing self-heals; the question is whether anything
@@ -5758,6 +5760,37 @@ function ChatView() {
       showToast("Couldn't hide that message — it's back in the channel.");
       messagesApi.list(200, currentWorkspaceId).then(setItems).catch(logCaught('messages.reconcile'));
     }
+  };
+
+  // ---- Restoring hidden messages -------------------------------------------------------------
+  // `hiddenCount` drives the "N hidden" affordance in the header, so a hide is discoverable and
+  // reversible LATER too — the undo toast only covers the next few seconds.
+  const [hiddenCount, setHiddenCount] = useState(0);
+  useEffect(() => {
+    if (!currentWorkspaceId) return;
+    let on = true;
+    messagesApi.hiddenCount(currentWorkspaceId)
+      .then(n => { if (on) setHiddenCount(n); })
+      .catch(logCaught('messages.hiddenCount'));
+    return () => { on = false; };
+  }, [currentWorkspaceId]);
+
+  // Undo ONE hide (the toast action). Re-reads the thread rather than splicing the message back at a
+  // remembered index: `items` has moved on, and the RPC returns it in the right place by created_at.
+  const restoreOne = async (id) => {
+    try {
+      await messagesApi.unhide(id);
+      setHiddenCount(n => Math.max(0, n - 1));
+      setItems(await messagesApi.list(200, currentWorkspaceId));
+    } catch (e) { reportError(e, 'messages.unhide'); showToast("Couldn't restore that message."); }
+  };
+
+  const restoreAllHidden = async () => {
+    try {
+      await messagesApi.unhideAll(currentWorkspaceId);
+      setHiddenCount(0);
+      setItems(await messagesApi.list(200, currentWorkspaceId));
+    } catch (e) { reportError(e, 'messages.unhideAll'); showToast("Couldn't restore your hidden messages."); }
   };
 
   // ---- Read receipts: each member's avatar sits under the last message they have read ----------
@@ -5858,6 +5891,18 @@ function ChatView() {
           <div className="text-sm font-semibold text-white/90 leading-tight">Team chat</div>
           <div className="text-[10px] text-white/35 leading-tight">Everyone in this workspace</div>
         </div>
+        {/* Hidden-message escape hatch. Without this, "Delete for me" is a one-way door the moment the
+            undo toast expires: the message is gone from every read path (thread, search, unread), so
+            there is no way to even discover it still exists. Only rendered when there is something to
+            restore, so it costs nothing in the common case. */}
+        {hiddenCount > 0 && (
+          <button onClick={restoreAllHidden} type="button"
+            title={`You have hidden ${hiddenCount} message${hiddenCount === 1 ? '' : 's'} in this channel. Restore them?`}
+            className="shrink-0 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-white/10 bg-white/5 text-[11px] text-white/60 hover:text-white/90 hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70 transition-colors">
+            <EyeOff className="w-3 h-3" />
+            {hiddenCount} hidden — restore
+          </button>
+        )}
         {/* Facepile: shows WHO "everyone" actually is. Overlapped and capped at 4 + a "+N"; each face opens
             that person's profile. No ring separator — Avatar's own border does it and stays theme-safe. */}
         {members.length > 0 && (
@@ -6288,6 +6333,10 @@ function DmThread({ conversationId, peerId, onBack }) {
     setItems(prev => prev.filter(x => x.id !== m.id));
     try {
       await directMessagesApi.hide(m.id);
+      setHiddenCount(n => n + 1);
+      // Same undo affordance as team chat. dm_message_hides has carried a DELETE policy + grant since
+      // 20260716000040 and nothing ever called it, so this half of the feature was dead for three days.
+      showToast('Message hidden for you.', 'info', { label: 'Undo', onClick: () => restoreOne(m.id) });
       // dm_message_hides is deliberately OUT of the realtime publication, so nothing tells the
       // conversation list that this thread's preview (and possibly its unread badge) just changed.
       // remove/edit self-heal via the dm_messages UPDATE event; a hide has no such event.
@@ -6302,6 +6351,35 @@ function DmThread({ conversationId, peerId, onBack }) {
       showToast("Couldn't hide that message — it's back in the thread.");
       directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(logCaught('dms.reconcile'));
     }
+  };
+
+  // ---- Restoring hidden messages (the twin of ChatView's) -------------------------------------
+  const [hiddenCount, setHiddenCount] = useState(0);
+  useEffect(() => {
+    if (!conversationId) return;
+    let on = true;
+    directMessagesApi.hiddenCount(conversationId)
+      .then(n => { if (on) setHiddenCount(n); })
+      .catch(logCaught('dms.hiddenCount'));
+    return () => { on = false; };
+  }, [conversationId]);
+
+  const restoreOne = async (id) => {
+    try {
+      await directMessagesApi.unhide(id);
+      setHiddenCount(n => Math.max(0, n - 1));
+      setItems(await directMessagesApi.listMessages(conversationId, 200));
+      refreshDms?.(currentWorkspaceId);   // the preview may change back
+    } catch (e) { reportError(e, 'dms.unhide'); showToast("Couldn't restore that message."); }
+  };
+
+  const restoreAllHidden = async () => {
+    try {
+      await directMessagesApi.unhideAll(conversationId);
+      setHiddenCount(0);
+      setItems(await directMessagesApi.listMessages(conversationId, 200));
+      refreshDms?.(currentWorkspaceId);
+    } catch (e) { reportError(e, 'dms.unhideAll'); showToast("Couldn't restore your hidden messages."); }
   };
 
   // Edit own DM text in place; the DB trigger enforces the 10-minute window + stamps edited_at.
@@ -6342,6 +6420,16 @@ function DmThread({ conversationId, peerId, onBack }) {
             </div>
           </div>
         </PersonButton>
+        {/* Hidden-message escape hatch — the twin of ChatView's. See that one for why a hide needs a
+            way back after the undo toast expires. */}
+        {hiddenCount > 0 && (
+          <button onClick={restoreAllHidden} type="button"
+            title={`You have hidden ${hiddenCount} message${hiddenCount === 1 ? '' : 's'} in this thread. Restore them?`}
+            className="shrink-0 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-white/10 bg-white/5 text-[11px] text-white/60 hover:text-white/90 hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70 transition-colors">
+            <EyeOff className="w-3 h-3" />
+            {hiddenCount} hidden — restore
+          </button>
+        )}
       </div>
 
       <MessageList

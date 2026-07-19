@@ -967,6 +967,28 @@ in the same change** (see *Chat pass (2026-07-19)*).
 `invitations_role_check` widen + `p_role` arg on `create_invitation` + the Members invite-form toggle; 6/6
 rolled-back proof). See *Workspace roles, mentions & guest UX*.
 
+### KNOWN GAP — advertised-but-unenforced plan limits (owner-accepted 2026-07-19, deliberately deferred)
+
+**`historyDays`, `prioritySupport`, `seats` and `workspaces` are advertised on the pricing page and
+enforced NOWHERE.** Confirmed against the live catalog, not just the docs: there are **zero plan or
+billing columns** anywhere in the schema, and `private._create_workspace` / `private._create_invitation`
+contain **no count checks at all** — so the seats and workspaces limits are pure client-side UX.
+`historyDays` has no retention job of any kind, and `prioritySupport` has no mechanism in the product.
+
+**This is deferred ON PURPOSE, not forgotten.** Enforcing it requires the **per-account vs
+per-workspace** billing decision the owner has not made yet (the packaging realignment currently reads
+per-account, but nothing implements it). Building enforcement before that decision would mean
+enforcing the wrong shape. Everything resolves to the all-access `founding` plan today, so nothing is
+mis-sold in practice.
+
+**When billing is built, this is the first thing to close** — see *Roadmap* item 2. Until then, do not
+"fix" one of these four in isolation; they share the same missing foundation.
+
+*(Contrast with `recurringTasks`, which was advertised the same way and was REMOVED on 2026-07-19 —
+see the RECURRENCE note in `VisualTaskCommandCenter.jsx`. The difference: recurring tasks had no
+backend and no path to one without a design decision, whereas these four are limits whose enforcement
+is well-understood and merely blocked on a pricing-model choice.)*
+
 **Before real paid traffic (flagged by the 2026-06-26 audit — none applied yet):**
 1. **Auth dashboard hardening** (Supabase dashboard — no code): **password minimum raised 6 → 10**
    (2026-07-06; app UI hints/validation synced same day). **Leaked Password Protection = ACCEPTED risk — do

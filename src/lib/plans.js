@@ -19,7 +19,6 @@
 // ── Gateable feature keys (the power-feature levers actually enforced in the UI) ──
 export const FEATURE = {
   voiceNotes: 'voiceNotes',
-  recurringTasks: 'recurringTasks',
   bulkImport: 'bulkImport',
   prioritySupport: 'prioritySupport',
 };
@@ -59,7 +58,7 @@ export const PLANS = {
     tagline: 'Early access, every feature unlocked.',
     price: { monthly: 0, annual: 0 },
     limits: { seats: Infinity, workspaces: Infinity, historyDays: Infinity },
-    features: { voiceNotes: true, recurringTasks: true, bulkImport: true, prioritySupport: true },
+    features: { voiceNotes: true, bulkImport: true, prioritySupport: true },
   },
 
   free: {
@@ -69,16 +68,16 @@ export const PLANS = {
     tagline: 'Get your first team coordinated.',
     price: { monthly: 0, annual: 0 },
     limits: { seats: 3, workspaces: 1, historyDays: 30 },
-    // Core task management + onboarding stay FREE so adoption isn't gated: recurring tasks and bulk
-    // import are part of getting set up, not a power-team perk. Voice notes are the Pro upgrade.
-    features: { voiceNotes: false, recurringTasks: true, bulkImport: true, prioritySupport: false },
+    // Core task management + onboarding stay FREE so adoption isn't gated: bulk import is part of
+    // getting set up, not a power-team perk. Voice notes are the Pro upgrade.
+    features: { voiceNotes: false, bulkImport: true, prioritySupport: false },
     cta: 'Start free',
     ctaTo: '/signup',
     highlights: [
       'Up to 3 members',
       '1 workspace',
       'Unlimited tasks across board, priority matrix & schedule',
-      'Recurring tasks & bulk import',
+      'Bulk import',
       'Team chat & direct messages',
       '30-day message history',
       'Export your data anytime',
@@ -93,7 +92,7 @@ export const PLANS = {
     tagline: 'Coordinate a growing, distributed team.',
     price: { monthly: 19, annual: 190 }, // HYPOTHESIS — annual ≈ 2 months free
     limits: { seats: 15, workspaces: 3, historyDays: Infinity },
-    features: { voiceNotes: true, recurringTasks: true, bulkImport: true, prioritySupport: false },
+    features: { voiceNotes: true, bulkImport: true, prioritySupport: false },
     cta: 'Choose Pro',
     inherits: 'Free',
     highlights: [
@@ -111,7 +110,7 @@ export const PLANS = {
     tagline: 'Run several teams from one hub.',
     price: { monthly: 49, annual: 490 }, // HYPOTHESIS — annual ≈ 2 months free
     limits: { seats: 50, workspaces: 10, historyDays: Infinity },
-    features: { voiceNotes: true, recurringTasks: true, bulkImport: true, prioritySupport: true },
+    features: { voiceNotes: true, bulkImport: true, prioritySupport: true },
     cta: 'Choose Business',
     inherits: 'Pro',
     highlights: [
@@ -143,8 +142,11 @@ export const DEFAULT_PLAN_ID = 'founding';
    lever names the cheapest tier that unlocks it so the modal can route there.
 ----------------------------------------------------------------------------- */
 export const FEATURE_META = {
-  // Voice notes are the only power FEATURE behind Pro now (recurring tasks + bulk import moved to
-  // Free). seats/workspaces are the "grows with success" LIMITS that also route here.
+  // Voice notes are the only power FEATURE behind Pro now (bulk import is on Free). seats/workspaces
+  // are the "grows with success" LIMITS that also route here.
+  // NB `recurringTasks` was removed 2026-07-19. The feature had NO backend of any kind and was
+  // advertised on every tier; see the RECURRENCE note in VisualTaskCommandCenter.jsx. Do not
+  // re-add the entitlement key until there is something to gate.
   voiceNotes: {
     label: 'Voice notes',
     blurb: 'Record and send voice messages in team chat and direct messages. Great for briefing distributed teammates async.',
@@ -176,7 +178,6 @@ export const FEATURE_TABLE = [
   { label: 'Members (seats)', type: 'limit', key: 'seats' },
   { label: 'Workspaces', type: 'limit', key: 'workspaces' },
   { label: 'Tasks, board, priority matrix & schedule', type: 'always' },
-  { label: 'Recurring tasks', type: 'always' },
   { label: 'Bulk import', type: 'always' },
   { label: 'Team chat & direct messages', type: 'always' },
   { label: 'Message history', type: 'history', key: 'historyDays' },
