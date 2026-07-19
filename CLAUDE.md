@@ -1,11 +1,15 @@
 # Command Center — project guide for Claude
 
 > Orientation file so any future session is instantly up to speed. Last verified against the
-> live DB on **2026-07-19** — current through `20260719134752`
-> (message_hides_team_chat); see *Chat pass (2026-07-19)*, which also closed a **live cursor-repudiation
-> hole in `dm_reads`** and is the first DB work in a while that shipped **fully wired into the UI in the
-> same change**. That pass is **merged and live** at `main` tip **`ca847e3`** (regression **267/267**);
-> rollback is `git revert -m 1 ca847e3`, client-only — see the box in that section.
+> live DB on **2026-07-19** — current through `20260719172122`
+> (delete_project_validate_reassign_target); see *Remediation pass (2026-07-19)*, which stopped
+> "Keep the tasks" from silently unfiling them, made "Delete for me" reversible, and removed the
+> recurring-tasks UI that had **no backend at all**. Earlier the same day, *Chat pass (2026-07-19)*
+> shipped team-chat read receipts + "Delete for me" and closed a **live cursor-repudiation hole in
+> `dm_reads`**. Both are **merged and live** — `main` tip **`c2004b3`**, regression **519/519**;
+> rollback `git revert -m 1 c2004b3`, and LEAVE the migration applied (see that section's box).
+> **AWAITING APPROVAL:** the avatars quota/rate-limit/sweep + public→private conversion, designed and
+> proven but deliberately NOT applied — see *Avatars hardening (proposed)*.
 > Previous anchor: `20260718195854`
 > (accept_invitation_email_confirm_guard); see *DB pass (2026-07-18)*. Earlier anchor:
 > **task file attachments** shipped 2026-07-12 (see *Task attachments*). Two production bugs were found
@@ -591,6 +595,107 @@ Files on a task (briefs, deliverables, images, docs). Three DB migrations + a cl
   authorize it) then the row. Client MIME/size/count checks are UX only — the server RLS/bucket is authoritative.
 - **Proven:** feasibility A-E 14/14 (delegation matrix + happy path + outsider blocks); quotas (size, per-task
   20, rate 60 delete-resistant); orphan sweep 5/5; regression isolation 36/36 + role 40/40 + storage 14/14.
+
+## Avatars hardening (PROPOSED 2026-07-19 — designed + proven, **NOT APPLIED**, awaiting approval)
+
+Two migrations that **must land together, in this order, in the same deploy as their client half**.
+Either alone leaves the product broken: the first leaves "Remove photo" orphaning, the second breaks
+rendering. Files in `supabase/proposed/`.
+
+1. **`PROPOSED_avatars_quota_rate_limit_and_orphan_sweep.sql` — 37/37 proven.** `avatars` is the only
+   bucket of the three with **no rate limit, no byte quota and no object cap**; this adds 12/hr
+   (delete-resistant, operations-counted via an append-only log), 20 objects / 20 MB per user, and an
+   hourly orphan sweep carrying the 20260715142424 **age guard**.
+   **→ Landmine already paid for once:** the first draft used
+   `perform set_config('session_replication_role','replica',true)`, which raises **42501** because
+   this project's `postgres` is **not a superuser** — the cron job would have errored every hour
+   forever, silently. Use `SET LOCAL`, as the shipped precedent does. The proof now carries a
+   permanent regression guard (S00) against reintroducing it.
+2. **`PROPOSED_avatars_private_bucket_and_signed_urls.sql` — 30/30 proven.** Flips the bucket to
+   PRIVATE. **Why:** it is the only public bucket, so "Remove photo" leaves a **world-readable** image
+   live forever, and any co-member who receives a URL holds a permanent, unrevokable,
+   anonymously-fetchable link that outlives their membership.
+   **The design in one line:** `avatar_url` stops storing a URL and stores the **storage PATH**; a
+   co-workspace SELECT policy gates on the object being *referenced* by a members row you may see;
+   and the sweep's matching rule becomes exact equality against that same column — giving one
+   invariant: **an object is VISIBLE iff it is REFERENCED iff it is NOT SWEPT.**
+
+**Four things a future reader must not undo:**
+- **The hard blocker:** `avatars_select_own` is own-folder ONLY. While the bucket is public that never
+  mattered (the public endpoint bypasses RLS), but signing needs SELECT — proven by impersonation
+  that a workspace admin selects **zero** of a co-member's avatar objects. Flipping the flag alone
+  silently degrades **every avatar except your own** to initials.
+- **The trigger pin became a CONTROL.** `members_validate_profile` pins the path to the ROW OWNER's
+  own uid. Under the old URL rule that was tidiness; now that `avatar_url` **grants read access to
+  the object it names**, without the pin user A could set it to user B's path and publish B's private
+  image to A's whole workspace.
+- **The sweep rule is the sharpest edge.** Suffix matching via `right()` *happens to still work* under
+  a path column — it fails **silently correct**, which is exactly what makes it dangerous. Replaced
+  with exact equality, which **cannot** match a legacy URL, so a skipped backfill would make the next
+  hourly run **delete a live avatar**. Mitigated twice: a refuse-to-commit backfill guard, and a
+  fail-safe that RAISES rather than deletes if any `avatar_url` is not a bare path.
+- **`storage.protect_delete()` is a STATEMENT-level BEFORE DELETE trigger**, so a direct SQL delete on
+  `storage.objects` raises 42501 *before RLS is consulted* — an avatars DELETE-policy outcome is
+  therefore **not behaviourally provable in SQL** (the proof pins it structurally instead, and says
+  so). This is also why the sweep's `SET LOCAL session_replication_role='replica'` is load-bearing.
+
+**Client half (specified, not written):** `uploadAvatar` returns a path; a batched `createSignedUrls`
+(**plural** — one request per workspace, not per avatar) cache with TTL refresh; **`Avatar`'s
+`onError` must reset on `photoUrl` change** or one expired URL permanently degrades a face to
+initials; `removeAvatar` actually deleting the object on Remove-photo AND on re-upload.
+
+**Two test files must change in the SAME commit** (house landmine rule): `avatars_upload_rls` (its
+S01/S02 are *deliberately inverted* by the new co-workspace policy) and `profile_and_avatar` (it
+plants public-URL values the new trigger rejects).
+
+## Remediation pass (2026-07-19, later the same day) — data integrity, a11y, dead code
+
+> **MERGED AND LIVE.** `main` tip **`c2004b3`**; production serves `index-B1SY169F.js`,
+> SHA256-identical to a local build of that tree. Previous state `ce9741a`.
+> **Rollback: `git revert -m 1 c2004b3 && git push`** — and **LEAVE `20260719172122` APPLIED.**
+> It is strictly protective: the pre-merge client sent a hardcoded seed id that the new validation
+> rejects LOUDLY (P0002) instead of silently unfiling tasks. Reverting the migration would restore
+> the data-loss path. Revert the client, re-apply forward.
+
+Triggered by a post-deploy audit of the chat pass. Regression after: **519 assertions across 15
+suites, zero real failures**; advisors clean (13 lints, zero new). Build clean, lint held at **12/2**.
+
+- **`_delete_project` now validates the reassign target** (`20260719172122`). It checked the target
+  was non-blank and different, and that the project being DELETED existed — but never that the
+  **target** resolved. `tasks.project` is free text with **no FK**, so "Keep the tasks" moved them
+  onto an unresolvable id and silently unfiled them; the chip just disappears and nothing errors.
+  **0 tasks were already stranded** (checked live before applying) but the trap was armed everywhere:
+  **no workspace has a project `'other'`** and two of three lack `'personal'` — the exact ids the
+  client hardcoded. Shipped WITH its client half by necessity: alone it converts a silent stranding
+  into a loud P0002 on nearly every project. The modal now has a real destination **picker**, and a
+  shared **`defaultProjectId()`** fixed the same assumption in **five** call sites.
+- **"Delete for me" is finally reversible.** Both `message_hides` and `dm_message_hides` shipped a
+  DELETE policy AND a grant that **nothing ever called** — the same built-but-not-wired shape as the
+  hide feature itself. Added `unhide`/`unhideAll`/`hiddenCount` on both surfaces, an **Undo** toast
+  (`showToast` gained an optional `{label,onClick}` action, 8s), and a persistent
+  **"N hidden — restore"** header control for after the toast expires.
+- **Recurring tasks REMOVED from the UI** (owner decision: remove now, build later). No DB function,
+  trigger or cron job ever read `tasks.recurring`; five live tasks had carried active rules since
+  2026-04-26 producing nothing, while it was advertised on **every** pricing tier. Column and
+  `sanitize.js` round-trip retained, so every rule is preserved for a future build.
+- **A11y:** message menus are keyboard-operable (focus enters the menu, arrows/Home/End rove,
+  focus-out closes, one menu at a time); the mic button's focus ring is back (it was a 1.92:1 border
+  tint — under the WCAG 1.4.11 3:1 minimum); and `Avatar`'s `aria-hidden` regression is fixed. That
+  last one was **self-inflicted**: the justification "every call site pairs it with a real name" was
+  true of three call sites and false of `AssigneeChip` with `showLabel={false}`.
+- **Four dead `api.js` exports deleted**, each with a note on what superseded it.
+
+**→ PROOF LIFECYCLE — the reusable lesson.** A proof written BEFORE its migration has two lifecycles
+and they conflict: its RED phase attacks a hole the migration then closes, so on re-run it either
+fails "expectedly" or **aborts the whole transaction and reports nothing**. Five suites hit this. The
+fix is the **REWIND** pattern: transaction-locally restore the pre-migration body, let RED demonstrate
+the disease against it, then re-apply and let GREEN prove the cure. Applied to `chat_reads`,
+`dm_reads_identity_lock`, `delete_project`, `accept_invitation`, `role_title_match_anchored`.
+`message_hides` could NOT be rewound (its RED asserted a table's absence; recreating that means
+DROPping a live table and holding an ACCESS EXCLUSIVE lock mid-run) so it became a structural
+precondition instead. **Also:** `stripe_sandbox_billing` had been *silently un-runnable since it was
+written* — 42501 on its own temp results table, because `record_result` is INVOKER and runs as
+`authenticated` during impersonated phases. One grant; now 45/45.
 
 ## Chat pass (2026-07-19) — team-chat read receipts, "Delete for me", + a live dm_reads hole
 
