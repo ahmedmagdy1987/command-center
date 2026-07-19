@@ -792,6 +792,31 @@ export const messages = {
    dm_conversations). dm_messages.workspace_id is stamped server-side from the conversation.
    Voice notes reuse the 'voice-notes' bucket (storage SELECT is participant-gated for DMs).
 ================================================================================= */
+
+/** A missing RPC — PostgREST can't find the function in its schema cache (PGRST202), or Postgres
+ *  reports "function does not exist" (42883). Distinct from a permission or runtime failure. */
+const rpcMissing = (e) => e?.code === 'PGRST202' || e?.code === '42883';
+
+/**
+ * Read DM rows through a hide-aware RPC (added by 20260716000040), which filters out messages I've
+ * hidden INSIDE the query — before the LIMIT — so keyset pagination stays exact (a client-side
+ * filter would return short pages). If that migration is not live on this project the function is
+ * absent, so fall back to the plain table read: the thread still renders in full, and hidden
+ * messages simply stay visible. Any OTHER error propagates — we never mask a real failure.
+ * NB this covers the READ path only. If the migration is missing, `hide()` fails separately on the
+ * absent TABLE (PGRST205 / 42P01), which `rpcMissing` deliberately does not match — that surfaces
+ * as a toast rather than being silently swallowed.
+ */
+async function hideAwareRead(rpc, params, fallback) {
+  const { data, error } = await supabase.rpc(rpc, params);
+  if (!error) return data || [];
+  if (!rpcMissing(error)) throw error;
+  logCaught(`api.${rpc} missing — falling back to unfiltered read`)(error);
+  const { data: rows, error: fallbackError } = await fallback();
+  if (fallbackError) throw fallbackError;
+  return rows || [];
+}
+
 export const directMessages = {
   /** Canonical get-or-create the 1:1 conversation with a peer in a workspace. Returns the conversation id. */
   async getOrCreateConversation(peerId, workspaceId) {
@@ -812,33 +837,61 @@ export const directMessages = {
   /** Messages in one conversation: the NEWEST `limit`, returned oldest-first. */
   async listMessages(conversationId, limit = 200) {
     // Newest-N (DESC + limit) then reverse — ASC + limit would return the OLDEST N and hide recent ones.
-    const { data, error } = await supabase
-      .from('dm_messages').select('*')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: false }).limit(limit);
-    if (error) throw error;
-    return (data || []).map(fromDbDirectMessage).reverse();
+    const rows = await hideAwareRead(
+      'dm_thread_messages', { p_conversation_id: conversationId, p_before: null, p_limit: limit },
+      () => supabase.from('dm_messages').select('*')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: false }).limit(limit));
+    return rows.map(fromDbDirectMessage).reverse();
   },
 
   /** 5c: the OLDER page for a thread — messages strictly before `beforeCreatedAt`, oldest-first for
    *  prepending. Rides dm_messages_conv_idx (conversation_id, created_at). */
   async listMessagesBefore(conversationId, beforeCreatedAt, limit = 200) {
-    const { data, error } = await supabase
-      .from('dm_messages').select('*')
-      .eq('conversation_id', conversationId)
-      .lt('created_at', beforeCreatedAt)
-      .order('created_at', { ascending: false }).limit(limit);
-    if (error) throw error;
-    return (data || []).map(fromDbDirectMessage).reverse();
+    const rows = await hideAwareRead(
+      'dm_thread_messages', { p_conversation_id: conversationId, p_before: beforeCreatedAt, p_limit: limit },
+      () => supabase.from('dm_messages').select('*')
+        .eq('conversation_id', conversationId)
+        .lt('created_at', beforeCreatedAt)
+        .order('created_at', { ascending: false }).limit(limit));
+    return rows.map(fromDbDirectMessage).reverse();
   },
 
   /** Recent messages across all my conversations in a workspace (newest first) — for list previews + unread. */
   async listRecentMessages(workspaceId, limit = 500) {
-    let q = supabase.from('dm_messages').select('*').order('created_at', { ascending: false }).limit(limit);
-    if (workspaceId) q = q.eq('workspace_id', workspaceId);
-    const { data, error } = await q;
+    const rows = await hideAwareRead(
+      'dm_recent_messages', { p_ws: workspaceId, p_limit: limit },
+      () => {
+        let q = supabase.from('dm_messages').select('*').order('created_at', { ascending: false }).limit(limit);
+        if (workspaceId) q = q.eq('workspace_id', workspaceId);
+        return q;
+      });
+    return rows.map(fromDbDirectMessage);
+  },
+
+  /**
+   * "Delete for me" — hide ONE message from MY view only, leaving it untouched for the other
+   * participant. Unlike softDelete there is NO time limit and it works on someone else's message and
+   * on an existing tombstone, because the row lands in `dm_message_hides` rather than mutating
+   * `dm_messages` (so `enforce_message_edit_window` is never entered). RLS pins user_id to auth.uid()
+   * and requires DM participation; `conversation_id` is stamped server-side by a trigger, not sent.
+   *
+   * `ignoreDuplicates` is LOAD-BEARING, not a nicety. It makes PostgREST emit `ON CONFLICT DO
+   * NOTHING` (so a repeat hide is idempotent) instead of `ON CONFLICT DO UPDATE` — and Postgres
+   * requires UPDATE privilege for DO UPDATE, checked at executor startup whether or not a conflict
+   * actually occurs. `dm_message_hides` is granted select/insert/delete only, with no UPDATE policy
+   * (20260716000040:66-89 — the rows are deliberately immutable), so a merge-duplicates upsert would
+   * fail 42501 on EVERY hide, including the first one for a fresh message. Do NOT "fix" a failure
+   * here by granting UPDATE; that reopens the mutability the migration argues against.
+   */
+  async hide(messageId) {
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not signed in');
+    const { error } = await supabase
+      .from('dm_message_hides')
+      .upsert({ message_id: messageId, user_id: session.user.id },
+              { onConflict: 'message_id,user_id', ignoreDuplicates: true });
     if (error) throw error;
-    return (data || []).map(fromDbDirectMessage);
   },
 
   /** Accurate per-conversation unread counts for me (server-side RPC — correct at any message volume,

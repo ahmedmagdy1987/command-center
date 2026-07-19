@@ -8,7 +8,7 @@ import {
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
   Info, LogOut, Loader2,
   KeyRound, Bell, MessageSquare, MessagesSquare, Send, Mic, Square, Play, Pause, Users, Mail, UserPlus, ArrowRight,
-  FileText, Shield, Paperclip, FileImage, User
+  FileText, Shield, Paperclip, FileImage, User, EyeOff
 } from 'lucide-react';
 import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, directMessages as directMessagesApi, workspaces as workspacesApi, workspaceMembers as workspaceMembersApi, invitations as invitationsApi, attachments as attachmentsApi, auth } from './lib/api';
 import { supabase } from './lib/supabase';
@@ -5022,9 +5022,16 @@ function Avatar({ name, userId, photoUrl, size = 28, className }) {
       {showPhoto ? (
         // Fixed box + lazy/async decode: an avatar renders in every roster row and chat line, so it
         // must never drive layout off an image whose real dimensions we don't control.
+        // FILL THE CONTENT BOX — do NOT restate `size` here. The wrapper is border-box with a 1px
+        // border, so its content box is (size-2) square. An img authored at `size` gets its WIDTH
+        // clamped to size-2 by preflight's `img { max-width: 100% }` while the inline HEIGHT stays
+        // `size`, yielding a portrait box: `cover` then over-crops horizontally and overflow-hidden
+        // shaves a row of pixels off the top and bottom. The error is a fixed 2px, so it is worst on
+        // the small avatars (17% at size 12, 7% at 28). 100%/100% keeps it exactly square at every
+        // size; flexShrink guards the same width against the wrapper's flex context.
         <img src={photoUrl} alt="" width={size} height={size} loading="lazy" decoding="async"
           onError={() => setBroken(true)}
-          style={{ width: size, height: size, objectFit: 'cover', display: 'block' }} />
+          style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', display: 'block', flexShrink: 0 }} />
       ) : initials ? initials : (
         <User aria-hidden="true" style={{ width: Math.round(size * 0.5), height: Math.round(size * 0.5) }} />
       )}
@@ -5042,9 +5049,19 @@ function MsgAvatar({ name, userId, photoUrl, size = 28 }) {
 // rejects a late edit/delete that slips through (P0001), after which the caller reconciles.
 const MSG_EDIT_WINDOW_MS = 10 * 60 * 1000;
 
+/** "Dense" = a bubble whose box has no text half-leading to soften the gap to its neighbour: a voice
+ *  note (fixed-height control row) or a tombstone. Drives the message-row spacing in MessageList. */
+const isDenseMsg = (m) => !!m && (!!m.deletedAt || !!m.audioPath || !!m.localUrl);
+
 /** One message bubble: tombstone / body (+ "(edited)") / voice note, an inline editor, and a
- *  hover-and-touch "…" actions menu (Edit own · Copy · Delete own). Shared by team chat + DMs. */
-function MsgBubble({ m, mine, onDelete, onEdit }) {
+ *  hover-and-touch "…" actions menu. Shared by team chat + DMs.
+ *
+ *  TWO-TIER DELETE. `onDelete` is "delete for everyone" — a soft-delete that tombstones the row for
+ *  both sides, capped at MSG_EDIT_WINDOW_MS by the DB trigger. `onHide` is "delete for me" — a row
+ *  in dm_message_hides that removes the message from MY view only, with NO time limit, and which
+ *  therefore also works on someone ELSE's message and on an existing tombstone. `onHide` is passed
+ *  ONLY by DMs: team chat has no per-user hide table, so team chat gets tier 1 alone. */
+function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
   const [menu, setMenu] = useState(false);
   const [pos, setPos] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -5059,23 +5076,61 @@ function MsgBubble({ m, mine, onDelete, onEdit }) {
   // Trigger visibility (pure): the precise 10-min window is computed in openMenu, not at render
   // (Date.now() is impure for render), and gates Edit/Delete inside the menu via `actable`.
   // A pending bubble has no server row yet, so there is nothing to edit, copy or delete on it.
-  const menuBtn = !deleted && !m.pending && (canCopy || mine);
-  const MENU_W = 144;
+  // "Delete for me" has no time limit and no sender restriction, so it is available on ANY settled
+  // message — including a tombstone — whenever the surface supports it (DMs only).
+  const canHide = !!onHide && !m.pending;
+  const menuBtn = !m.pending && (canCopy || canHide || (mine && !deleted));
+  // Keep in sync with the menu's `w-44` below — this is the width used to clamp it on-screen.
+  const MENU_W = 176;
+  const MENU_ROW_H = 34;    // one item: px-3 py-2 (16) + a 12px/1.5 line box (18)
+  const MENU_PAD_Y = 8;     // the menu's own py-1, top + bottom
+  const MENU_HINT_H = 48;   // the expiry hint wraps to two lines at this width
   // Anchor the menu to the trigger's viewport rect, then render it via a PORTAL to document.body so
   // it escapes the scroll/overflow clipping of the message list (the old absolute menu was clipped
   // and spilled off the edge). Clamp horizontally so it never runs off-screen on mobile.
   const openMenu = () => {
+    // Always open. This used to bail when nothing was actionable, which made the visible trigger a
+    // SILENT NO-OP on an own voice note past the window — indistinguishable from a broken button.
+    // The menu now explains itself instead (see the expiry hint).
     const within = Date.now() - new Date(m.createdAt).getTime() < MSG_EDIT_WINDOW_MS;
-    if (!canCopy && !(mine && within)) return;   // nothing to show (e.g. an own voice note past the window)
     setActable(within);
     const r = btnRef.current?.getBoundingClientRect();
     if (r) {
       let left = mine ? r.right - MENU_W : r.left;
       left = Math.max(8, Math.min(left, window.innerWidth - MENU_W - 8));
-      setPos({ top: Math.min(r.bottom + 6, window.innerHeight - 96), left });
+      // The vertical reserve must track the ITEM COUNT. A fixed one was sized for a 3-item menu, and
+      // the DM case now renders FOUR (Edit · Copy · Delete for me · Delete for everyone) — on the
+      // newest message the clamp pushed the last row below the fold, and the menu is `fixed` with no
+      // overflow, so "Delete for everyone" became unreachable. Prefer below the trigger, flip above
+      // when it would overflow, and only clamp if it fits neither way.
+      const rows = (mine && hasBody && within && !deleted ? 1 : 0)
+                 + (canCopy ? 1 : 0)
+                 + (canHide ? 1 : 0)
+                 + (mine && within && !deleted ? 1 : 0);
+      const h = MENU_PAD_Y + (rows === 0 ? MENU_HINT_H : rows * MENU_ROW_H);
+      const below = r.bottom + 6;
+      const top = below + h <= window.innerHeight - 8
+        ? below
+        : Math.max(8, Math.min(r.top - 6 - h, window.innerHeight - h - 8));
+      setPos({ top, left });
     }
     setMenu(true);
   };
+
+  // Escape closes the menu and returns focus to the trigger. Without this the menu was mouse-only:
+  // it is portaled to document.body, so it lands at the END of the tab order rather than after the
+  // trigger, and there was no way to dismiss it from the keyboard at all.
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();          // don't also close the surrounding modal/view
+      setMenu(false);
+      btnRef.current?.focus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menu]);
   const copy = () => { try { navigator.clipboard?.writeText(m.body || ''); } catch { /* ignore */ } setMenu(false); };
   const startEdit = () => { setDraft(m.body || ''); setEditing(true); setMenu(false); };
   const saveEdit = () => {
@@ -5084,12 +5139,72 @@ function MsgBubble({ m, mine, onDelete, onEdit }) {
     if (next && next !== (m.body || '')) onEdit?.(m, next);   // no-op if unchanged/empty
   };
 
-  // Tombstone — content was stripped server-side; render a muted placeholder in place, no actions.
+  // The "…" trigger + its portaled menu. Rendered by BOTH the tombstone branch and the normal
+  // bubble, because "delete for me" stays available after a message is deleted for everyone.
+  const showEdit = mine && hasBody && actable && !deleted;
+  const showDeleteAll = mine && actable && !deleted;
+  const actions = menuBtn && (
+    <>
+      <button ref={btnRef} onClick={() => (menu ? setMenu(false) : openMenu())} aria-label="Message actions"
+        aria-haspopup="true" aria-expanded={menu}
+        className={cx('absolute -top-2 w-6 h-6 rounded-full bg-[#0f1017] border border-white/10 flex items-center justify-center text-white/60 hover:text-white/80 transition-opacity',
+          // Always visible on touch (no hover there); hover-revealed on desktop. focus-visible keeps
+          // it keyboard-reachable — without it the only delete path was mouse-only. The UA focus ring
+          // is deliberately NOT suppressed: it is the only focus affordance here, and it stays
+          // visible in both themes without needing a light-sheet rule.
+          'opacity-100 sm:opacity-0 sm:group-hover/bubble:opacity-100 focus-visible:opacity-100',
+          mine ? '-left-2' : '-right-2')}>
+        <MoreHorizontal className="w-3 h-3" />
+      </button>
+      {menu && pos && createPortal(
+        <>
+          <div className="fixed inset-0 z-[70]" onClick={() => setMenu(false)} />
+          <div className="fixed z-[71] w-44 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1"
+            style={{ top: pos.top, left: pos.left, animation: 'slideUp .12s ease' }}>
+            {showEdit && (
+              <button onClick={startEdit} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5">
+                <Edit3 className="w-3.5 h-3.5" />Edit
+              </button>
+            )}
+            {canCopy && (
+              <button onClick={copy} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5">
+                <Copy className="w-3.5 h-3.5" />Copy
+              </button>
+            )}
+            {canHide && (
+              <button onClick={() => { setMenu(false); onHide?.(m); }} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5">
+                <EyeOff className="w-3.5 h-3.5" />Delete for me
+              </button>
+            )}
+            {showDeleteAll && (
+              <button onClick={() => { setMenu(false); onDelete?.(m); }} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-rose-300 hover:bg-rose-500/10">
+                <Trash2 className="w-3.5 h-3.5" />Delete for everyone
+              </button>
+            )}
+            {/* Say WHY the options are gone rather than opening an empty menu — "the button does
+                nothing" was the reported symptom. `menuBtn` only renders the trigger when something
+                is plausibly actionable, so the single reachable case here is your OWN voice note,
+                past the window, in team chat: no body (no Copy), no onHide, and !actable. */}
+            {!showEdit && !canCopy && !canHide && !showDeleteAll && (
+              <div className="px-3 py-2 text-[11px] text-white/40 leading-snug">
+                Edit and delete expire 10 minutes after sending.
+              </div>
+            )}
+          </div>
+        </>,
+        document.body
+      )}
+    </>
+  );
+
+  // Tombstone — content was stripped server-side; render a muted placeholder in place. It still
+  // carries the actions menu so it can be cleared from your own view ("delete for me", DMs).
   if (deleted) {
     return (
-      <div className={cx('max-w-full rounded-2xl px-3 py-2 border text-[13px] italic text-white/40',
-        mine ? 'bg-white/[0.03] border-white/10 rounded-tr-sm' : 'bg-white/[0.03] border-white/10 rounded-tl-sm')}>
+      <div className={cx('group/bubble relative max-w-full rounded-2xl px-3 py-2 border text-[13px] italic text-white/40 bg-white/[0.03] border-white/10',
+        mine ? 'rounded-tr-sm' : 'rounded-tl-sm')}>
         This message was deleted
+        {actions}
       </div>
     );
   }
@@ -5126,37 +5241,7 @@ function MsgBubble({ m, mine, onDelete, onEdit }) {
       {(m.audioPath || m.localUrl) && (
         <VoiceNote path={m.audioPath} localUrl={m.localUrl} duration={m.audioDuration} pending={m.pending} />
       )}
-      {menuBtn && (
-        <button ref={btnRef} onClick={() => (menu ? setMenu(false) : openMenu())} aria-label="Message actions"
-          className={cx('absolute -top-2 w-6 h-6 rounded-full bg-[#0f1017] border border-white/10 flex items-center justify-center text-white/45 hover:text-white/80 transition-opacity',
-            'opacity-100 sm:opacity-0 sm:group-hover/bubble:opacity-100', mine ? '-left-2' : '-right-2')}>
-          <MoreHorizontal className="w-3 h-3" />
-        </button>
-      )}
-      {menu && pos && createPortal(
-        <>
-          <div className="fixed inset-0 z-[70]" onClick={() => setMenu(false)} />
-          <div className="fixed z-[71] w-36 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1"
-            style={{ top: pos.top, left: pos.left, animation: 'slideUp .12s ease' }}>
-            {mine && hasBody && actable && (
-              <button onClick={startEdit} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5">
-                <Edit3 className="w-3.5 h-3.5" />Edit
-              </button>
-            )}
-            {canCopy && (
-              <button onClick={copy} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5">
-                <Copy className="w-3.5 h-3.5" />Copy
-              </button>
-            )}
-            {mine && actable && (
-              <button onClick={() => { setMenu(false); onDelete?.(m); }} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-rose-300 hover:bg-rose-500/10">
-                <Trash2 className="w-3.5 h-3.5" />Delete
-              </button>
-            )}
-          </div>
-        </>,
-        document.body
-      )}
+      {actions}
     </div>
   );
 }
@@ -5166,7 +5251,7 @@ function MsgBubble({ m, mine, onDelete, onEdit }) {
  *  autoscroll, and a jump-to-latest button. Shared by the team channel and DM threads. */
 /** Shared by team chat AND DMs — any change here lands in both. `avatarFor(senderId) -> photoUrl` is
  *  optional so a caller that has no roster handy still renders correct initials. */
-function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelete, onEdit, receiptFor, hasMore, onLoadOlder, loadingOlder }) {
+function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelete, onEdit, onHide, receiptFor, hasMore, onLoadOlder, loadingOlder }) {
   const scrollRef = useRef(null);
   const atBottomRef = useRef(true);
   const prependAnchorRef = useRef(null);   // 5c: distance-from-bottom captured before an older page prepends
@@ -5208,8 +5293,13 @@ function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelet
       const prev = items[i - 1];
       const newDay = !prev || !sameDay(prev.createdAt, m.createdAt);
       const firstOfGroup = newDay || prev.senderId !== m.senderId || (new Date(m.createdAt) - new Date(prev.createdAt) > 5 * 60 * 1000);
+      // A text bubble's `leading-relaxed` line box carries ~3px of half-leading top and bottom, which
+      // visually pads the 2px grouped gap into something acceptable. A voice note (a fixed 32px
+      // control row) and a tombstone (13px/1.5) have no such half-leading, so the same 2px reads as
+      // FLUSH against the next bubble. Give any row that touches a dense box real extrinsic spacing.
+      const roomy = isDenseMsg(m) || isDenseMsg(prev);
       if (newDay) groups.push({ key: m.id, label: dayLabel(m.createdAt), rows: [] });
-      groups[groups.length - 1].rows.push({ m, firstOfGroup });
+      groups[groups.length - 1].rows.push({ m, firstOfGroup, roomy });
     });
     return groups;
   }, [items]);
@@ -5229,10 +5319,10 @@ function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelet
         {days.map(day => (
           <section key={day.key}>
             <DayDivider label={day.label} />
-            {day.rows.map(({ m, firstOfGroup }) => {
+            {day.rows.map(({ m, firstOfGroup, roomy }) => {
               const mine = m.senderId === userId;
               return (
-                <div key={m.id} className={cx('flex gap-2.5', mine && 'flex-row-reverse', firstOfGroup ? 'mt-3' : 'mt-0.5')}>
+                <div key={m.id} className={cx('flex gap-2.5', mine && 'flex-row-reverse', firstOfGroup ? 'mt-3' : roomy ? 'mt-2' : 'mt-1')}>
                   {!mine && (firstOfGroup
                     ? <PersonButton personId={m.senderId} className="shrink-0 self-start" title={`View ${nameOf(m.senderId)}'s profile`}>
                         <MsgAvatar name={nameOf(m.senderId)} userId={m.senderId} photoUrl={avatarFor?.(m.senderId)} />
@@ -5249,7 +5339,7 @@ function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelet
                         <span className="text-[10px] text-white/35 tabular-nums">{clockTime(m.createdAt)}</span>
                       </div>
                     )}
-                    <MsgBubble m={m} mine={mine} onDelete={onDelete} onEdit={onEdit} />
+                    <MsgBubble m={m} mine={mine} onDelete={onDelete} onEdit={onEdit} onHide={onHide} />
                     {mine && receiptFor && receiptFor(m)}
                   </div>
                 </div>
@@ -5371,7 +5461,7 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
             <button onClick={() => canVoice ? onStartRecording() : onUpgradeVoice?.()} disabled={sending}
               aria-label={canVoice ? 'Record a voice note' : 'Upgrade to unlock voice notes'}
               title={canVoice ? 'Record a voice note' : 'Upgrade to unlock voice notes'}
-              className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 disabled:opacity-40 shrink-0">
+              className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white/90 hover:border-white/20 focus:outline-none focus:border-violet-400/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 shrink-0">
               {canVoice ? <Mic className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}
             </button>
             <button onClick={submit} disabled={!text.trim() || sending}
@@ -5789,7 +5879,7 @@ function DirectMessagesView() {
 
 /** One open 1:1 thread. Keyed by conversationId so it remounts (fresh state) per conversation. */
 function DmThread({ conversationId, peerId, onBack }) {
-  const { session, currentMember, resolveAssignee, markDmRead, requestUpgrade } = useApp();
+  const { session, currentMember, resolveAssignee, markDmRead, requestUpgrade, refreshDms, currentWorkspaceId, showToast } = useApp();
   const entitlements = useEntitlements();
   const userId = session?.user?.id;
   const peer = resolveAssignee(peerId);
@@ -6012,6 +6102,29 @@ function DmThread({ conversationId, peerId, onBack }) {
     catch (e) { reportError(e, 'dms.delete'); directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(logCaught('dms.reconcile')); }
   };
 
+  // "Delete for me" — drop the message from MY view only; the peer still sees it. No time limit and
+  // no sender restriction (it also clears a tombstone), because this writes dm_message_hides rather
+  // than touching dm_messages.
+  const hideForMe = async (m) => {
+    setItems(prev => prev.filter(x => x.id !== m.id));
+    try {
+      await directMessagesApi.hide(m.id);
+      // dm_message_hides is deliberately OUT of the realtime publication, so nothing tells the
+      // conversation list that this thread's preview (and possibly its unread badge) just changed.
+      // remove/edit self-heal via the dm_messages UPDATE event; a hide has no such event.
+      refreshDms?.(currentWorkspaceId);
+    } catch (e) {
+      // Reconcile from the server rather than restoring a pre-await snapshot of `items`: that array
+      // is stale by the time we'd use it, so it would clobber a message that arrived mid-flight and
+      // resurrect a concurrent hide. Same reconcile the sibling remove/edit handlers use.
+      // Toast because this failure is otherwise INVISIBLE: remove/edit leave a tombstone or an edit
+      // state to look at, but a failed hide just flickers the message out and back.
+      reportError(e, 'dms.hide');
+      showToast?.("Couldn't hide that message — it's back in the thread.");
+      directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(logCaught('dms.reconcile'));
+    }
+  };
+
   // Edit own DM text in place; the DB trigger enforces the 10-minute window + stamps edited_at.
   const edit = async (m, body) => {
     setItems(prev => prev.map(x => x.id === m.id ? { ...x, body, editedAt: nowISO() } : x));
@@ -6064,6 +6177,7 @@ function DmThread({ conversationId, peerId, onBack }) {
         loadingOlder={loadingOlder}
         onDelete={remove}
         onEdit={edit}
+        onHide={hideForMe}
         receiptFor={receiptFor}
         empty={(
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-10">
