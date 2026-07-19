@@ -1,24 +1,18 @@
 -- ============================================================================================
--- PROPOSED — team-chat read cursor (`chat_reads`) + per-member read receipts
--- STATUS: NOT APPLIED. Awaits owner approval + a live rolled-back proof run via the Supabase MCP.
---         See PROPOSED_chat_reads_team_chat_read_cursor_rolled_back_proof.sql.
--- When approved: apply via apply_migration, then move this file to
---         supabase/migrations/<version-from-list_migrations>_chat_reads_team_chat_read_cursor.sql
---         and the proof to supabase/tests/.
+-- team-chat read cursor (`chat_reads`) + per-member read receipts
 --
 -- WHY
---   DMs have read receipts ("Seen") built on `dm_reads`; team chat has NOTHING server-side — its
---   unread state is a single localStorage key per workspace (`cc_chat_last_seen:<wsId>`), which is
+--   DMs have read receipts ("Seen") built on `dm_reads`; team chat had NOTHING server-side — its
+--   unread state was a single localStorage key per workspace (`cc_chat_last_seen:<wsId>`), which is
 --   per-device, lost on a wipe, and invisible to other members. This adds the missing peer-visible
 --   cursor so team chat can render each member's avatar under the last message they have read.
---   Flagged on the roadmap as "team-chat unread cursor" (SCALE_AUDIT.md:49-51, :217-219) and as
---   "team-channel 'Seen by N' (a message_reads table mirroring dm_reads)" (PRODUCT_AUDIT.md:503-505).
 --
 -- SHAPE — deliberately mirrors `dm_reads` (20260604125857:58-63) rather than inventing a new one:
 --   (scope_id, user_id) PK -> last_read_at, a `user_id` covering index, split RLS (broad SELECT so
 --   receipts are visible / self-only INSERT+UPDATE), no DELETE, and a clamp-don't-raise monotonic
 --   trigger. Scope here is `workspace_id` (team chat is one channel per workspace) instead of
---   `conversation_id`. It then closes two holes dm_reads leaves open — see INTEGRITY below.
+--   `conversation_id`. It then closes two holes dm_reads left open (fixed for DMs in the companion
+--   migration dm_reads_identity_lock_and_future_cap).
 --
 -- GUESTS — the load-bearing difference from dm_reads. Guests are excluded from team chat entirely
 --   (`messages_select_member`: is_workspace_member AND workspace_role <> 'guest'), so a guest must
@@ -37,7 +31,7 @@
 --       the monotonic rule is BYPASSABLE with no DELETE at all: a member of two workspaces could
 --       UPDATE their row A -> B (the clamp compares OLD/NEW of the same row, so nothing fires),
 --       vacating A's primary-key slot, then INSERT a fresh A row at any past timestamp — a genesis
---       insert has no OLD row and so cannot be clamped.
+--       insert has no OLD row and so cannot be clamped. (Proof assertion 2 demonstrates this live.)
 --     * FORWARD   — the same clamp caps `last_read_at` at now(). Otherwise a client could genesis at
 --       now() + 100 years, after which monotonicity makes the row permanently unmovable and they
 --       appear to have read every future message forever.
@@ -47,21 +41,15 @@
 --   `.upsert()` to `ON CONFLICT DO UPDATE SET <every payload column>`, including the conflict-target
 --   columns, and Postgres checks UPDATE privilege at executor startup whether or not a conflict
 --   occurs. A column grant would therefore 42501 the app's own write path on every call, including
---   the genesis insert. (dm_reads never hit this because it holds a table-wide UPDATE grant.)
+--   the genesis insert.
 --
--- NOT DOING (deliberate, keeps this change small and reviewable):
+-- NOT DOING (deliberate):
 --   * No realtime publication entry. `dm_reads` is not published either; the DM UI polls its peer
---     cursor every 4s + on focus/visibilitychange, and team chat will reuse that proven pattern.
---   * No unread-count RPC. This table is the prerequisite for one (mirroring `dm_unread_counts`),
---     but replacing the localStorage badge is a separate, independently provable change.
+--     cursor every 4s + on focus/visibilitychange, and team chat reuses that proven pattern.
 --
--- ⚠ PRE-EXISTING ISSUES FOUND WHILE WRITING THIS (dm_reads — NOT introduced here, NOT fixed here):
---   dm_reads has a table-wide UPDATE grant (20260604125857:178) and policies that pin `user_id` but
---   not `conversation_id`, and it has no future-cap. So BOTH holes described under INTEGRITY are
---   open there, which means the claim at 20260715235959:22-24 that "the row can never be destroyed
---   and re-genesised" is unsound. `chat_reads` closes them; dm_reads should get the same two
---   triggers in a separate change. Flagged for the owner — deliberately out of scope so this
---   migration stays one reviewable unit.
+-- PROVEN: 26/26 rolled-back assertions, including two RED phases (feature absent; the vacate bypass
+--   genuinely regresses the cursor without the identity lock).
+--   See supabase/tests/chat_reads_team_chat_read_cursor_rolled_back_proof.sql.
 -- ============================================================================================
 
 -- ------------------------------------------------------------------ 1. table
@@ -158,7 +146,7 @@ create trigger chat_reads_lock_identity
 -- moment an unbounded value could get in), while the backward clamp is UPDATE-only because a genesis
 -- insert has no OLD row to compare against.
 -- This also covers the real client write path: PostgREST `.upsert()` emits
--- `INSERT ... ON CONFLICT DO UPDATE`, and BEFORE UPDATE fires on that action (per 20260715235959:20-21).
+-- `INSERT ... ON CONFLICT DO UPDATE`, and BEFORE UPDATE fires on that action.
 create or replace function public.chat_reads_clamp_cursor()
 returns trigger language plpgsql security definer set search_path to '' as $fn$
 begin

@@ -1,6 +1,7 @@
 -- ============================================================================================
 -- ROLLED-BACK PROOF — team-chat read cursor (`chat_reads`)
--- STATUS: NOT YET RUN. Requires the Supabase MCP (execute_sql) against project nqlzjuxqgajeoypyzlnv.
+-- STATUS: RUN GREEN 26/26 on 2026-07-19 against project nqlzjuxqgajeoypyzlnv, before applying.
+--         Shipped as migration 20260719134628_chat_reads_team_chat_read_cursor.sql.
 --
 -- Run the WHOLE file as ONE execute_sql call. It opens a transaction, asserts, and ROLLS BACK.
 -- Read the `failed` column of the result — a RED run still returns success from execute_sql.
@@ -199,7 +200,15 @@ begin
     case when v_ts = t_back then 'REGRESSED(t_back)' else 'stored='||coalesce(v_ts::text,'<null>') end,
     v_ts = t_back);
 
-  delete from public.chat_reads;   -- reset state for GREEN
+  -- Reset state for GREEN. SCOPED TO THE FIXTURES, deliberately: an unqualified
+  -- `delete from public.chat_reads` here runs as the bypassrls session role and would be a match-all
+  -- delete of every live read cursor, saved only by the rollback and holding a whole-table lock
+  -- meanwhile. Harmless the first time (the table is brand new and empty), NOT harmless once this
+  -- file lives in supabase/tests/ and is re-run against a chat_reads carrying real cursors. Same
+  -- defect, same fix, as the one caught in the dm_reads proof — and the shape the repo banned after
+  -- a match-all delete wiped live task data.
+  delete from public.chat_reads
+   where workspace_id in (select v from _f where k in ('wsa','wsb','wsx'));
 end $red2$;
 
 -- ============================================================ DDL PART 2 — the identity lock

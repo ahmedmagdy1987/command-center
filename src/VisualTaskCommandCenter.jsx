@@ -10,7 +10,7 @@ import {
   KeyRound, Bell, MessageSquare, MessagesSquare, Send, Mic, Square, Play, Pause, Users, Mail, UserPlus, ArrowRight,
   FileText, Shield, Paperclip, FileImage, User, EyeOff
 } from 'lucide-react';
-import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, directMessages as directMessagesApi, workspaces as workspacesApi, workspaceMembers as workspaceMembersApi, invitations as invitationsApi, attachments as attachmentsApi, auth } from './lib/api';
+import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, chatReads as chatReadsApi, directMessages as directMessagesApi, workspaces as workspacesApi, workspaceMembers as workspaceMembersApi, invitations as invitationsApi, attachments as attachmentsApi, auth } from './lib/api';
 import { supabase } from './lib/supabase';
 import { sanitizeTask, uid, nowISO } from './lib/sanitize';
 import { resolvePlanId, computeEntitlements, getPreviewPlanId, clearPreviewPlan } from './lib/entitlements';
@@ -279,12 +279,48 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   }, []);
   const chatViewRef = useRef(view);
   useEffect(() => { chatViewRef.current = view; }, [view]);
-  const markChatRead = useCallback(() => {
-    // Per-workspace key: a single global cursor mis-counts across workspaces (reading chat in A would
-    // mark B's older-but-unseen messages as read). The unread effect reads the same per-workspace key.
-    try { if (currentWorkspaceId) localStorage.setItem(`cc_chat_last_seen:${currentWorkspaceId}`, new Date().toISOString()); } catch { /* ignore */ }
+  // Advance my team-chat read cursor. SERVER-SIDE since 20260719134628 (`chat_reads`), replacing the
+  // per-device `cc_chat_last_seen:<wsId>` localStorage key — which was invisible to other members
+  // (so no read receipts were possible), wrong on a second device, and lost on a machine wipe.
+  // Still per-workspace, for the same reason the old key was: one global cursor would mark workspace
+  // B's older-but-unseen messages read just because you opened chat in A.
+  // `coverAt` is the triggering message's SERVER timestamp when we have one — see chatReads.markRead
+  // for why the client's own now() is not safe here. Fire-and-forget: the badge zeroes optimistically
+  // and the DB clamps a stale or out-of-order write, so a failed cursor write is never destructive.
+  const markChatRead = useCallback((coverAt) => {
     setChatUnread(0);
+    if (!currentWorkspaceId) return;
+    chatReadsApi.markRead(currentWorkspaceId, coverAt).catch(logCaught('chat.markRead'));
   }, [currentWorkspaceId]);
+
+  // Recompute the team-chat badge from the SERVER cursor, for boot and workspace-switch. Deliberately
+  // NOT on the context: the only other plausible caller was ChatView's "delete for me", and that one
+  // must not recompute (see the note in hideForMe) — so exposing this would only invite the race the
+  // `viewing` guard below exists to prevent.
+  const chatUnreadWsRef = useRef(currentWorkspaceId);
+  useEffect(() => { chatUnreadWsRef.current = currentWorkspaceId; }, [currentWorkspaceId]);
+  const refreshChatUnread = useCallback(async () => {
+    const me = session?.user?.id;
+    const ws = currentWorkspaceId;
+    if (!me || !ws) return;
+    try {
+      const rs = await chatReadsApi.reads(ws);
+      const since = rs.find(r => r.userId === me)?.lastReadAt || null;
+      const n = await messagesApi.unreadCount(since, ws);
+      // Drop a late resolve that lost a race with a workspace switch — otherwise workspace A's count
+      // lands on workspace B's badge.
+      if (chatUnreadWsRef.current !== ws) return;
+      // Badge-race fix, the exact twin of refreshDms' `viewing` guard: while the channel is the view
+      // being looked at, markChatRead has already zeroed the badge optimistically — don't let the
+      // lagging server value re-inflate it. This matters MORE than it did for the old localStorage
+      // cursor, which was written synchronously in the effect body and so was always already visible
+      // to this read. The cursor upsert is now behind a list fetch AND a getSession, while this path
+      // is a chat_reads SELECT plus a chat_unread_count — so `since` here is reliably the PRE-OPEN
+      // cursor, and without the guard the stale count usually lands LAST and wins.
+      if (chatViewRef.current === 'chat') return;
+      setChatUnread(n);
+    } catch (e) { logCaught('chat.unreadCount')(e); }
+  }, [session?.user?.id, currentWorkspaceId]);
 
   // ---- Direct messages (1:1) ---- conversation summaries + handlers live here (the state hub);
   // the open thread loads its own messages. Read state is server-side (dm_reads), so unread + receipts
@@ -455,23 +491,27 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
     return () => { unsub(); clearTimeout(timer); };
   }, [currentWorkspaceId]);
 
-  // Live unread badge for chat: count messages newer than the user's last-seen (localStorage)
+  // Live unread badge for chat: count messages newer than my SERVER-SIDE read cursor (chat_reads)
   // and bump it on new messages from others while they're not viewing the channel.
+  // A member with no cursor row yet resolves to `since = null`, and the RPC then counts the whole
+  // visible channel — the same thing the old code did when the localStorage key was missing.
   useEffect(() => {
     const me = session?.user?.id;
     if (!me || !currentWorkspaceId) return;
     let on = true;
-    let lastSeen = null;
-    try { lastSeen = localStorage.getItem(`cc_chat_last_seen:${currentWorkspaceId}`); } catch { /* ignore */ }
-    messagesApi.unreadCount(lastSeen, me, currentWorkspaceId).then(n => { if (on) setChatUnread(n); }).catch(logCaught('chat.unreadCount'));
+    // Deferred so the initial count isn't a synchronous setState in the effect body — the same
+    // house pattern as the typing-indicator effect above. (refreshChatUnread only setStates after
+    // two awaits, so this is already true at runtime; the deferral is what makes it true at the
+    // CALL SITE, which is what the lint rule reads.)
+    const t = setTimeout(refreshChatUnread, 0);
     const unsub = messagesApi.subscribe(({ type, message }) => {
       if (type !== 'INSERT' || !message || !on) return;
       if (message.senderId === me) return;
       if (chatViewRef.current === 'chat') return;   // viewing -> ChatView keeps it read
       setChatUnread(n => n + 1);
     }, 'messages-unread', currentWorkspaceId);
-    return () => { on = false; unsub(); };
-  }, [session?.user?.id, currentWorkspaceId]);
+    return () => { on = false; clearTimeout(t); unsub(); };
+  }, [session?.user?.id, currentWorkspaceId, refreshChatUnread]);
 
   // Direct messages: load the workspace's conversation summaries + live-refresh on any DM change
   // (cheap re-summarize; recomputes previews + unread from the server-side cursors). Clears on switch.
@@ -5032,7 +5072,13 @@ function Avatar({ name, userId, photoUrl, size = 28, className }) {
         <img src={photoUrl} alt="" width={size} height={size} loading="lazy" decoding="async"
           onError={() => setBroken(true)}
           style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', display: 'block', flexShrink: 0 }} />
-      ) : initials ? initials : (
+      ) : initials ? (
+        // aria-hidden for the same reason the other two branches already are (`alt=""` on the photo,
+        // aria-hidden on the silhouette): an avatar is decoration, and every call site pairs it with
+        // a real name — in a PersonButton title, a sibling label, or an sr-only summary. Without
+        // this, a screen reader reads bare initials ("A M") as if they were content.
+        <span aria-hidden="true">{initials}</span>
+      ) : (
         <User aria-hidden="true" style={{ width: Math.round(size * 0.5), height: Math.round(size * 0.5) }} />
       )}
     </span>
@@ -5059,8 +5105,9 @@ const isDenseMsg = (m) => !!m && (!!m.deletedAt || !!m.audioPath || !!m.localUrl
  *  TWO-TIER DELETE. `onDelete` is "delete for everyone" — a soft-delete that tombstones the row for
  *  both sides, capped at MSG_EDIT_WINDOW_MS by the DB trigger. `onHide` is "delete for me" — a row
  *  in dm_message_hides that removes the message from MY view only, with NO time limit, and which
- *  therefore also works on someone ELSE's message and on an existing tombstone. `onHide` is passed
- *  ONLY by DMs: team chat has no per-user hide table, so team chat gets tier 1 alone. */
+ *  therefore also works on someone ELSE's message and on an existing tombstone. BOTH surfaces now
+ *  pass `onHide` — DMs via dm_message_hides (20260716000040) and team chat via message_hides
+ *  (20260719134752) — so the two menus are identical, which is the whole point. */
 function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
   const [menu, setMenu] = useState(false);
   const [pos, setPos] = useState(null);
@@ -5077,7 +5124,7 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
   // (Date.now() is impure for render), and gates Edit/Delete inside the menu via `actable`.
   // A pending bubble has no server row yet, so there is nothing to edit, copy or delete on it.
   // "Delete for me" has no time limit and no sender restriction, so it is available on ANY settled
-  // message — including a tombstone — whenever the surface supports it (DMs only).
+  // message — including a tombstone — on both surfaces.
   const canHide = !!onHide && !m.pending;
   const menuBtn = !m.pending && (canCopy || canHide || (mine && !deleted));
   // Keep in sync with the menu's `w-44` below — this is the width used to clamp it on-screen.
@@ -5347,7 +5394,13 @@ function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelet
                       </div>
                     )}
                     <MsgBubble m={m} mine={mine} onDelete={onDelete} onEdit={onEdit} onHide={onHide} />
-                    {mine && receiptFor && receiptFor(m)}
+                    {/* NOT gated on `mine`. DMs put a receipt under MY last message only ("Seen" by
+                        the one peer); team chat puts each member's face under whichever message THEY
+                        last read, which is usually someone else's. Dropping the gate is safe for the
+                        DM caller because its receiptFor already returns null unless m.id is the last
+                        OWN message id — a condition that implies `mine` — so this is behaviour-
+                        preserving there and merely permissive here. */}
+                    {receiptFor && receiptFor(m)}
                   </div>
                 </div>
               );
@@ -5484,7 +5537,7 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
 }
 
 function ChatView() {
-  const { session, markChatRead, currentMember, currentWorkspaceId, requestUpgrade, members, meId } = useApp();
+  const { session, markChatRead, showToast, currentMember, currentWorkspaceId, requestUpgrade, members, meId } = useApp();
   const entitlements = useEntitlements();
   const userId = session?.user?.id;
   const myName = currentMember?.display_name || currentMember?.email || 'You';
@@ -5537,8 +5590,17 @@ function ChatView() {
   useEffect(() => {
     if (!currentWorkspaceId) return;
     let on = true;
-    messagesApi.list(200, currentWorkspaceId).then(list => { if (on) { setItems(list); setHasMore(list.length >= 200); } }).catch(e => reportError(e, 'messages.list')).finally(() => { if (on) setLoading(false); });
-    markChatRead();
+    // Mark read from INSIDE the .then, with the newest loaded message's SERVER timestamp as the
+    // cover time. Two reasons this moved: (a) the cursor is now peer-visible, so it must not claim
+    // to have read messages we never actually loaded — a failed load now correctly leaves the badge
+    // standing; (b) anchoring to the server stamp rather than the client's now() keeps the cursor
+    // from landing just before a message the server stamped at ~the same instant.
+    messagesApi.list(200, currentWorkspaceId).then(list => {
+      if (!on) return;
+      setItems(list);
+      setHasMore(list.length >= 200);
+      markChatRead(list.length ? list[list.length - 1].createdAt : undefined);
+    }).catch(e => reportError(e, 'messages.list')).finally(() => { if (on) setLoading(false); });
     const unsub = messagesApi.subscribe(({ type, message }) => {
       if (!message || !on) return;
       setItems(prev => {
@@ -5548,7 +5610,7 @@ function ChatView() {
       });
       // Clear the typing indicator immediately on someone else's message (don't wait for "stopped typing").
       if (type === 'INSERT' && message.senderId !== userId) setShownTyping('');
-      markChatRead();
+      markChatRead(message.createdAt);
     }, 'messages-thread', currentWorkspaceId);
     return () => { on = false; unsub(); };
   }, [markChatRead, currentWorkspaceId, userId]);
@@ -5573,7 +5635,9 @@ function ChatView() {
     streamRef.current?.getTracks().forEach(t => t.stop());
   }, []);
 
-  const nameOf = (id) => (id === userId ? 'You' : (people[id]?.display_name || people[id]?.email || 'Someone'));
+  // useCallback'd because receiptFor depends on it: an inline definition would change identity every
+  // render and re-create that callback (and so re-render every message row) on each poll tick.
+  const nameOf = useCallback((id) => (id === userId ? 'You' : (people[id]?.display_name || people[id]?.email || 'Someone')), [people, userId]);
 
   const sendText = async (body, mentions) => {
     const created = await messagesApi.sendText(body, currentWorkspaceId, mentions);
@@ -5668,6 +5732,112 @@ function ChatView() {
     catch (e) { reportError(e, 'messages.edit'); messagesApi.list(200, currentWorkspaceId).then(setItems).catch(logCaught('messages.reconcile')); }
   };
 
+  // "Delete for me" — drop the message from MY view only; everyone else still sees it. No time limit
+  // and no sender restriction (it also clears a tombstone), because this writes `message_hides`
+  // rather than touching `messages`. The exact twin of DmThread.hideForMe.
+  const hideForMe = async (m) => {
+    setItems(prev => prev.filter(x => x.id !== m.id));
+    try {
+      await messagesApi.hide(m.id);
+      // NB no badge refresh here, and that is deliberate — it is where team chat legitimately
+      // DIVERGES from DmThread.hideForMe, which does call refreshDms. A hide fires no realtime event
+      // (message_hides is unpublished), so nothing self-heals; the question is whether anything
+      // needs to. In DMs it does: refreshDms also rebuilds every conversation's PREVIEW and the
+      // other threads' unread counts. Team chat has one channel and no list, and a hide is only
+      // reachable from inside ChatView — where markChatRead has already pinned the badge to 0 and
+      // AppProvider's realtime handler declines to increment it. Recomputing from the server here
+      // would do nothing at best, and at worst re-inflate the badge from a cursor whose upsert has
+      // not landed yet. So: nothing to do.
+    } catch (e) {
+      // Reconcile from the server rather than restoring a pre-await snapshot of `items`: that array
+      // is stale by the time we'd use it, so it would clobber a message that arrived mid-flight and
+      // resurrect a concurrent hide. Same reconcile the sibling remove/edit handlers use.
+      // Toast because this failure is otherwise INVISIBLE: remove/edit leave a tombstone or an edit
+      // state to look at, but a failed hide just flickers the message out and back.
+      reportError(e, 'messages.hide');
+      showToast("Couldn't hide that message — it's back in the channel.");
+      messagesApi.list(200, currentWorkspaceId).then(setItems).catch(logCaught('messages.reconcile'));
+    }
+  };
+
+  // ---- Read receipts: each member's avatar sits under the last message they have read ----------
+  // chat_reads is NOT in the realtime publication (nor is dm_reads), so this POLLS — the same 4s +
+  // focus + visibilitychange cadence DmThread already proves out.
+  // `reads` is TAGGED with the workspace it came from rather than applied blind. ChatView is
+  // route-mounted with no workspace key, so a switch need not remount it, and an in-flight SELECT for
+  // the OLD workspace could otherwise resolve afterwards and paint the old workspace's members onto
+  // the new channel — receiptsByMessage matches cursors to messages on TIMESTAMP alone and has no
+  // notion of a workspace, and `people` is not workspace-scoped either, so those strangers would
+  // render with real names and faces. Tagging also makes the stale window show NOTHING rather than
+  // something wrong, without needing a setState inside an effect to clear it.
+  const [reads, setReads] = useState({ ws: null, rows: [] });
+  const refreshReads = useCallback(() => {
+    if (!currentWorkspaceId) return;
+    const ws = currentWorkspaceId;
+    chatReadsApi.reads(ws).then(rows => setReads({ ws, rows })).catch(logCaught('chat.reads'));
+  }, [currentWorkspaceId]);
+  useEffect(() => {
+    if (!currentWorkspaceId) return undefined;
+    refreshReads();
+    const id = setInterval(refreshReads, 4000);
+    const onFocus = () => refreshReads();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => { clearInterval(id); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus); };
+  }, [currentWorkspaceId, refreshReads]);
+
+  // messageId -> [userId] : for each OTHER member, the newest loaded message at or before their
+  // cursor. That is what makes a face "move down" as they read further.
+  // Guests never appear here and it costs no client-side check: the chat_reads SELECT policy
+  // evaluates the ROW OWNER's team-chat visibility, so a guest — or a member since DEMOTED to
+  // guest — is filtered out server-side before these rows are ever returned.
+  const receiptsByMessage = useMemo(() => {
+    const map = new Map();
+    const rows = reads.ws === currentWorkspaceId ? reads.rows : [];
+    if (!items.length || !rows.length) return map;
+    const stamps = items.map(m => new Date(m.createdAt).getTime());
+    rows.forEach(r => {
+      if (!r.userId || r.userId === userId) return;         // never render my own face
+      const readMs = new Date(r.lastReadAt).getTime();
+      if (!Number.isFinite(readMs)) return;
+      // Walk from the newest backwards: a cursor is almost always at or near the bottom, so this
+      // exits on the first comparison in the common case.
+      let idx = -1;
+      for (let i = items.length - 1; i >= 0; i--) { if (Number.isFinite(stamps[i]) && stamps[i] <= readMs) { idx = i; break; } }
+      if (idx < 0) return;                                   // their cursor predates this whole window
+      const id = items[idx].id;
+      if (!map.has(id)) map.set(id, []);
+      map.get(id).push(r.userId);
+    });
+    return map;
+  }, [items, reads, userId, currentWorkspaceId]);
+
+  const receiptFor = useCallback((m) => {
+    const readers = receiptsByMessage.get(m.id);
+    if (!readers || !readers.length) return null;
+    const shown = readers.slice(0, 6);
+    return (
+      <div className="mt-1 px-0.5 flex items-center gap-0.5 flex-wrap">
+        {/* The faces CANNOT carry the identity on their own: at 14px Avatar's initials fallback
+            renders at ~5px, and a title tooltip is mouse-only — so on touch, and for a screen
+            reader, "who read this" would be unobtainable. Two affordances instead: an sr-only
+            summary naming everyone (including the ones behind the +N), and each face as a real
+            PersonButton — focusable, per-person title, opens that profile — which is exactly what
+            the header facepile above already does. */}
+        <span className="sr-only">{`Read by ${readers.map(nameOf).join(', ')}`}</span>
+        {shown.map(rid => (
+          <PersonButton key={rid} personId={rid} title={`Read by ${nameOf(rid)}`} className="shrink-0">
+            <Avatar name={nameOf(rid)} userId={rid} photoUrl={people[rid]?.avatar_url} size={14} />
+          </PersonButton>
+        ))}
+        {/* aria-hidden: the sr-only summary above already names these people in full. */}
+        {readers.length > shown.length && (
+          <span aria-hidden="true" className="text-[10px] text-white/40 tabular-nums pl-0.5">+{readers.length - shown.length}</span>
+        )}
+      </div>
+    );
+  }, [receiptsByMessage, nameOf, people]);
+
   return (
     <div className="cc-chat flex flex-col h-[calc(100dvh-9rem)] rounded-2xl border border-white/10 bg-[#0a0b11] overflow-hidden">
       <style>{`
@@ -5719,6 +5889,8 @@ function ChatView() {
         loadingOlder={loadingOlder}
         onDelete={remove}
         onEdit={edit}
+        onHide={hideForMe}
+        receiptFor={receiptFor}
         empty={(
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-10">
             <div className="w-12 h-12 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">

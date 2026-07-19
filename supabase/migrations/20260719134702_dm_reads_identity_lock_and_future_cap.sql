@@ -1,10 +1,5 @@
 -- ============================================================================================
--- PROPOSED — dm_reads: identity lock + future cap (closes live cursor repudiation)
--- STATUS: NOT APPLIED. Awaits owner approval + a live rolled-back proof run via the Supabase MCP.
---         See PROPOSED_dm_reads_identity_lock_and_future_cap_rolled_back_proof.sql.
--- When approved: apply via apply_migration, then move this file to
---         supabase/migrations/<version-from-list_migrations>_dm_reads_identity_lock_and_future_cap.sql
---         and the proof to supabase/tests/.
+-- dm_reads: identity lock + future cap (closes live cursor repudiation)
 --
 -- THIS IS A LIVE BUG, NOT A HARDENING NICETY. `20260715235959_dm_reads_monotonic_cursor.sql:20-24`
 -- argues that BEFORE UPDATE alone is sufficient, on three premises:
@@ -28,7 +23,7 @@
 -- The cursor for A has moved BACKWARD to an arbitrary past time. Because
 -- `dm_reads_select_participant` is peer-inclusive by design (it is how "Seen" works), the peer's UI
 -- observes the retraction: **"Seen" un-says itself.** That is exactly the repudiation the monotonic
--- trigger exists to prevent.
+-- trigger exists to prevent. The proof's RED phase reproduced BOTH holes against the live rules.
 --
 -- A SECOND, OPPOSITE HOLE: there is no upper bound. A client can genesis (or advance) its cursor to
 -- now() + 100 years, after which monotonicity makes the row permanently unmovable and the user
@@ -41,7 +36,7 @@
 --
 -- WHY A TRIGGER AND NOT A COLUMN GRANT. `grant update (last_read_at)` looks tighter and would also
 -- block the vacate — but it breaks the app. PostgREST builds `ON CONFLICT DO UPDATE SET ...` from
--- the PAYLOAD KEYS, and api.js markRead (:926-939) sends all three columns, so the emitted SET list
+-- the PAYLOAD KEYS, and api.js markRead sends all three columns, so the emitted SET list
 -- includes `conversation_id = EXCLUDED.conversation_id, user_id = EXCLUDED.user_id`. Postgres checks
 -- UPDATE privilege on every column in the SET list at executor startup, whether or not a conflict
 -- occurs, so a column grant that excluded the PK would 42501 EVERY markRead, including the genesis
@@ -65,6 +60,9 @@
 --
 -- SCOPE: dm_reads only. Behaviour-preserving for every legitimate client path — the app's single
 -- writer is markRead, which never changes a cursor's identity and never sends a future timestamp.
+--
+-- PROVEN: 19/19 rolled-back assertions, with a RED phase that reproduced both holes against the
+--   CURRENT live rules before the fix. See supabase/tests/dm_reads_identity_lock_and_future_cap_rolled_back_proof.sql.
 -- ============================================================================================
 
 -- ------------------------------------------------------------------ 1. identity lock

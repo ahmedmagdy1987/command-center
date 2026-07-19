@@ -1,6 +1,7 @@
 -- ============================================================================================
 -- ROLLED-BACK PROOF — team-chat "Delete for me" (public.message_hides)
--- STATUS: NOT YET RUN. Requires the Supabase MCP (execute_sql) against nqlzjuxqgajeoypyzlnv.
+-- STATUS: RUN GREEN 30/30 on 2026-07-19 against nqlzjuxqgajeoypyzlnv, before applying.
+--         Shipped as migration 20260719134752_message_hides_team_chat.sql.
 --
 -- Run the WHOLE file as ONE execute_sql call. It opens a transaction, asserts, and ROLLS BACK.
 -- Read the `failed` column — a RED run still returns success from execute_sql.

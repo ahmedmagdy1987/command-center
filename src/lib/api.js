@@ -612,42 +612,83 @@ export const messages = {
     return (data || []).map(fromDbMessage);
   },
 
-  /** List the channel: the NEWEST `limit` messages, returned oldest-first. */
+  /** List the channel: the NEWEST `limit` messages, returned oldest-first.
+   *
+   *  Hide-aware since 20260719134752: `chat_thread_messages` applies MY OWN `message_hides` rows
+   *  INSIDE the query, before the LIMIT, so a hidden message never consumes a page slot (a
+   *  client-side .filter() after the fetch would silently return short pages). The RPC still returns
+   *  DESC like the raw query it replaces — reverse() back to the oldest-first contract is unchanged.
+   *
+   *  THROWS on a falsy workspaceId, deliberately. The old table read merely OMITTED the .eq() filter
+   *  in that case, which mixed every workspace the caller could see under RLS into one channel. The
+   *  RPC would instead match zero rows — a silently empty channel, which is just as wrong and harder
+   *  to spot. Neither is a good default for a workspace-scoped surface, so fail loudly.
+   */
   async list(limit = 200, workspaceId) {
-    // Order DESC + limit fetches the most-recent N (ASC + limit would return the OLDEST N and hide
-    // everything newer once a channel exceeds the limit); reverse back to the oldest-first contract.
-    let q = supabase
-      .from('messages').select('*')
-      .order('created_at', { ascending: false })
-      .limit(limit);
-    if (workspaceId) q = q.eq('workspace_id', workspaceId);
-    const { data, error } = await q;
-    if (error) throw error;
-    return (data || []).map(fromDbMessage).reverse();
+    if (!workspaceId) throw new Error('messages.list requires a workspaceId');
+    const rows = await hideAwareRead(
+      'chat_thread_messages', { p_ws: workspaceId, p_before: null, p_limit: limit },
+      () => supabase.from('messages').select('*').eq('workspace_id', workspaceId)
+        .order('created_at', { ascending: false }).limit(limit));
+    return rows.map(fromDbMessage).reverse();
   },
 
   /** 5c: the OLDER page — messages strictly before `beforeCreatedAt` (ISO), newest-first fetch, returned
-   *  oldest-first for prepending. Keyset on created_at; rides the messages_ws_created_idx composite. */
+   *  oldest-first for prepending. Keyset on created_at; rides the messages_ws_created_idx composite.
+   *  Hide-aware + falsy-workspace guard for the same reasons as list() above. */
   async listBefore(beforeCreatedAt, limit = 200, workspaceId) {
-    let q = supabase
-      .from('messages').select('*')
-      .lt('created_at', beforeCreatedAt)
-      .order('created_at', { ascending: false }).limit(limit);
-    if (workspaceId) q = q.eq('workspace_id', workspaceId);
-    const { data, error } = await q;
-    if (error) throw error;
-    return (data || []).map(fromDbMessage).reverse();
+    if (!workspaceId) throw new Error('messages.listBefore requires a workspaceId');
+    const rows = await hideAwareRead(
+      'chat_thread_messages', { p_ws: workspaceId, p_before: beforeCreatedAt, p_limit: limit },
+      () => supabase.from('messages').select('*').eq('workspace_id', workspaceId)
+        .lt('created_at', beforeCreatedAt)
+        .order('created_at', { ascending: false }).limit(limit));
+    return rows.map(fromDbMessage).reverse();
   },
 
-  /** Count messages newer than `since` (ISO) not sent by `exceptSenderId` — for the unread badge. */
-  async unreadCount(since, exceptSenderId, workspaceId) {
-    let q = supabase.from('messages').select('*', { count: 'exact', head: true });
-    if (workspaceId) q = q.eq('workspace_id', workspaceId);
-    if (since) q = q.gt('created_at', since);
-    if (exceptSenderId) q = q.neq('sender_id', exceptSenderId);
-    const { count, error } = await q;
+  /** Count messages newer than `since` (ISO) that I haven't sent — for the unread badge.
+   *
+   *  Server-side since 20260719134752. `exceptSenderId` is GONE from the signature: the RPC pins the
+   *  exclusion to auth.uid() itself, so passing a sender was always redundant and, worse, spoofable
+   *  into counting nothing. Two behaviour changes vs the old head-count, both corrections, both
+   *  accepted — they move the badge ONCE on cutover:
+   *    1. `sender_id` is nullable (on delete set null). The old `.neq('sender_id', me)` DROPPED
+   *       null-sender rows, so a departed member's messages never counted. They count now.
+   *    2. Tombstones no longer count. "This message was deleted" is not an unread message.
+   *  Also hide-aware: a message I hid stops inflating my own badge.
+   */
+  async unreadCount(since, workspaceId) {
+    if (!workspaceId) throw new Error('messages.unreadCount requires a workspaceId');
+    const { data, error } = await supabase.rpc('chat_unread_count', { p_ws: workspaceId, p_since: since || null });
     if (error) throw error;
-    return count || 0;
+    return Number(data) || 0;
+  },
+
+  /**
+   * "Delete for me" — hide ONE team-chat message from MY view only, leaving it untouched for
+   * everyone else. The exact twin of directMessages.hide: no time limit, works on someone else's
+   * message and on an existing tombstone, because the row lands in `message_hides` rather than
+   * mutating `messages` (so `enforce_message_edit_window` is never entered and no realtime UPDATE
+   * fires). RLS pins user_id to auth.uid() and requires non-guest workspace membership;
+   * `workspace_id` is stamped server-side by a trigger from the parent message, not sent.
+   *
+   * `ignoreDuplicates` is LOAD-BEARING, not a nicety — same trap as the DM version. It makes
+   * PostgREST emit `ON CONFLICT DO NOTHING` (so a repeat hide is idempotent) instead of `ON CONFLICT
+   * DO UPDATE` — and Postgres requires UPDATE privilege for DO UPDATE, checked at executor startup
+   * whether or not a conflict actually occurs. `message_hides` is granted select/insert/delete only,
+   * with no UPDATE policy (the rows are deliberately immutable), so a merge-duplicates upsert would
+   * fail 42501 on EVERY hide, including the first one for a fresh message. Do NOT "fix" a failure
+   * here by granting UPDATE; that reopens the mutability the migration argues against. (Asserted
+   * both ways by the proof: DO NOTHING => OK, DO UPDATE => 42501.)
+   */
+  async hide(messageId) {
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not signed in');
+    const { error } = await supabase
+      .from('message_hides')
+      .upsert({ message_id: messageId, user_id: session.user.id },
+              { onConflict: 'message_id,user_id', ignoreDuplicates: true });
+    if (error) throw error;
   },
 
   async sendText(body, workspaceId, mentions) {
@@ -798,11 +839,13 @@ export const messages = {
 const rpcMissing = (e) => e?.code === 'PGRST202' || e?.code === '42883';
 
 /**
- * Read DM rows through a hide-aware RPC (added by 20260716000040), which filters out messages I've
- * hidden INSIDE the query — before the LIMIT — so keyset pagination stays exact (a client-side
- * filter would return short pages). If that migration is not live on this project the function is
- * absent, so fall back to the plain table read: the thread still renders in full, and hidden
- * messages simply stay visible. Any OTHER error propagates — we never mask a real failure.
+ * Read message rows through a hide-aware RPC — `dm_thread_messages` / `dm_recent_messages` for DMs
+ * (20260716000040) and `chat_thread_messages` for team chat (20260719134752). Each filters out
+ * messages I've hidden INSIDE the query — before the LIMIT — so keyset pagination stays exact (a
+ * client-side filter would return short pages). If the relevant migration is not live on this
+ * project the function is absent, so fall back to the plain table read: the thread still renders in
+ * full, and hidden messages simply stay visible. Any OTHER error propagates — we never mask a real
+ * failure.
  * NB this covers the READ path only. If the migration is missing, `hide()` fails separately on the
  * absent TABLE (PGRST205 / 42P01), which `rpcMissing` deliberately does not match — that surfaces
  * as a toast rather than being silently swallowed.
@@ -816,6 +859,59 @@ async function hideAwareRead(rpc, params, fallback) {
   if (fallbackError) throw fallbackError;
   return rows || [];
 }
+
+/* =================================================================================
+   CHAT READS — the team-chat read cursor (20260719134628), the twin of dm_reads.
+   One row per (workspace_id, user_id). SELECT is deliberately BROAD so every member
+   can see every member's cursor — that asymmetry against the self-only writes is what
+   makes per-member read receipts possible. Guests never appear: the SELECT policy
+   evaluates the ROW OWNER's visibility too, so a member later DEMOTED to guest drops
+   out of everyone's receipts even though their row still exists.
+   Not in the realtime publication (nor is dm_reads) — the UI POLLS, mirroring DmThread.
+================================================================================= */
+export const chatReads = {
+  /** Every member's cursor for one workspace (RLS returns all visible rows) — for read receipts. */
+  async reads(workspaceId) {
+    if (!workspaceId) return [];
+    // ORDER BY is load-bearing, not tidiness. The receipt UI renders these as a row of faces and
+    // slices it to the first 6 — so row order is BOTH the visual order and which people fall behind
+    // the "+N". Unordered, this is a bitmap heap scan in physical order, and every markRead upsert
+    // rewrites a row's heap tuple and moves it to the end — so in an active channel the faces would
+    // visibly permute on each poll with no change in read state. dm_reads gets away without one
+    // because a 1:1 thread renders a single peer.
+    const { data, error } = await supabase
+      .from('chat_reads').select('workspace_id, user_id, last_read_at')
+      .eq('workspace_id', workspaceId)
+      .order('user_id', { ascending: true });
+    if (error) throw error;
+    return (data || []).map(r => ({ workspaceId: r.workspace_id, userId: r.user_id, lastReadAt: r.last_read_at }));
+  },
+
+  /**
+   * Advance MY cursor for a workspace (upsert on the (workspace_id,user_id) PK).
+   *
+   * `coverAt` anchors the cursor to the latest message's SERVER timestamp when available, exactly as
+   * directMessages.markRead does: writing the client's own now() can land BEFORE a message the
+   * server stamped at ~the same instant, which leaves an already-open channel showing unread.
+   *
+   * The DB clamps this in BOTH directions — monotonic (a regressing write is silently kept at the
+   * stored value) and capped at now() (a future cursor would otherwise become permanently unmovable
+   * and claim every future message as read). So a benign out-of-order write is safe to fire, and the
+   * optimistic zeroing of the badge stays valid. Do NOT pass an onConflict other than the PK: the
+   * identity-lock trigger's compatibility with PostgREST's `DO UPDATE SET <every payload column>`
+   * depends on the arbiter being the primary key (see 20260719134628 / ...134702 headers).
+   */
+  async markRead(workspaceId, coverAt) {
+    if (!workspaceId) return;
+    const session = await auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+    const { error } = await supabase
+      .from('chat_reads')
+      .upsert({ workspace_id: workspaceId, user_id: session.user.id, last_read_at: coverAt || new Date().toISOString() },
+              { onConflict: 'workspace_id,user_id' });
+    if (error) throw error;
+  },
+};
 
 export const directMessages = {
   /** Canonical get-or-create the 1:1 conversation with a peer in a workspace. Returns the conversation id. */

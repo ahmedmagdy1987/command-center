@@ -1,6 +1,9 @@
 -- ============================================================================================
 -- ROLLED-BACK PROOF — dm_reads identity lock + future cap
--- STATUS: NOT YET RUN. Requires the Supabase MCP (execute_sql) against nqlzjuxqgajeoypyzlnv.
+-- STATUS: RUN GREEN 19/19 on 2026-07-19 against nqlzjuxqgajeoypyzlnv, before applying. The RED phase
+--         reproduced BOTH holes against the then-live rules: the cursor really did regress to a past
+--         timestamp, and a cursor dated 2126 was accepted. Shipped as migration
+--         20260719134702_dm_reads_identity_lock_and_future_cap.sql.
 --
 -- Run the WHOLE file as ONE execute_sql call. It opens a transaction, asserts, and ROLLS BACK.
 -- Read the `failed` column of the result — a RED run still returns success from execute_sql.
@@ -352,13 +355,13 @@ where n.nspname='public' and p.proname in ('dm_reads_monotonic_cursor','dm_reads
 -- trigger left disabled — a session_replication_role='replica' window would otherwise let every
 -- assertion above pass while the controls were inert.
 insert into _r values (17,'clamp fires BEFORE ROW on INSERT+UPDATE and is enabled','tgtype=23 enabled=O',
-  (select coalesce('tgtype='||tgtype::int||' enabled='||tgenabled,'<missing>') from pg_trigger
+  (select coalesce('tgtype='||tgtype::int||' enabled='||tgenabled::text,'<missing>') from pg_trigger
     where tgrelid='public.dm_reads'::regclass and tgname='dm_reads_monotonic'),
   (select tgtype::int = 23 and tgenabled = 'O' from pg_trigger
     where tgrelid='public.dm_reads'::regclass and tgname='dm_reads_monotonic'));
 
 insert into _r values (18,'identity lock fires BEFORE ROW on UPDATE and is enabled','tgtype=19 enabled=O',
-  (select coalesce('tgtype='||tgtype::int||' enabled='||tgenabled,'<missing>') from pg_trigger
+  (select coalesce('tgtype='||tgtype::int||' enabled='||tgenabled::text,'<missing>') from pg_trigger
     where tgrelid='public.dm_reads'::regclass and tgname='dm_reads_lock_identity'),
   (select tgtype::int = 19 and tgenabled = 'O' from pg_trigger
     where tgrelid='public.dm_reads'::regclass and tgname='dm_reads_lock_identity'));

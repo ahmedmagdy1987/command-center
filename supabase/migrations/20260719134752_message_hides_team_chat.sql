@@ -1,19 +1,13 @@
 -- ============================================================================================
--- PROPOSED — "Delete for me" for TEAM CHAT (`public.message_hides`)
--- STATUS: NOT APPLIED. Awaits owner approval + a live rolled-back proof run via the Supabase MCP.
---         See PROPOSED_message_hides_team_chat_rolled_back_proof.sql.
--- When approved: apply via apply_migration, then move this file to
---         supabase/migrations/<version-from-list_migrations>_message_hides_team_chat.sql
---         and the proof to supabase/tests/.
+-- "Delete for me" for TEAM CHAT (`public.message_hides`)
 --
 -- WHY: `dm_message_hides` (20260716000040) gave DMs a two-tier delete — "delete for everyone"
 -- (soft-delete, 10-minute window) and "delete for me" (personal hide, no time limit, works on
--- someone else's message and on a tombstone). Team chat has only tier 1. This is the team-chat
+-- someone else's message and on a tombstone). Team chat had only tier 1. This is the team-chat
 -- twin, so the two surfaces behave IDENTICALLY: same menu, same two tiers, tombstone hideable
 -- with no time limit.
 --
--- STRUCTURAL MIRROR of 20260716000040, decision for decision. Every non-obvious choice there was
--- load-bearing and is reproduced here with the substitution:
+-- STRUCTURAL MIRROR of 20260716000040, decision for decision, with the substitution:
 --     dm_messages          -> messages
 --     conversation_id      -> workspace_id
 --     is_dm_participant()  -> is_workspace_member() AND workspace_role() <> 'guest'
@@ -27,10 +21,8 @@
 -- ORDERING DEPENDENCY (mirrors 20260716000040:5-8): hiding the NEWEST message shrinks the client's
 -- list, which walks its read cursor backward. In DMs that would have flipped the peer's "Seen" —
 -- a peer-observable hide oracle — which is why the monotonic cursor had to land first. Team chat's
--- cursor is currently localStorage (`cc_chat_last_seen`), per-device and not peer-visible, so there
--- is no oracle today. But the PROPOSED `chat_reads` read-receipt table makes team-chat cursors
--- peer-visible too. **If chat_reads is applied, it must carry its monotonic clamp (it does) and
--- should be applied BEFORE or WITH this migration.**
+-- cursor becomes peer-visible with the companion `chat_reads` migration, which carries its own
+-- monotonic clamp and is applied BEFORE this one.
 --
 -- NEVER REVEALS THAT A HIDE HAPPENED — the requirement, and how each layer serves it:
 --   * SELECT is pinned to `user_id = auth.uid()` and nothing else, so nobody can enumerate what
@@ -44,38 +36,24 @@
 --   * No sender-visible side effect: a hide writes nothing to `messages`, so no realtime UPDATE
 --     fires and `enforce_message_edit_window` is never entered.
 --
--- ⚠ DB ONLY — UI NOT WIRED BY THIS FILE. Applying this migration alone leaves the feature 100%
---   unreachable: nothing in the app can insert a `message_hides` row, and two of the three read
---   surfaces still query the table directly. That is exactly how dm_message_hides shipped — proven,
---   applied, and never called by a single line of application code. The client work is a REQUIRED
---   companion, in the same piece of work:
---     * NEW  `messages.hide(messageId)` — the writer. MUST use `ignoreDuplicates: true`
---            (ON CONFLICT DO NOTHING); a merge-duplicates upsert needs an UPDATE privilege this
---            table deliberately withholds and would 42501 on every call, including the first.
---     * REWIRE `messages.list` / `messages.listBefore` -> `chat_thread_messages` via the existing
---            `hideAwareRead` helper. The RPC returns DESC, so both callers keep their `.reverse()`.
---            Make them THROW on a falsy workspaceId rather than silently return [] — today they omit
---            the workspace filter entirely in that case, whereas the RPC would match zero rows.
---     * REWIRE `messages.unreadCount` -> `chat_unread_count`.
---     * `messages.search` already routes through `search_messages`, so it needs no client change.
---     * ChatView's failure reconcilers (VisualTaskCommandCenter.jsx ~:5661, ~:5668) re-read via
---            `messages.list`; once that is hide-aware they stop resurrecting hidden messages.
---     * A hide fires no realtime event, so the hiding client must refresh its own unread badge.
+-- TWO DELIBERATE BEHAVIOUR CHANGES in `chat_unread_count` vs the client's previous head-count.
+-- Both mirror `_dm_unread_counts` and both are CORRECTIONS, explicitly accepted by the owner. They
+-- move the badge once on cutover, so they are stated rather than discovered:
+--   1. `messages.sender_id` is NULLABLE (`on delete set null`). The client's `.neq('sender_id', me)`
+--      DROPPED null-sender rows, so a departed member's messages never counted. `is distinct from`
+--      COUNTS them. A former colleague's unread messages start appearing in the badge.
+--   2. The client counted tombstones; this excludes `deleted_at is not null`. A "this message was
+--      deleted" marker is not an unread message.
 --
--- ⚠ TWO DELIBERATE BEHAVIOUR CHANGES in `chat_unread_count` vs the client's current head-count.
---   Both mirror `_dm_unread_counts` and both are corrections, but they will move the badge on
---   cutover, so they are stated rather than discovered:
---     1. `messages.sender_id` is NULLABLE (`on delete set null`). The client's `.neq('sender_id', me)`
---        DROPS null-sender rows, so a departed member's messages never counted. `is distinct from`
---        COUNTS them. A former colleague's unread messages start appearing in the badge.
---     2. The client counts tombstones; this excludes `deleted_at is not null`. Deleted messages stop
---        inflating the badge.
---
--- ⚠ ACCEPTED LOCKOUT: the DELETE (unhide) policy carries the same guest gate as INSERT, so a member
+-- ACCEPTED LOCKOUT: the DELETE (unhide) policy carries the same guest gate as INSERT, so a member
 --   who hides and is then DEMOTED to guest cannot unhide. Harmless — a guest cannot see team chat at
 --   all, so the message is invisible to them either way — and re-promotion restores it. Dropping the
 --   gate from DELETE would be the wrong failure direction, for the same reason the workspace clause
 --   is kept off SELECT. Asserted in the proof so it is a decision on record, not an accident.
+--
+-- PROVEN: 30/30 rolled-back assertions across FUNCTION / PRIVACY / BOUNDARY, including the two
+--   sharpest oracle probes (duplicating a real hide -> 42501 not 23505; a nonexistent message_id ->
+--   42501 not 23502). See supabase/tests/message_hides_team_chat_rolled_back_proof.sql.
 -- ============================================================================================
 
 -- ------------------------------------------------------------------ 1. table
@@ -209,9 +187,9 @@ grant  execute on function public.chat_unread_count(uuid, timestamptz) to authen
 
 -- ------------------------------------------------------------------ 5. search must respect hides
 -- CREATE OR REPLACE of the LIVE 20260713205334 body with one added NOT EXISTS. Without this the
--- command palette (VisualTaskCommandCenter.jsx:2391) returns hidden messages' bodies verbatim and
--- deep-links to them — the most direct possible defeat of the feature. Everything else about the
--- body is reproduced unchanged, including the `least(coalesce(...))` limit form.
+-- command palette returns hidden messages' bodies verbatim and deep-links to them — the most direct
+-- possible defeat of the feature. Everything else about the body is reproduced unchanged, including
+-- the `least(coalesce(...))` limit form.
 create or replace function public.search_messages(p_ws uuid, p_q text, p_limit int default 50)
 returns setof public.messages
 language sql
