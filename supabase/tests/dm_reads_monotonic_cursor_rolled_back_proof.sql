@@ -60,7 +60,12 @@ declare
   v_base  timestamptz := now() - interval '3 hours';
   v_fwd   timestamptz := now() - interval '1 hour';   -- forward from base
   v_back  timestamptz := now() - interval '2 hours';  -- backward from fwd (> base, < fwd)
-  v_fwd2  timestamptz := now() + interval '1 hour';   -- forward from fwd
+  -- Must stay in the PAST. This was `now() + interval '1 hour'`, which the future cap added by
+  -- <chat_reads/dm_reads identity-lock migration> clamps to now() — that turned R06 red and, worse,
+  -- tripped the uncaught POSTCONDITION at the end of this block, aborting the whole suite before it
+  -- could report. Still strictly forward of v_fwd (now() - 1 hour), so R06's meaning is unchanged:
+  -- it asserts the clamp does not FREEZE the cursor, not that a future value is storable.
+  v_fwd2  timestamptz := now() - interval '30 minutes';  -- forward from fwd, still in the past
   v_stored timestamptz;
   v_n int; v_actual text;
 begin

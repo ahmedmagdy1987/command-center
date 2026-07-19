@@ -1,7 +1,10 @@
 # Command Center — project guide for Claude
 
 > Orientation file so any future session is instantly up to speed. Last verified against the
-> live DB on **2026-07-18** — current through `20260718195854`
+> live DB on **2026-07-19** — current through `20260719134752`
+> (message_hides_team_chat); see *Chat pass (2026-07-19)*, which also closed a **live cursor-repudiation
+> hole in `dm_reads`** and is the first DB work in a while that shipped **fully wired into the UI in the
+> same change**. Previous anchor: `20260718195854`
 > (accept_invitation_email_confirm_guard); see *DB pass (2026-07-18)*. Earlier anchor:
 > **task file attachments** shipped 2026-07-12 (see *Task attachments*). Two production bugs were found
 > and fixed on 2026-07-15 — a live self-service **impersonation** hole and an orphan sweep that could
@@ -88,12 +91,16 @@ Authorization is **per-workspace** via `workspace_members.role` — a four-rung 
 **owner > admin > member > guest** (the global `members.role` is vestigial, profile-only — never read it for
 authz, and never write this table from it again). See *Workspace roles, mentions & guest UX*.
 
-## Data model (13 base tables)
+## Data model (16 base tables)
 
 `tasks`, `projects`, `members`, `comments`, `messages`, `notifications`, `workspaces`,
-`workspace_members`, plus `invitations` (workspace invites), the direct-messages trio
-`dm_conversations` / `dm_messages` / `dm_reads`, and `task_attachments` (task file attachments —
-see *Task attachments*). Every tenant-scoped table carries a `workspace_id`.
+`workspace_members`, plus `invitations` (workspace invites), the direct-messages quartet
+`dm_conversations` / `dm_messages` / `dm_reads` / `dm_message_hides`, their team-chat counterparts
+`chat_reads` (read cursor → per-member receipts) and `message_hides` ("Delete for me"), and
+`task_attachments` (task file attachments — see *Task attachments*). Every tenant-scoped table
+carries a `workspace_id`.
+*(The count read "13" until 2026-07-19 and had already missed `dm_message_hides`, which shipped
+2026-07-16 — corrected here along with the two added by* Chat pass (2026-07-19)*.)*
 
 - `tasks.id` is **TEXT** (client-generated); `comments.task_id` / `notifications.task_id` are TEXT FKs.
 - `members` cols: `id` (=auth user id), `email`, `display_name`, `role`, `created_at`. **No `name` col.**
@@ -582,6 +589,116 @@ Files on a task (briefs, deliverables, images, docs). Three DB migrations + a cl
   authorize it) then the row. Client MIME/size/count checks are UX only — the server RLS/bucket is authoritative.
 - **Proven:** feasibility A-E 14/14 (delegation matrix + happy path + outsider blocks); quotas (size, per-task
   20, rate 60 delete-resistant); orphan sweep 5/5; regression isolation 36/36 + role 40/40 + storage 14/14.
+
+## Chat pass (2026-07-19) — team-chat read receipts, "Delete for me", + a live dm_reads hole
+
+Three DB migrations **and the client wiring for all of them, in one change** — the process rule that
+nothing ships DB-only, after `dm_message_hides` (20260716000040) shipped proven, applied, and never
+called by a single line of app code. Full discipline: proofs run rolled-back FIRST (75/75 across the
+three) → owner approval → apply → advisors → regression → ledger-named files → commit.
+Advisors clean (only the accepted `auth_leaked_password_protection` WARN). Regression **267/267**:
+isolation 48/48 · role 143/143 · profile 40/40 · dm_reads_monotonic 9/9 · dm_message_hides 27/27.
+Build clean, lint held at the **12 errors / 2 warnings** baseline.
+
+- **`chat_reads`** (`20260719134628`, 26/26). The team-chat read cursor DMs already had — team chat
+  had NOTHING server-side, just a per-device `cc_chat_last_seen:<wsId>` localStorage key that was
+  lost on a wipe and invisible to everyone else. Mirrors `dm_reads` ((scope,user) PK, broad SELECT so
+  receipts are visible, self-only writes, no DELETE) and then closes two holes dm_reads left open.
+  **Guests get two independent layers:** the write policies restate the guest exclusion, AND the
+  SELECT policy evaluates the **ROW OWNER's** visibility — so a member later **DEMOTED** to guest
+  disappears from everyone's receipts. Layer 2 is not redundant; demotion is the case layer 1 cannot
+  reach (asserted).
+- **`dm_reads` identity lock + future cap** (`20260719134702`, 19/19) — **A LIVE BUG, not a
+  hardening nicety.** `20260715235959` claimed the row "can never be destroyed and re-genesised"
+  because there is no DELETE grant. That only rules out DELETE — **not an UPDATE that moves the row
+  off its PK.** `dm_reads_update_own` pins `user_id` but says nothing about `conversation_id`, and
+  the grant is table-wide UPDATE, so anyone with two DM threads could move their cursor A→B (the
+  clamp compares OLD/NEW of the *same* row, so it never fires), vacating A's PK slot, then
+  genesis-insert A at any past time. Since the SELECT policy is peer-inclusive *by design*, the peer
+  observes it: **"Seen" un-says itself.** The proof's RED phase reproduced this against the then-live
+  rules, plus the opposite hole (a cursor dated **2126** was accepted, after which monotonicity makes
+  it permanently unmovable). Fixed with the same two triggers `chat_reads` carries.
+  **→ Landmine:** the fix MUST be a trigger, not a tighter column grant. PostgREST compiles
+  `.upsert()` to `ON CONFLICT DO UPDATE SET <every payload column>` including the conflict-target
+  columns, and Postgres checks UPDATE privilege at executor startup whether or not a conflict occurs
+  — so `grant update (last_read_at)` would 42501 **every** markRead. The trigger is compatible only
+  because the arbiter is the **PRIMARY KEY** (EXCLUDED then necessarily matches OLD on those two
+  columns). **Keep the arbiter on the PK**; a different `onConflict` would start failing 42501.
+- **`message_hides`** (`20260719134752`, 30/30). Team-chat "Delete for me" — the twin of
+  `dm_message_hides`, so both surfaces now have the identical two-tier menu (delete for everyone =
+  soft-delete inside the 10-min window; delete for me = personal hide, **no time limit**, works on
+  someone else's message and on a tombstone). Guests excluded by construction (the gate delegates to
+  the team-chat visibility predicate, so the hide surface can never drift from the message surface).
+  SELECT pinned to `user_id = auth.uid()` and nothing else; the workspace clause is deliberately
+  **absent** from SELECT because it would fail OPEN (losing membership would make a hidden message
+  REAPPEAR). Two oracle probes asserted: duplicating a real hide → **42501, never 23505**; a
+  nonexistent `message_id` → **42501, never 23502**. Also replaces `search_messages`, which would
+  otherwise hand hidden bodies straight back to the command palette.
+  **→ ACCEPTED LOCKOUT:** a member who hides and is then demoted to guest cannot unhide. Harmless
+  (a guest can't see team chat at all) and re-promotion restores it; on record, not an accident.
+
+**TWO ACCEPTED BEHAVIOUR CHANGES — the badge moves ONCE on cutover** (owner-approved, both are
+corrections): (1) `messages.sender_id` is nullable, and the old client `.neq('sender_id', me)`
+silently DROPPED null-sender rows, so **a departed member's messages never counted** — `is distinct
+from` counts them; (2) tombstones no longer inflate the count ("this message was deleted" is not an
+unread message).
+
+**Client wiring** (`api.js` + `VisualTaskCommandCenter.jsx`): `messages.list`/`listBefore` route
+through `chat_thread_messages` via the existing `hideAwareRead` helper (the RPC returns DESC, so both
+callers keep their `.reverse()`), and now **THROW on a falsy `workspaceId`** — the old table read just
+omitted the `.eq()` filter and mixed every visible workspace into one channel, while the RPC would
+match zero rows (a silently empty channel); both are wrong, so fail loudly. `messages.unreadCount`
+→ `chat_unread_count` and **lost its `exceptSenderId` argument** (the RPC pins the exclusion to
+`auth.uid()`). New `messages.hide()` uses **`ignoreDuplicates`** — load-bearing, same trap as the DM
+version: a merge-duplicates upsert needs an UPDATE privilege this table deliberately withholds and
+would 42501 on every call including the first. New `chatReads` API. `markChatRead(coverAt)` writes
+the server cursor anchored to the triggering message's **server** timestamp, and moved INSIDE the
+load `.then` so a failed load no longer claims to have read what it couldn't fetch. Read receipts
+poll every 4s + focus + visibilitychange (`chat_reads` is not in the realtime publication, same as
+`dm_reads`) and render each member's 14px avatar under the last message at/before their cursor.
+`MessageList`'s `receiptFor` lost its `mine &&` gate (behaviour-preserving for DMs, whose
+`receiptFor` already returns null unless the message is the last OWN one).
+**→ A hide fires NO realtime event** (`message_hides` is deliberately unpublished), so nothing
+self-heals: the hiding client calls the new `refreshChatUnread` explicitly.
+
+**Two defects found in the PROOF FILES themselves and fixed before running** — worth knowing because
+both classes recur: the `chat_reads` proof carried an **unqualified `delete from public.chat_reads`**
+(the banned match-all shape — harmless on a brand-new empty table, NOT harmless once the file lives
+in `supabase/tests/` and is re-run against real cursors), and the `dm_reads` proof used
+`text || tgenabled` where `tgenabled` is Postgres's `"char"` type — an ambiguous-operator error that
+meant **the file could never have run at all**.
+
+**Four client defects found by a 4-lens adversarial review and fixed before commit** (8 raised, 4
+refuted). All four are landmines for anyone touching this code again:
+1. **The badge race.** Moving `markChatRead` into the load `.then` made the read-mark fully async,
+   while AppProvider's boot/switch refresh still recomputed from the server concurrently — and since
+   the cursor upsert sits behind a fetch AND a `getSession`, the recompute's `since` is reliably the
+   PRE-OPEN cursor, so the stale count usually lands LAST and wins. You would sit in a fully-read
+   channel looking at "5". The old localStorage cursor was ordered-safe *by construction* (a
+   synchronous `setItem` in a child effect, read by a synchronous `getItem` in the parent) — that
+   safety was invisible and it was lost silently. Fixed with the same `viewing` guard `refreshDms`
+   already carries.
+2. **`chatReads.reads()` needs its `ORDER BY`.** Unordered it plans as a bitmap heap scan in physical
+   order, and every `markRead` upsert rewrites a row's heap tuple and moves it — so in an active
+   channel the receipt faces visibly permute every poll, and *which* people hide behind the "+N"
+   churns. Proven empirically on the live DB, not assumed. `dm_reads` escapes this only because a 1:1
+   thread renders one peer.
+3. **Receipts were unidentifiable without a mouse.** At 14px `Avatar`'s initials fallback renders at
+   ~5px and a `title` tooltip is mouse-only, so on touch and for a screen reader "who read this" was
+   unobtainable. Now each face is a real `PersonButton` (focusable, per-person title) plus an
+   `sr-only` summary naming everyone *including* those behind the "+N". Also fixed at the source:
+   `Avatar`'s initials branch is now `aria-hidden`, matching the photo (`alt=""`) and silhouette
+   branches — it was the one branch leaking bare initials into the a11y tree, app-wide.
+4. **`reads` is workspace-TAGGED, not applied blind.** ChatView is route-mounted with no workspace
+   key, and `receiptsByMessage` matches cursors to messages on TIMESTAMP alone while `people` is not
+   workspace-scoped — so a late-resolving fetch could render a non-member of the new workspace, by
+   name and face, as having read its messages.
+
+**→ Team chat deliberately DIVERGES from `DmThread.hideForMe` on one point:** it does NOT refresh the
+badge after a hide. DMs must (refreshDms also rebuilds previews and other threads' counts); team chat
+has one channel, and a hide is only reachable from inside ChatView where the badge is already pinned
+to 0 — recomputing there would at best do nothing and at worst re-inflate it from a not-yet-landed
+cursor. Don't "restore the parity".
 
 ## DB pass (2026-07-18) — anchored role-title rule + invite email-confirm guard
 

@@ -8,9 +8,9 @@ import {
   Flame, TrendingUp, Minimize2, Maximize2, Inbox, PauseCircle, PlayCircle, Sparkles,
   Info, LogOut, Loader2,
   KeyRound, Bell, MessageSquare, MessagesSquare, Send, Mic, Square, Play, Pause, Users, Mail, UserPlus, ArrowRight,
-  FileText, Shield, Paperclip, FileImage, User
+  FileText, Shield, Paperclip, FileImage, User, EyeOff
 } from 'lucide-react';
-import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, directMessages as directMessagesApi, workspaces as workspacesApi, workspaceMembers as workspaceMembersApi, invitations as invitationsApi, attachments as attachmentsApi, auth } from './lib/api';
+import { tasks as tasksApi, projects as projectsApi, members as membersApi, notifications as notificationsApi, comments as commentsApi, messages as messagesApi, chatReads as chatReadsApi, directMessages as directMessagesApi, workspaces as workspacesApi, workspaceMembers as workspaceMembersApi, invitations as invitationsApi, attachments as attachmentsApi, auth } from './lib/api';
 import { supabase } from './lib/supabase';
 import { sanitizeTask, uid, nowISO } from './lib/sanitize';
 import { resolvePlanId, computeEntitlements, getPreviewPlanId, clearPreviewPlan } from './lib/entitlements';
@@ -279,12 +279,48 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   }, []);
   const chatViewRef = useRef(view);
   useEffect(() => { chatViewRef.current = view; }, [view]);
-  const markChatRead = useCallback(() => {
-    // Per-workspace key: a single global cursor mis-counts across workspaces (reading chat in A would
-    // mark B's older-but-unseen messages as read). The unread effect reads the same per-workspace key.
-    try { if (currentWorkspaceId) localStorage.setItem(`cc_chat_last_seen:${currentWorkspaceId}`, new Date().toISOString()); } catch { /* ignore */ }
+  // Advance my team-chat read cursor. SERVER-SIDE since 20260719134628 (`chat_reads`), replacing the
+  // per-device `cc_chat_last_seen:<wsId>` localStorage key — which was invisible to other members
+  // (so no read receipts were possible), wrong on a second device, and lost on a machine wipe.
+  // Still per-workspace, for the same reason the old key was: one global cursor would mark workspace
+  // B's older-but-unseen messages read just because you opened chat in A.
+  // `coverAt` is the triggering message's SERVER timestamp when we have one — see chatReads.markRead
+  // for why the client's own now() is not safe here. Fire-and-forget: the badge zeroes optimistically
+  // and the DB clamps a stale or out-of-order write, so a failed cursor write is never destructive.
+  const markChatRead = useCallback((coverAt) => {
     setChatUnread(0);
+    if (!currentWorkspaceId) return;
+    chatReadsApi.markRead(currentWorkspaceId, coverAt).catch(logCaught('chat.markRead'));
   }, [currentWorkspaceId]);
+
+  // Recompute the team-chat badge from the SERVER cursor, for boot and workspace-switch. Deliberately
+  // NOT on the context: the only other plausible caller was ChatView's "delete for me", and that one
+  // must not recompute (see the note in hideForMe) — so exposing this would only invite the race the
+  // `viewing` guard below exists to prevent.
+  const chatUnreadWsRef = useRef(currentWorkspaceId);
+  useEffect(() => { chatUnreadWsRef.current = currentWorkspaceId; }, [currentWorkspaceId]);
+  const refreshChatUnread = useCallback(async () => {
+    const me = session?.user?.id;
+    const ws = currentWorkspaceId;
+    if (!me || !ws) return;
+    try {
+      const rs = await chatReadsApi.reads(ws);
+      const since = rs.find(r => r.userId === me)?.lastReadAt || null;
+      const n = await messagesApi.unreadCount(since, ws);
+      // Drop a late resolve that lost a race with a workspace switch — otherwise workspace A's count
+      // lands on workspace B's badge.
+      if (chatUnreadWsRef.current !== ws) return;
+      // Badge-race fix, the exact twin of refreshDms' `viewing` guard: while the channel is the view
+      // being looked at, markChatRead has already zeroed the badge optimistically — don't let the
+      // lagging server value re-inflate it. This matters MORE than it did for the old localStorage
+      // cursor, which was written synchronously in the effect body and so was always already visible
+      // to this read. The cursor upsert is now behind a list fetch AND a getSession, while this path
+      // is a chat_reads SELECT plus a chat_unread_count — so `since` here is reliably the PRE-OPEN
+      // cursor, and without the guard the stale count usually lands LAST and wins.
+      if (chatViewRef.current === 'chat') return;
+      setChatUnread(n);
+    } catch (e) { logCaught('chat.unreadCount')(e); }
+  }, [session?.user?.id, currentWorkspaceId]);
 
   // ---- Direct messages (1:1) ---- conversation summaries + handlers live here (the state hub);
   // the open thread loads its own messages. Read state is server-side (dm_reads), so unread + receipts
@@ -455,23 +491,27 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
     return () => { unsub(); clearTimeout(timer); };
   }, [currentWorkspaceId]);
 
-  // Live unread badge for chat: count messages newer than the user's last-seen (localStorage)
+  // Live unread badge for chat: count messages newer than my SERVER-SIDE read cursor (chat_reads)
   // and bump it on new messages from others while they're not viewing the channel.
+  // A member with no cursor row yet resolves to `since = null`, and the RPC then counts the whole
+  // visible channel — the same thing the old code did when the localStorage key was missing.
   useEffect(() => {
     const me = session?.user?.id;
     if (!me || !currentWorkspaceId) return;
     let on = true;
-    let lastSeen = null;
-    try { lastSeen = localStorage.getItem(`cc_chat_last_seen:${currentWorkspaceId}`); } catch { /* ignore */ }
-    messagesApi.unreadCount(lastSeen, me, currentWorkspaceId).then(n => { if (on) setChatUnread(n); }).catch(logCaught('chat.unreadCount'));
+    // Deferred so the initial count isn't a synchronous setState in the effect body — the same
+    // house pattern as the typing-indicator effect above. (refreshChatUnread only setStates after
+    // two awaits, so this is already true at runtime; the deferral is what makes it true at the
+    // CALL SITE, which is what the lint rule reads.)
+    const t = setTimeout(refreshChatUnread, 0);
     const unsub = messagesApi.subscribe(({ type, message }) => {
       if (type !== 'INSERT' || !message || !on) return;
       if (message.senderId === me) return;
       if (chatViewRef.current === 'chat') return;   // viewing -> ChatView keeps it read
       setChatUnread(n => n + 1);
     }, 'messages-unread', currentWorkspaceId);
-    return () => { on = false; unsub(); };
-  }, [session?.user?.id, currentWorkspaceId]);
+    return () => { on = false; clearTimeout(t); unsub(); };
+  }, [session?.user?.id, currentWorkspaceId, refreshChatUnread]);
 
   // Direct messages: load the workspace's conversation summaries + live-refresh on any DM change
   // (cheap re-summarize; recomputes previews + unread from the server-side cursors). Clears on switch.
@@ -5022,10 +5062,23 @@ function Avatar({ name, userId, photoUrl, size = 28, className }) {
       {showPhoto ? (
         // Fixed box + lazy/async decode: an avatar renders in every roster row and chat line, so it
         // must never drive layout off an image whose real dimensions we don't control.
+        // FILL THE CONTENT BOX — do NOT restate `size` here. The wrapper is border-box with a 1px
+        // border, so its content box is (size-2) square. An img authored at `size` gets its WIDTH
+        // clamped to size-2 by preflight's `img { max-width: 100% }` while the inline HEIGHT stays
+        // `size`, yielding a portrait box: `cover` then over-crops horizontally and overflow-hidden
+        // shaves a row of pixels off the top and bottom. The error is a fixed 2px, so it is worst on
+        // the small avatars (17% at size 12, 7% at 28). 100%/100% keeps it exactly square at every
+        // size; flexShrink guards the same width against the wrapper's flex context.
         <img src={photoUrl} alt="" width={size} height={size} loading="lazy" decoding="async"
           onError={() => setBroken(true)}
-          style={{ width: size, height: size, objectFit: 'cover', display: 'block' }} />
-      ) : initials ? initials : (
+          style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', display: 'block', flexShrink: 0 }} />
+      ) : initials ? (
+        // aria-hidden for the same reason the other two branches already are (`alt=""` on the photo,
+        // aria-hidden on the silhouette): an avatar is decoration, and every call site pairs it with
+        // a real name — in a PersonButton title, a sibling label, or an sr-only summary. Without
+        // this, a screen reader reads bare initials ("A M") as if they were content.
+        <span aria-hidden="true">{initials}</span>
+      ) : (
         <User aria-hidden="true" style={{ width: Math.round(size * 0.5), height: Math.round(size * 0.5) }} />
       )}
     </span>
@@ -5042,9 +5095,20 @@ function MsgAvatar({ name, userId, photoUrl, size = 28 }) {
 // rejects a late edit/delete that slips through (P0001), after which the caller reconciles.
 const MSG_EDIT_WINDOW_MS = 10 * 60 * 1000;
 
+/** "Dense" = a bubble whose box has no text half-leading to soften the gap to its neighbour: a voice
+ *  note (fixed-height control row) or a tombstone. Drives the message-row spacing in MessageList. */
+const isDenseMsg = (m) => !!m && (!!m.deletedAt || !!m.audioPath || !!m.localUrl);
+
 /** One message bubble: tombstone / body (+ "(edited)") / voice note, an inline editor, and a
- *  hover-and-touch "…" actions menu (Edit own · Copy · Delete own). Shared by team chat + DMs. */
-function MsgBubble({ m, mine, onDelete, onEdit }) {
+ *  hover-and-touch "…" actions menu. Shared by team chat + DMs.
+ *
+ *  TWO-TIER DELETE. `onDelete` is "delete for everyone" — a soft-delete that tombstones the row for
+ *  both sides, capped at MSG_EDIT_WINDOW_MS by the DB trigger. `onHide` is "delete for me" — a row
+ *  in dm_message_hides that removes the message from MY view only, with NO time limit, and which
+ *  therefore also works on someone ELSE's message and on an existing tombstone. BOTH surfaces now
+ *  pass `onHide` — DMs via dm_message_hides (20260716000040) and team chat via message_hides
+ *  (20260719134752) — so the two menus are identical, which is the whole point. */
+function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
   const [menu, setMenu] = useState(false);
   const [pos, setPos] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -5059,23 +5123,64 @@ function MsgBubble({ m, mine, onDelete, onEdit }) {
   // Trigger visibility (pure): the precise 10-min window is computed in openMenu, not at render
   // (Date.now() is impure for render), and gates Edit/Delete inside the menu via `actable`.
   // A pending bubble has no server row yet, so there is nothing to edit, copy or delete on it.
-  const menuBtn = !deleted && !m.pending && (canCopy || mine);
-  const MENU_W = 144;
+  // "Delete for me" has no time limit and no sender restriction, so it is available on ANY settled
+  // message — including a tombstone — on both surfaces.
+  const canHide = !!onHide && !m.pending;
+  const menuBtn = !m.pending && (canCopy || canHide || (mine && !deleted));
+  // Keep in sync with the menu's `w-44` below — this is the width used to clamp it on-screen.
+  const MENU_W = 176;
+  const MENU_ROW_H = 34;    // one item: px-3 py-2 (16) + a 12px/1.5 line box (18), no wrap
+  const MENU_PAD_Y = 10;    // the menu's own py-1 (8) + its 1px top and bottom border
+  const MENU_HINT_H = 48;   // the expiry hint wraps to two lines at this width
   // Anchor the menu to the trigger's viewport rect, then render it via a PORTAL to document.body so
   // it escapes the scroll/overflow clipping of the message list (the old absolute menu was clipped
   // and spilled off the edge). Clamp horizontally so it never runs off-screen on mobile.
   const openMenu = () => {
+    // Always open. This used to bail when nothing was actionable, which made the visible trigger a
+    // SILENT NO-OP on an own voice note past the window — indistinguishable from a broken button.
+    // The menu now explains itself instead (see the expiry hint).
     const within = Date.now() - new Date(m.createdAt).getTime() < MSG_EDIT_WINDOW_MS;
-    if (!canCopy && !(mine && within)) return;   // nothing to show (e.g. an own voice note past the window)
     setActable(within);
     const r = btnRef.current?.getBoundingClientRect();
     if (r) {
       let left = mine ? r.right - MENU_W : r.left;
       left = Math.max(8, Math.min(left, window.innerWidth - MENU_W - 8));
-      setPos({ top: Math.min(r.bottom + 6, window.innerHeight - 96), left });
+      // The vertical reserve must track the ITEM COUNT. A fixed one was sized for a 3-item menu, and
+      // the DM case now renders FOUR (Edit · Copy · Delete for me · Delete for everyone) — on the
+      // newest message the clamp pushed the last row below the fold, and the menu is `fixed` with no
+      // overflow, so "Delete for everyone" became unreachable. Prefer below the trigger, flip above
+      // when it would overflow, and only clamp if it fits neither way.
+      const rows = (mine && hasBody && within && !deleted ? 1 : 0)
+                 + (canCopy ? 1 : 0)
+                 + (canHide ? 1 : 0)
+                 + (mine && within && !deleted ? 1 : 0);
+      const h = MENU_PAD_Y + rows * MENU_ROW_H + (mine && !deleted && !within ? MENU_HINT_H : 0);
+      const below = r.bottom + 6;
+      const top = below + h <= window.innerHeight - 8
+        ? below
+        : Math.max(8, Math.min(r.top - 6 - h, window.innerHeight - h - 8));
+      setPos({ top, left });
     }
     setMenu(true);
   };
+
+  // Escape closes the menu and returns focus to the trigger. Without this the menu was mouse-only:
+  // it is portaled to document.body, so it lands at the END of the tab order rather than after the
+  // trigger, and there was no way to dismiss it from the keyboard at all.
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      // No stopPropagation: this listener is on `window`, the last node in the bubble path, so there
+      // is nothing left to stop — and AppProvider's own window-level Escape handler is registered at
+      // mount, so it runs first regardless. Harmless here (its targets are all inert in a chat view),
+      // but don't add a guard that reads as if it prevents that; it wouldn't.
+      setMenu(false);
+      btnRef.current?.focus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menu]);
   const copy = () => { try { navigator.clipboard?.writeText(m.body || ''); } catch { /* ignore */ } setMenu(false); };
   const startEdit = () => { setDraft(m.body || ''); setEditing(true); setMenu(false); };
   const saveEdit = () => {
@@ -5084,12 +5189,76 @@ function MsgBubble({ m, mine, onDelete, onEdit }) {
     if (next && next !== (m.body || '')) onEdit?.(m, next);   // no-op if unchanged/empty
   };
 
-  // Tombstone — content was stripped server-side; render a muted placeholder in place, no actions.
+  // The "…" trigger + its portaled menu. Rendered by BOTH the tombstone branch and the normal
+  // bubble, because "delete for me" stays available after a message is deleted for everyone.
+  const showEdit = mine && hasBody && actable && !deleted;
+  const showDeleteAll = mine && actable && !deleted;
+  const actions = menuBtn && (
+    <>
+      <button ref={btnRef} onClick={() => (menu ? setMenu(false) : openMenu())} aria-label="Message actions"
+        aria-haspopup="true" aria-expanded={menu}
+        className={cx('absolute -top-2 w-6 h-6 rounded-full bg-[#0f1017] border border-white/10 flex items-center justify-center text-white/60 hover:text-white/80 transition-opacity',
+          // Always visible on touch (no hover there); hover-revealed on desktop. focus-visible keeps
+          // it keyboard-reachable — without it the only delete path was mouse-only. The UA focus ring
+          // is deliberately NOT suppressed: it is the only focus affordance here, and it stays
+          // visible in both themes without needing a light-sheet rule.
+          'opacity-100 sm:opacity-0 sm:group-hover/bubble:opacity-100 focus-visible:opacity-100',
+          mine ? '-left-2' : '-right-2')}>
+        <MoreHorizontal className="w-3 h-3" />
+      </button>
+      {menu && pos && createPortal(
+        <>
+          <div className="fixed inset-0 z-[70]" onClick={() => setMenu(false)} />
+          {/* maxHeight + scroll so an extreme viewport degrades gracefully: a `fixed` box with no
+              overflow would put the last row off-screen with no way to reach it. */}
+          <div className="fixed z-[71] w-44 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1 overflow-y-auto"
+            style={{ top: pos.top, left: pos.left, maxHeight: 'calc(100vh - 16px)', animation: 'slideUp .12s ease' }}>
+            {showEdit && (
+              <button onClick={startEdit} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5 whitespace-nowrap">
+                <Edit3 className="w-3.5 h-3.5" />Edit
+              </button>
+            )}
+            {canCopy && (
+              <button onClick={copy} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5 whitespace-nowrap">
+                <Copy className="w-3.5 h-3.5" />Copy
+              </button>
+            )}
+            {canHide && (
+              <button onClick={() => { setMenu(false); onHide?.(m); }} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5 whitespace-nowrap">
+                <EyeOff className="w-3.5 h-3.5" />Delete for me
+              </button>
+            )}
+            {showDeleteAll && (
+              <button onClick={() => { setMenu(false); onDelete?.(m); }} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-rose-300 hover:bg-rose-500/10 whitespace-nowrap">
+                <Trash2 className="w-3.5 h-3.5" />Delete for everyone
+              </button>
+            )}
+            {/* Say WHY the destructive options are gone rather than leaving the user to guess —
+                "I can't find delete" was the reported symptom, and an expired window looks identical
+                to a missing feature. Shown whenever YOUR OWN live message is past the window, so it
+                also covers the DM case where only "Delete for me" survives, not just the team-chat
+                case where the menu would otherwise be empty. (It is never empty: menuBtn requires
+                one of canCopy/canHide/(mine && !deleted), and the last of those implies this hint.) */}
+            {mine && !deleted && !actable && (
+              <div className="px-3 py-2 text-[11px] text-white/40 leading-snug">
+                Edit and delete-for-everyone expire 10 minutes after sending.
+              </div>
+            )}
+          </div>
+        </>,
+        document.body
+      )}
+    </>
+  );
+
+  // Tombstone — content was stripped server-side; render a muted placeholder in place. It still
+  // carries the actions menu so it can be cleared from your own view ("delete for me", DMs).
   if (deleted) {
     return (
-      <div className={cx('max-w-full rounded-2xl px-3 py-2 border text-[13px] italic text-white/40',
-        mine ? 'bg-white/[0.03] border-white/10 rounded-tr-sm' : 'bg-white/[0.03] border-white/10 rounded-tl-sm')}>
+      <div className={cx('group/bubble relative max-w-full rounded-2xl px-3 py-2 border text-[13px] italic text-white/40 bg-white/[0.03] border-white/10',
+        mine ? 'rounded-tr-sm' : 'rounded-tl-sm')}>
         This message was deleted
+        {actions}
       </div>
     );
   }
@@ -5126,37 +5295,7 @@ function MsgBubble({ m, mine, onDelete, onEdit }) {
       {(m.audioPath || m.localUrl) && (
         <VoiceNote path={m.audioPath} localUrl={m.localUrl} duration={m.audioDuration} pending={m.pending} />
       )}
-      {menuBtn && (
-        <button ref={btnRef} onClick={() => (menu ? setMenu(false) : openMenu())} aria-label="Message actions"
-          className={cx('absolute -top-2 w-6 h-6 rounded-full bg-[#0f1017] border border-white/10 flex items-center justify-center text-white/45 hover:text-white/80 transition-opacity',
-            'opacity-100 sm:opacity-0 sm:group-hover/bubble:opacity-100', mine ? '-left-2' : '-right-2')}>
-          <MoreHorizontal className="w-3 h-3" />
-        </button>
-      )}
-      {menu && pos && createPortal(
-        <>
-          <div className="fixed inset-0 z-[70]" onClick={() => setMenu(false)} />
-          <div className="fixed z-[71] w-36 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1"
-            style={{ top: pos.top, left: pos.left, animation: 'slideUp .12s ease' }}>
-            {mine && hasBody && actable && (
-              <button onClick={startEdit} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5">
-                <Edit3 className="w-3.5 h-3.5" />Edit
-              </button>
-            )}
-            {canCopy && (
-              <button onClick={copy} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5">
-                <Copy className="w-3.5 h-3.5" />Copy
-              </button>
-            )}
-            {mine && actable && (
-              <button onClick={() => { setMenu(false); onDelete?.(m); }} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-rose-300 hover:bg-rose-500/10">
-                <Trash2 className="w-3.5 h-3.5" />Delete
-              </button>
-            )}
-          </div>
-        </>,
-        document.body
-      )}
+      {actions}
     </div>
   );
 }
@@ -5166,7 +5305,7 @@ function MsgBubble({ m, mine, onDelete, onEdit }) {
  *  autoscroll, and a jump-to-latest button. Shared by the team channel and DM threads. */
 /** Shared by team chat AND DMs — any change here lands in both. `avatarFor(senderId) -> photoUrl` is
  *  optional so a caller that has no roster handy still renders correct initials. */
-function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelete, onEdit, receiptFor, hasMore, onLoadOlder, loadingOlder }) {
+function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelete, onEdit, onHide, receiptFor, hasMore, onLoadOlder, loadingOlder }) {
   const scrollRef = useRef(null);
   const atBottomRef = useRef(true);
   const prependAnchorRef = useRef(null);   // 5c: distance-from-bottom captured before an older page prepends
@@ -5208,8 +5347,13 @@ function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelet
       const prev = items[i - 1];
       const newDay = !prev || !sameDay(prev.createdAt, m.createdAt);
       const firstOfGroup = newDay || prev.senderId !== m.senderId || (new Date(m.createdAt) - new Date(prev.createdAt) > 5 * 60 * 1000);
+      // A text bubble's `leading-relaxed` line box carries ~3px of half-leading top and bottom, which
+      // visually pads the 2px grouped gap into something acceptable. A voice note (a fixed 32px
+      // control row) and a tombstone (13px/1.5) have no such half-leading, so the same 2px reads as
+      // FLUSH against the next bubble. Give any row that touches a dense box real extrinsic spacing.
+      const roomy = isDenseMsg(m) || isDenseMsg(prev);
       if (newDay) groups.push({ key: m.id, label: dayLabel(m.createdAt), rows: [] });
-      groups[groups.length - 1].rows.push({ m, firstOfGroup });
+      groups[groups.length - 1].rows.push({ m, firstOfGroup, roomy });
     });
     return groups;
   }, [items]);
@@ -5229,10 +5373,10 @@ function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelet
         {days.map(day => (
           <section key={day.key}>
             <DayDivider label={day.label} />
-            {day.rows.map(({ m, firstOfGroup }) => {
+            {day.rows.map(({ m, firstOfGroup, roomy }) => {
               const mine = m.senderId === userId;
               return (
-                <div key={m.id} className={cx('flex gap-2.5', mine && 'flex-row-reverse', firstOfGroup ? 'mt-3' : 'mt-0.5')}>
+                <div key={m.id} className={cx('flex gap-2.5', mine && 'flex-row-reverse', firstOfGroup ? 'mt-3' : roomy ? 'mt-2' : 'mt-1')}>
                   {!mine && (firstOfGroup
                     ? <PersonButton personId={m.senderId} className="shrink-0 self-start" title={`View ${nameOf(m.senderId)}'s profile`}>
                         <MsgAvatar name={nameOf(m.senderId)} userId={m.senderId} photoUrl={avatarFor?.(m.senderId)} />
@@ -5249,8 +5393,14 @@ function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelet
                         <span className="text-[10px] text-white/35 tabular-nums">{clockTime(m.createdAt)}</span>
                       </div>
                     )}
-                    <MsgBubble m={m} mine={mine} onDelete={onDelete} onEdit={onEdit} />
-                    {mine && receiptFor && receiptFor(m)}
+                    <MsgBubble m={m} mine={mine} onDelete={onDelete} onEdit={onEdit} onHide={onHide} />
+                    {/* NOT gated on `mine`. DMs put a receipt under MY last message only ("Seen" by
+                        the one peer); team chat puts each member's face under whichever message THEY
+                        last read, which is usually someone else's. Dropping the gate is safe for the
+                        DM caller because its receiptFor already returns null unless m.id is the last
+                        OWN message id — a condition that implies `mine` — so this is behaviour-
+                        preserving there and merely permissive here. */}
+                    {receiptFor && receiptFor(m)}
                   </div>
                 </div>
               );
@@ -5371,7 +5521,7 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
             <button onClick={() => canVoice ? onStartRecording() : onUpgradeVoice?.()} disabled={sending}
               aria-label={canVoice ? 'Record a voice note' : 'Upgrade to unlock voice notes'}
               title={canVoice ? 'Record a voice note' : 'Upgrade to unlock voice notes'}
-              className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 disabled:opacity-40 shrink-0">
+              className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white/90 hover:border-white/20 focus:outline-none focus:border-violet-400/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 shrink-0">
               {canVoice ? <Mic className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}
             </button>
             <button onClick={submit} disabled={!text.trim() || sending}
@@ -5387,7 +5537,7 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
 }
 
 function ChatView() {
-  const { session, markChatRead, currentMember, currentWorkspaceId, requestUpgrade, members, meId } = useApp();
+  const { session, markChatRead, showToast, currentMember, currentWorkspaceId, requestUpgrade, members, meId } = useApp();
   const entitlements = useEntitlements();
   const userId = session?.user?.id;
   const myName = currentMember?.display_name || currentMember?.email || 'You';
@@ -5440,8 +5590,17 @@ function ChatView() {
   useEffect(() => {
     if (!currentWorkspaceId) return;
     let on = true;
-    messagesApi.list(200, currentWorkspaceId).then(list => { if (on) { setItems(list); setHasMore(list.length >= 200); } }).catch(e => reportError(e, 'messages.list')).finally(() => { if (on) setLoading(false); });
-    markChatRead();
+    // Mark read from INSIDE the .then, with the newest loaded message's SERVER timestamp as the
+    // cover time. Two reasons this moved: (a) the cursor is now peer-visible, so it must not claim
+    // to have read messages we never actually loaded — a failed load now correctly leaves the badge
+    // standing; (b) anchoring to the server stamp rather than the client's now() keeps the cursor
+    // from landing just before a message the server stamped at ~the same instant.
+    messagesApi.list(200, currentWorkspaceId).then(list => {
+      if (!on) return;
+      setItems(list);
+      setHasMore(list.length >= 200);
+      markChatRead(list.length ? list[list.length - 1].createdAt : undefined);
+    }).catch(e => reportError(e, 'messages.list')).finally(() => { if (on) setLoading(false); });
     const unsub = messagesApi.subscribe(({ type, message }) => {
       if (!message || !on) return;
       setItems(prev => {
@@ -5451,7 +5610,7 @@ function ChatView() {
       });
       // Clear the typing indicator immediately on someone else's message (don't wait for "stopped typing").
       if (type === 'INSERT' && message.senderId !== userId) setShownTyping('');
-      markChatRead();
+      markChatRead(message.createdAt);
     }, 'messages-thread', currentWorkspaceId);
     return () => { on = false; unsub(); };
   }, [markChatRead, currentWorkspaceId, userId]);
@@ -5476,7 +5635,9 @@ function ChatView() {
     streamRef.current?.getTracks().forEach(t => t.stop());
   }, []);
 
-  const nameOf = (id) => (id === userId ? 'You' : (people[id]?.display_name || people[id]?.email || 'Someone'));
+  // useCallback'd because receiptFor depends on it: an inline definition would change identity every
+  // render and re-create that callback (and so re-render every message row) on each poll tick.
+  const nameOf = useCallback((id) => (id === userId ? 'You' : (people[id]?.display_name || people[id]?.email || 'Someone')), [people, userId]);
 
   const sendText = async (body, mentions) => {
     const created = await messagesApi.sendText(body, currentWorkspaceId, mentions);
@@ -5571,6 +5732,112 @@ function ChatView() {
     catch (e) { reportError(e, 'messages.edit'); messagesApi.list(200, currentWorkspaceId).then(setItems).catch(logCaught('messages.reconcile')); }
   };
 
+  // "Delete for me" — drop the message from MY view only; everyone else still sees it. No time limit
+  // and no sender restriction (it also clears a tombstone), because this writes `message_hides`
+  // rather than touching `messages`. The exact twin of DmThread.hideForMe.
+  const hideForMe = async (m) => {
+    setItems(prev => prev.filter(x => x.id !== m.id));
+    try {
+      await messagesApi.hide(m.id);
+      // NB no badge refresh here, and that is deliberate — it is where team chat legitimately
+      // DIVERGES from DmThread.hideForMe, which does call refreshDms. A hide fires no realtime event
+      // (message_hides is unpublished), so nothing self-heals; the question is whether anything
+      // needs to. In DMs it does: refreshDms also rebuilds every conversation's PREVIEW and the
+      // other threads' unread counts. Team chat has one channel and no list, and a hide is only
+      // reachable from inside ChatView — where markChatRead has already pinned the badge to 0 and
+      // AppProvider's realtime handler declines to increment it. Recomputing from the server here
+      // would do nothing at best, and at worst re-inflate the badge from a cursor whose upsert has
+      // not landed yet. So: nothing to do.
+    } catch (e) {
+      // Reconcile from the server rather than restoring a pre-await snapshot of `items`: that array
+      // is stale by the time we'd use it, so it would clobber a message that arrived mid-flight and
+      // resurrect a concurrent hide. Same reconcile the sibling remove/edit handlers use.
+      // Toast because this failure is otherwise INVISIBLE: remove/edit leave a tombstone or an edit
+      // state to look at, but a failed hide just flickers the message out and back.
+      reportError(e, 'messages.hide');
+      showToast("Couldn't hide that message — it's back in the channel.");
+      messagesApi.list(200, currentWorkspaceId).then(setItems).catch(logCaught('messages.reconcile'));
+    }
+  };
+
+  // ---- Read receipts: each member's avatar sits under the last message they have read ----------
+  // chat_reads is NOT in the realtime publication (nor is dm_reads), so this POLLS — the same 4s +
+  // focus + visibilitychange cadence DmThread already proves out.
+  // `reads` is TAGGED with the workspace it came from rather than applied blind. ChatView is
+  // route-mounted with no workspace key, so a switch need not remount it, and an in-flight SELECT for
+  // the OLD workspace could otherwise resolve afterwards and paint the old workspace's members onto
+  // the new channel — receiptsByMessage matches cursors to messages on TIMESTAMP alone and has no
+  // notion of a workspace, and `people` is not workspace-scoped either, so those strangers would
+  // render with real names and faces. Tagging also makes the stale window show NOTHING rather than
+  // something wrong, without needing a setState inside an effect to clear it.
+  const [reads, setReads] = useState({ ws: null, rows: [] });
+  const refreshReads = useCallback(() => {
+    if (!currentWorkspaceId) return;
+    const ws = currentWorkspaceId;
+    chatReadsApi.reads(ws).then(rows => setReads({ ws, rows })).catch(logCaught('chat.reads'));
+  }, [currentWorkspaceId]);
+  useEffect(() => {
+    if (!currentWorkspaceId) return undefined;
+    refreshReads();
+    const id = setInterval(refreshReads, 4000);
+    const onFocus = () => refreshReads();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => { clearInterval(id); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus); };
+  }, [currentWorkspaceId, refreshReads]);
+
+  // messageId -> [userId] : for each OTHER member, the newest loaded message at or before their
+  // cursor. That is what makes a face "move down" as they read further.
+  // Guests never appear here and it costs no client-side check: the chat_reads SELECT policy
+  // evaluates the ROW OWNER's team-chat visibility, so a guest — or a member since DEMOTED to
+  // guest — is filtered out server-side before these rows are ever returned.
+  const receiptsByMessage = useMemo(() => {
+    const map = new Map();
+    const rows = reads.ws === currentWorkspaceId ? reads.rows : [];
+    if (!items.length || !rows.length) return map;
+    const stamps = items.map(m => new Date(m.createdAt).getTime());
+    rows.forEach(r => {
+      if (!r.userId || r.userId === userId) return;         // never render my own face
+      const readMs = new Date(r.lastReadAt).getTime();
+      if (!Number.isFinite(readMs)) return;
+      // Walk from the newest backwards: a cursor is almost always at or near the bottom, so this
+      // exits on the first comparison in the common case.
+      let idx = -1;
+      for (let i = items.length - 1; i >= 0; i--) { if (Number.isFinite(stamps[i]) && stamps[i] <= readMs) { idx = i; break; } }
+      if (idx < 0) return;                                   // their cursor predates this whole window
+      const id = items[idx].id;
+      if (!map.has(id)) map.set(id, []);
+      map.get(id).push(r.userId);
+    });
+    return map;
+  }, [items, reads, userId, currentWorkspaceId]);
+
+  const receiptFor = useCallback((m) => {
+    const readers = receiptsByMessage.get(m.id);
+    if (!readers || !readers.length) return null;
+    const shown = readers.slice(0, 6);
+    return (
+      <div className="mt-1 px-0.5 flex items-center gap-0.5 flex-wrap">
+        {/* The faces CANNOT carry the identity on their own: at 14px Avatar's initials fallback
+            renders at ~5px, and a title tooltip is mouse-only — so on touch, and for a screen
+            reader, "who read this" would be unobtainable. Two affordances instead: an sr-only
+            summary naming everyone (including the ones behind the +N), and each face as a real
+            PersonButton — focusable, per-person title, opens that profile — which is exactly what
+            the header facepile above already does. */}
+        <span className="sr-only">{`Read by ${readers.map(nameOf).join(', ')}`}</span>
+        {shown.map(rid => (
+          <PersonButton key={rid} personId={rid} title={`Read by ${nameOf(rid)}`} className="shrink-0">
+            <Avatar name={nameOf(rid)} userId={rid} photoUrl={people[rid]?.avatar_url} size={14} />
+          </PersonButton>
+        ))}
+        {/* aria-hidden: the sr-only summary above already names these people in full. */}
+        {readers.length > shown.length && (
+          <span aria-hidden="true" className="text-[10px] text-white/40 tabular-nums pl-0.5">+{readers.length - shown.length}</span>
+        )}
+      </div>
+    );
+  }, [receiptsByMessage, nameOf, people]);
+
   return (
     <div className="cc-chat flex flex-col h-[calc(100dvh-9rem)] rounded-2xl border border-white/10 bg-[#0a0b11] overflow-hidden">
       <style>{`
@@ -5622,6 +5889,8 @@ function ChatView() {
         loadingOlder={loadingOlder}
         onDelete={remove}
         onEdit={edit}
+        onHide={hideForMe}
+        receiptFor={receiptFor}
         empty={(
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-10">
             <div className="w-12 h-12 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
@@ -5789,7 +6058,7 @@ function DirectMessagesView() {
 
 /** One open 1:1 thread. Keyed by conversationId so it remounts (fresh state) per conversation. */
 function DmThread({ conversationId, peerId, onBack }) {
-  const { session, currentMember, resolveAssignee, markDmRead, requestUpgrade } = useApp();
+  const { session, currentMember, resolveAssignee, markDmRead, requestUpgrade, refreshDms, currentWorkspaceId, showToast } = useApp();
   const entitlements = useEntitlements();
   const userId = session?.user?.id;
   const peer = resolveAssignee(peerId);
@@ -6012,6 +6281,29 @@ function DmThread({ conversationId, peerId, onBack }) {
     catch (e) { reportError(e, 'dms.delete'); directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(logCaught('dms.reconcile')); }
   };
 
+  // "Delete for me" — drop the message from MY view only; the peer still sees it. No time limit and
+  // no sender restriction (it also clears a tombstone), because this writes dm_message_hides rather
+  // than touching dm_messages.
+  const hideForMe = async (m) => {
+    setItems(prev => prev.filter(x => x.id !== m.id));
+    try {
+      await directMessagesApi.hide(m.id);
+      // dm_message_hides is deliberately OUT of the realtime publication, so nothing tells the
+      // conversation list that this thread's preview (and possibly its unread badge) just changed.
+      // remove/edit self-heal via the dm_messages UPDATE event; a hide has no such event.
+      refreshDms?.(currentWorkspaceId);
+    } catch (e) {
+      // Reconcile from the server rather than restoring a pre-await snapshot of `items`: that array
+      // is stale by the time we'd use it, so it would clobber a message that arrived mid-flight and
+      // resurrect a concurrent hide. Same reconcile the sibling remove/edit handlers use.
+      // Toast because this failure is otherwise INVISIBLE: remove/edit leave a tombstone or an edit
+      // state to look at, but a failed hide just flickers the message out and back.
+      reportError(e, 'dms.hide');
+      showToast("Couldn't hide that message — it's back in the thread.");
+      directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(logCaught('dms.reconcile'));
+    }
+  };
+
   // Edit own DM text in place; the DB trigger enforces the 10-minute window + stamps edited_at.
   const edit = async (m, body) => {
     setItems(prev => prev.map(x => x.id === m.id ? { ...x, body, editedAt: nowISO() } : x));
@@ -6064,6 +6356,7 @@ function DmThread({ conversationId, peerId, onBack }) {
         loadingOlder={loadingOlder}
         onDelete={remove}
         onEdit={edit}
+        onHide={hideForMe}
         receiptFor={receiptFor}
         empty={(
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-10">
