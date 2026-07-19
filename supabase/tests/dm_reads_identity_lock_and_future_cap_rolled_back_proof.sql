@@ -100,7 +100,45 @@ begin
   end if;
 end $harness$;
 
+-- ============================================================ REWIND — recreate the PRE-MIGRATION state
+-- Same two-lifecycle problem as the chat_reads proof, and here it is sharper: BOTH red assertions
+-- attack holes that 20260719134702 has now CLOSED. Assertion 1's vacate is rejected 42501 by the live
+-- dm_reads_lock_identity trigger, which aborts the whole transaction — on the first post-apply re-run
+-- this file produced no assertions at all. Assertion 2's future-dated cursor is silently capped by the
+-- live clamp, so it would fail rather than demonstrate anything.
+--
+-- REWIND restores a faithful copy of the pre-migration rules, transaction-locally, so RED still
+-- demonstrates the disease. THE DDL UNDER TEST below then re-applies the fix and GREEN re-proves the
+-- cure — which is the arrangement that makes this file a real regression suite rather than a one-shot.
+-- All of it is undone by the final rollback.
+--
+-- NB the clamp must be rewound too, not just the lock: reverting it to the pre-migration body (backward
+-- clamp only, BEFORE UPDATE only, no future cap and no tg_op guard) is what lets assertion 2 land.
+-- This body is 20260715235959's, reproduced exactly.
+do $rewind$
+begin
+  execute 'drop trigger if exists dm_reads_lock_identity on public.dm_reads';
+end $rewind$;
+
+create or replace function public.dm_reads_monotonic_cursor()
+returns trigger language plpgsql security definer set search_path to '' as $fn$
+begin
+  if new.last_read_at < old.last_read_at then
+    new.last_read_at := old.last_read_at;
+  end if;
+  return new;
+end;
+$fn$;
+revoke all on function public.dm_reads_monotonic_cursor() from public, anon, authenticated;
+
+drop trigger if exists dm_reads_monotonic on public.dm_reads;
+create trigger dm_reads_monotonic
+  before update on public.dm_reads
+  for each row execute function public.dm_reads_monotonic_cursor();
+
 -- ============================================================ RED — the live bug, demonstrated
+-- (Against the REWOUND rules above. If the rewind ever silently fails, these two assertions go red
+-- rather than passing vacuously — they are their own anti-vacuity control.)
 do $red$
 declare
   u1 uuid; cA uuid; cB uuid; v_ts timestamptz;

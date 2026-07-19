@@ -107,12 +107,15 @@ begin
   end if;
 end $harness$;
 
--- ============================================================ RED
-insert into _r values (1,'RED: no team-chat hide table exists today','absent',
-  coalesce(to_regclass('public.message_hides')::text,'absent'),
-  to_regclass('public.message_hides') is null);
-
 -- ============================================================ THE DDL UNDER TEST (top level)
+-- NB there is no RED phase here any more, and no rewind either — unlike the chat_reads and dm_reads
+-- proofs, this suite's original RED was a single "the table does not exist yet" assertion. That is a
+-- HISTORICAL claim: true only until 20260719134752 landed, permanently false afterwards, and it cannot
+-- be rewound the way a trigger can — recreating it would mean DROPping a live table, which takes an
+-- ACCESS EXCLUSIVE lock for the rest of the transaction and would block real users mid-run. Not worth
+-- it for a claim whose evidentiary job is already done and recorded in the migration header.
+-- It is replaced by a structural PRECONDITION assertion after the DDL below, which is true in both the
+-- pre-apply and post-apply worlds and actually guards the assertions that follow.
 create table if not exists public.message_hides (
   message_id   uuid not null references public.messages(id)   on delete cascade,
   user_id      uuid not null references auth.users(id)        on delete cascade,
@@ -202,6 +205,16 @@ returns setof public.messages language sql stable security invoker set search_pa
 $fn$;
 revoke all     on function public.search_messages(uuid, text, int) from public, anon;
 grant  execute on function public.search_messages(uuid, text, int) to authenticated;
+
+-- ============================================================ PRECONDITION (replaces the old RED)
+-- Anti-vacuity: everything below asserts behaviour OF this table. If it were missing or RLS were off,
+-- the boundary assertions would pass for the wrong reason (nothing to deny). True pre- and post-apply,
+-- because it runs AFTER the DDL above.
+insert into _r values (1,'PRECONDITION: message_hides exists with RLS enabled','present + rls=t',
+  coalesce((select 'present, rls='||c.relrowsecurity::text from pg_class c
+             where c.oid = to_regclass('public.message_hides')),'ABSENT'),
+  exists (select 1 from pg_class c
+           where c.oid = to_regclass('public.message_hides') and c.relrowsecurity));
 
 -- ============================================================ GREEN
 do $green$

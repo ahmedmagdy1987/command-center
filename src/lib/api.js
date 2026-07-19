@@ -468,22 +468,12 @@ export const notifications = {
     if (error) throw error;
   },
 
-  /**
-   * Clear (delete) all of the current user's notifications in the given workspace.
-   * REQUIRES a workspaceId — scoped to recipient = me AND workspace = current; never a bare/match-all delete.
-   * RLS independently gates to the recipient (recipient_id = auth.uid()).
-   */
-  async clearAll(workspaceId) {
-    if (!workspaceId) throw new Error('clearAll requires a workspaceId');
-    const session = await auth.getSession();
-    if (!session) throw new Error('Not authenticated');
-    const { error } = await supabase
-      .from('notifications')
-      .delete()
-      .eq('recipient_id', session.user.id)
-      .eq('workspace_id', workspaceId);
-    if (error) throw error;
-  },
+  // REMOVED 2026-07-19: `clearAll(workspaceId)` — zero callers. The bell's "Clear all" control calls
+  // `clearIds` instead, and that is a deliberate improvement, not an accident: see its doc below —
+  // clearing a captured SNAPSHOT of ids means a notification arriving during the clear animation is
+  // not destroyed, which the workspace-wide delete could not guarantee. If clearIds ever hits a URL
+  // length limit on a very large id list, the workspace-scoped delete is the shape to bring back —
+  // but it must keep the "never a bare/match-all delete" guard this one carried.
 
   /** Delete a SPECIFIC set of the recipient's own notifications (the "clear all" snapshot). Scoping to
    *  captured ids means a notification that streams in during the clear animation isn't destroyed.
@@ -757,12 +747,11 @@ export const messages = {
     return fromDbMessage(data);
   },
 
-  /** Delete your own message (and its audio object, if any). */
-  async remove(message) {
-    const { error } = await supabase.from('messages').delete().eq('id', message.id);
-    if (error) throw error;
-    if (message.audioPath) supabase.storage.from('voice-notes').remove([message.audioPath]).catch(logCaught('storage.voice-notes cleanup')); // best-effort
-  },
+  // REMOVED 2026-07-19: `remove(message)` — a HARD delete, superseded by softDelete (20260626065335)
+  // which tombstones in place so the thread still shows "This message was deleted". It had zero
+  // callers, so the `messages_delete_own` policy it was the only route to has no client path at all.
+  // The policy is left in place deliberately (it is the low-level capability); this export was just
+  // dead code that read like a supported operation.
 
   /** Signed URL for playing a voice note. */
   async signedUrl(path, expiresIn = 3600) {
@@ -998,16 +987,10 @@ export const directMessages = {
     return (data || []).map(r => ({ conversationId: r.conversation_id, unread: Number(r.unread) || 0 }));
   },
 
-  /** My own per-conversation read cursors. */
-  async myReads() {
-    const session = await auth.getSession();
-    if (!session) return [];
-    const { data, error } = await supabase
-      .from('dm_reads').select('conversation_id, last_read_at')
-      .eq('user_id', session.user.id);
-    if (error) throw error;
-    return (data || []).map(r => ({ conversationId: r.conversation_id, lastReadAt: r.last_read_at }));
-  },
+  // REMOVED 2026-07-19: `myReads()` — zero callers, and fully duplicated by `reads(conversationId)`
+  // below, which returns BOTH participants' cursors (a caller can filter to its own). Two functions
+  // reading the same table, one a strict subset of the other, is how a "which do I call?" bug gets
+  // written later.
 
   /** Both participants' read cursors for one conversation (RLS returns both rows) — for read receipts. */
   async reads(conversationId) {
@@ -1093,12 +1076,9 @@ export const directMessages = {
     return fromDbDirectMessage(data);
   },
 
-  /** Delete your own DM (and its audio object, if any). */
-  async remove(message) {
-    const { error } = await supabase.from('dm_messages').delete().eq('id', message.id);
-    if (error) throw error;
-    if (message.audioPath) supabase.storage.from('voice-notes').remove([message.audioPath]).catch(logCaught('storage.voice-notes cleanup'));
-  },
+  // REMOVED 2026-07-19: `remove(message)` — the DM twin of messages.remove, same reasoning. A HARD
+  // delete superseded by softDelete (tombstone in place), zero callers, and the only client route to
+  // the `dm_messages_delete_own` policy. Policy left in place; the dead export is gone.
 
   /** Per-workspace subscription (drives the conversation list + unread badge). dm_messages is
    *  REPLICA IDENTITY FULL so the server-side workspace_id filter is safe for INSERT/UPDATE/DELETE. */
