@@ -4,7 +4,9 @@
 > live DB on **2026-07-19** — current through `20260719134752`
 > (message_hides_team_chat); see *Chat pass (2026-07-19)*, which also closed a **live cursor-repudiation
 > hole in `dm_reads`** and is the first DB work in a while that shipped **fully wired into the UI in the
-> same change**. Previous anchor: `20260718195854`
+> same change**. That pass is **merged and live** at `main` tip **`ca847e3`** (regression **267/267**);
+> rollback is `git revert -m 1 ca847e3`, client-only — see the box in that section.
+> Previous anchor: `20260718195854`
 > (accept_invitation_email_confirm_guard); see *DB pass (2026-07-18)*. Earlier anchor:
 > **task file attachments** shipped 2026-07-12 (see *Task attachments*). Two production bugs were found
 > and fixed on 2026-07-15 — a live self-service **impersonation** hole and an orphan sweep that could
@@ -592,6 +594,16 @@ Files on a task (briefs, deliverables, images, docs). Three DB migrations + a cl
 
 ## Chat pass (2026-07-19) — team-chat read receipts, "Delete for me", + a live dm_reads hole
 
+> **MERGED AND LIVE.** `main` tip **`ca847e3`** (merge of `feat/chat-reads-hides-and-dm-hardening`,
+> 2026-07-19); production serves `index-CaIOqUll.js`, **SHA256-identical** to a local build of that
+> tree. Previous production state was `b8fbd9d`.
+> **Rollback: `git revert -m 1 ca847e3 && git push`** (parent 1 = `b8fbd9d`).
+> That restores the **CLIENT only, and that is safe** — leave the three migrations applied. The
+> pre-merge client works against them unchanged: it does plain table reads (nothing is hidden yet),
+> `search_messages` kept its exact signature, and `dm_reads` `markRead` still works under the new
+> triggers (asserted by the dm_reads proof's assertion 7, which reproduces the exact
+> PostgREST-shaped upsert the client emits). **Do not revert the migrations to roll back the UI.**
+
 Three DB migrations **and the client wiring for all of them, in one change** — the process rule that
 nothing ships DB-only, after `dm_message_hides` (20260716000040) shipped proven, applied, and never
 called by a single line of app code. Full discipline: proofs run rolled-back FIRST (75/75 across the
@@ -864,7 +876,7 @@ cursor) → adopt Realtime Authorization (private channels) before scale; (c) **
 — since updated: password min is **10** (2026-07-06) and the leaked-password WARN is **ACCEPTED** (Free-plan
 limitation; see *Roadmap* item 1).
 Fixed in-pass: workspace-scoped task-reconcile, removed the global-presence footgun default, no-empty catches.
-**(Current lint baseline: 31 errors / 2 warnings.)**
+**(Lint baseline was 31/2 at the time of this entry; it is 12 errors / 2 warnings as of 2026-07-19 — see *Chat pass (2026-07-19)*.)**
 
 ## Workspace roles, mentions & guest UX (2026-06-26, after the audit above)
 
@@ -945,8 +957,11 @@ slugs** (`20260604102655`), **direct messages** (`20260604125857`/`…130054`), 
 (`20260626065335`), **workspace roles owner/admin/member/guest** (`20260626103433`/`…103550`), **@mention
 notifications** (`20260626111955`), **guest nav cleanup + the scalable `AssigneeSelect` dropdown** (app),
 **invite-as-role** (`20260626135949`), **concurrency-safe subtask checklists** (app), **due-date reminders via
-pg_cron** (`20260626152555`/`…152653`), and the **per-account Free/Pro packaging realignment** (config only).
-`members.role` is vestigial for authz. **(Current lint baseline: 31 errors / 2 warnings.)**
+pg_cron** (`20260626152555`/`…152653`), the **per-account Free/Pro packaging realignment** (config only), and
+the **chat pass** — team-chat read receipts (`20260719134628`), the `dm_reads` cursor-repudiation fix
+(`20260719134702`), and team-chat "Delete for me" (`20260719134752`), all three **shipped wired into the UI
+in the same change** (see *Chat pass (2026-07-19)*).
+`members.role` is vestigial for authz. **(Lint baseline was 31/2 at the time of this entry; it is 12 errors / 2 warnings as of 2026-07-19 — see *Chat pass (2026-07-19)*.)**
 
 **Invite-as-role is DONE** (`20260626135949`) — an owner/admin picks member/guest at invite time (the
 `invitations_role_check` widen + `p_role` arg on `create_invitation` + the Members invite-form toggle; 6/6
