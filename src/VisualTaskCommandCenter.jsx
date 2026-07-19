@@ -5082,8 +5082,8 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
   const menuBtn = !m.pending && (canCopy || canHide || (mine && !deleted));
   // Keep in sync with the menu's `w-44` below — this is the width used to clamp it on-screen.
   const MENU_W = 176;
-  const MENU_ROW_H = 34;    // one item: px-3 py-2 (16) + a 12px/1.5 line box (18)
-  const MENU_PAD_Y = 8;     // the menu's own py-1, top + bottom
+  const MENU_ROW_H = 34;    // one item: px-3 py-2 (16) + a 12px/1.5 line box (18), no wrap
+  const MENU_PAD_Y = 10;    // the menu's own py-1 (8) + its 1px top and bottom border
   const MENU_HINT_H = 48;   // the expiry hint wraps to two lines at this width
   // Anchor the menu to the trigger's viewport rect, then render it via a PORTAL to document.body so
   // it escapes the scroll/overflow clipping of the message list (the old absolute menu was clipped
@@ -5107,7 +5107,7 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
                  + (canCopy ? 1 : 0)
                  + (canHide ? 1 : 0)
                  + (mine && within && !deleted ? 1 : 0);
-      const h = MENU_PAD_Y + (rows === 0 ? MENU_HINT_H : rows * MENU_ROW_H);
+      const h = MENU_PAD_Y + rows * MENU_ROW_H + (mine && !deleted && !within ? MENU_HINT_H : 0);
       const below = r.bottom + 6;
       const top = below + h <= window.innerHeight - 8
         ? below
@@ -5124,7 +5124,10 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
     if (!menu) return;
     const onKey = (e) => {
       if (e.key !== 'Escape') return;
-      e.stopPropagation();          // don't also close the surrounding modal/view
+      // No stopPropagation: this listener is on `window`, the last node in the bubble path, so there
+      // is nothing left to stop — and AppProvider's own window-level Escape handler is registered at
+      // mount, so it runs first regardless. Harmless here (its targets are all inert in a chat view),
+      // but don't add a guard that reads as if it prevents that; it wouldn't.
       setMenu(false);
       btnRef.current?.focus();
     };
@@ -5159,35 +5162,39 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
       {menu && pos && createPortal(
         <>
           <div className="fixed inset-0 z-[70]" onClick={() => setMenu(false)} />
-          <div className="fixed z-[71] w-44 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1"
-            style={{ top: pos.top, left: pos.left, animation: 'slideUp .12s ease' }}>
+          {/* maxHeight + scroll so an extreme viewport degrades gracefully: a `fixed` box with no
+              overflow would put the last row off-screen with no way to reach it. */}
+          <div className="fixed z-[71] w-44 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1 overflow-y-auto"
+            style={{ top: pos.top, left: pos.left, maxHeight: 'calc(100vh - 16px)', animation: 'slideUp .12s ease' }}>
             {showEdit && (
-              <button onClick={startEdit} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5">
+              <button onClick={startEdit} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5 whitespace-nowrap">
                 <Edit3 className="w-3.5 h-3.5" />Edit
               </button>
             )}
             {canCopy && (
-              <button onClick={copy} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5">
+              <button onClick={copy} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5 whitespace-nowrap">
                 <Copy className="w-3.5 h-3.5" />Copy
               </button>
             )}
             {canHide && (
-              <button onClick={() => { setMenu(false); onHide?.(m); }} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5">
+              <button onClick={() => { setMenu(false); onHide?.(m); }} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5 whitespace-nowrap">
                 <EyeOff className="w-3.5 h-3.5" />Delete for me
               </button>
             )}
             {showDeleteAll && (
-              <button onClick={() => { setMenu(false); onDelete?.(m); }} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-rose-300 hover:bg-rose-500/10">
+              <button onClick={() => { setMenu(false); onDelete?.(m); }} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-rose-300 hover:bg-rose-500/10 whitespace-nowrap">
                 <Trash2 className="w-3.5 h-3.5" />Delete for everyone
               </button>
             )}
-            {/* Say WHY the options are gone rather than opening an empty menu — "the button does
-                nothing" was the reported symptom. `menuBtn` only renders the trigger when something
-                is plausibly actionable, so the single reachable case here is your OWN voice note,
-                past the window, in team chat: no body (no Copy), no onHide, and !actable. */}
-            {!showEdit && !canCopy && !canHide && !showDeleteAll && (
+            {/* Say WHY the destructive options are gone rather than leaving the user to guess —
+                "I can't find delete" was the reported symptom, and an expired window looks identical
+                to a missing feature. Shown whenever YOUR OWN live message is past the window, so it
+                also covers the DM case where only "Delete for me" survives, not just the team-chat
+                case where the menu would otherwise be empty. (It is never empty: menuBtn requires
+                one of canCopy/canHide/(mine && !deleted), and the last of those implies this hint.) */}
+            {mine && !deleted && !actable && (
               <div className="px-3 py-2 text-[11px] text-white/40 leading-snug">
-                Edit and delete expire 10 minutes after sending.
+                Edit and delete-for-everyone expire 10 minutes after sending.
               </div>
             )}
           </div>
@@ -6120,7 +6127,7 @@ function DmThread({ conversationId, peerId, onBack }) {
       // Toast because this failure is otherwise INVISIBLE: remove/edit leave a tombstone or an edit
       // state to look at, but a failed hide just flickers the message out and back.
       reportError(e, 'dms.hide');
-      showToast?.("Couldn't hide that message — it's back in the thread.");
+      showToast("Couldn't hide that message — it's back in the thread.");
       directMessagesApi.listMessages(conversationId, 200).then(setItems).catch(logCaught('dms.reconcile'));
     }
   };
