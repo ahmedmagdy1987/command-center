@@ -8,8 +8,11 @@
 > shipped team-chat read receipts + "Delete for me" and closed a **live cursor-repudiation hole in
 > `dm_reads`**. Both are **merged and live** — `main` tip **`c2004b3`**, regression **519/519**;
 > rollback `git revert -m 1 c2004b3`, and LEAVE the migration applied (see that section's box).
-> **AWAITING APPROVAL:** the avatars quota/rate-limit/sweep + public→private conversion, designed and
-> proven but deliberately NOT applied — see *Avatars hardening (proposed)*.
+> **STAGED FOR A COORDINATED CUTOVER (not applied, not merged):** the avatars quota/rate-limit/sweep +
+> public→private conversion — both migrations proven (37/37 + 30/30) AND the full client half built on
+> branch `feat/avatars-private-signed-urls`. This is the ONE change that is **not backward-compatible
+> with the deployed client** (the new trigger rejects a URL; the old client stores one), so DB apply
+> and client deploy MUST happen together — see *Avatars hardening (proposed)*.
 > Previous anchor: `20260718195854`
 > (accept_invitation_email_confirm_guard); see *DB pass (2026-07-18)*. Earlier anchor:
 > **task file attachments** shipped 2026-07-12 (see *Task attachments*). Two production bugs were found
@@ -639,10 +642,23 @@ rendering. Files in `supabase/proposed/`.
   therefore **not behaviourally provable in SQL** (the proof pins it structurally instead, and says
   so). This is also why the sweep's `SET LOCAL session_replication_role='replica'` is load-bearing.
 
-**Client half (specified, not written):** `uploadAvatar` returns a path; a batched `createSignedUrls`
-(**plural** — one request per workspace, not per avatar) cache with TTL refresh; **`Avatar`'s
-`onError` must reset on `photoUrl` change** or one expired URL permanently degrades a face to
-initials; `removeAvatar` actually deleting the object on Remove-photo AND on re-upload.
+**Client half — BUILT (branch `feat/avatars-private-signed-urls`), not yet applied/merged.**
+`uploadAvatar` returns a path; a dedicated `AvatarSignCtx` + a batched signing cache in AppProvider
+(`createSignedUrls`, **plural** — one request per workspace) that eagerly signs the roster and
+proactively re-signs 5 min before the 3600s TTL; `Avatar` resolves a path→signed-URL through that
+cache and — the finding-3 fix — tracks the failed `src` in `brokenSrc` (keyed off `src`, not a
+sticky boolean) so a refreshed URL retries instead of degrading to initials forever, and `onError`
+force-re-signs. `removeAvatar` deletes the object on Remove-photo, on re-upload (the previous session
+object), and on save (the replaced saved object); `savedPathRef` guarantees the SAVED object is never
+deleted before a replacement commits. ProfileModal shows a `blob:` preview on pick.
+
+**⚠ CUTOVER IS NOT BACKWARD-COMPATIBLE — the two halves are strictly simultaneous.** New trigger
+rejects a URL → the deployed old client (which stores `getPublicUrl`) fails avatar upload the instant
+the migration lands. New client on the old public DB → also fails (old trigger rejects a path). So
+neither half works standalone; apply both migrations **and** deploy the client together. Runbook:
+merge branch → Vercel deploys (~30-60s) → apply sweep migration → apply conversion migration; the
+only breakage window is those seconds, and it affects one existing avatar (→ initials) + any upload
+attempted mid-window. Do NOT apply the migrations on their own and leave the branch unmerged.
 
 **Two test files must change in the SAME commit** (house landmine rule): `avatars_upload_rls` (its
 S01/S02 are *deliberately inverted* by the new co-workspace policy) and `profile_and_avatar` (it

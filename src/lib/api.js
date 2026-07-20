@@ -64,7 +64,8 @@ export const members = {
   /**
    * Update the signed-in user's OWN profile. Only these columns are grantable (identity columns are
    * locked by the members_lock_identity trigger); content is validated server-side by
-   * members_validate_profile (role-title impersonation, length caps, storage-hosted avatar). Pass any
+   * members_validate_profile (role-title impersonation, length caps, and — since the private-bucket
+   * conversion — `avatar_url` must be a bare storage PATH in your OWN uid folder, not a URL). Pass any
    * subset of { displayName, statusText, statusEmoji, bio, avatarUrl }. Returns the updated row.
    */
   async updateProfile(patch) {
@@ -75,16 +76,18 @@ export const members = {
     if (patch.statusText  !== undefined) fields.status_text  = patch.statusText;
     if (patch.statusEmoji !== undefined) fields.status_emoji = patch.statusEmoji;
     if (patch.bio         !== undefined) fields.bio          = patch.bio;
-    if (patch.avatarUrl   !== undefined) fields.avatar_url   = patch.avatarUrl;
+    if (patch.avatarUrl   !== undefined) fields.avatar_url   = patch.avatarUrl;   // a PATH now, or null
     const { data, error } = await supabase.from('members').update(fields).eq('id', session.user.id).select().single();
     if (error) throw error;
     return data;
   },
 
   /**
-   * Upload an avatar image to the public `avatars` bucket under the caller's own folder (<uid>/…) and
-   * return its stable public URL — which is what avatar_url stores (members_validate_profile pins
-   * avatar_url to this bucket). The RLS avatars_insert_own policy enforces the own-folder path.
+   * Upload an avatar image to the private `avatars` bucket under the caller's own folder (<uid>/…) and
+   * return the STORAGE PATH — which is what `avatar_url` now stores. The bucket is private (see the
+   * private-bucket conversion migration), so there is no stable public URL; the path is what
+   * `avatars_select_shared_workspace` and the orphan sweep compare to `storage.objects.name`, and it
+   * is what `signedAvatarUrls` mints a short-lived URL from at render time.
    */
   async uploadAvatar(file) {
     const session = await auth.getSession();
@@ -98,7 +101,42 @@ export const members = {
     // only avatars_insert_own, so the upload path stays correct even if the SELECT policy ever changes.
     const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: false, contentType: file.type || undefined });
     if (error) throw error;
-    return supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl;
+    return path;
+  },
+
+  /**
+   * Delete an avatar object from storage. Called on "Remove photo" and before replacing an existing
+   * photo on re-upload, so the bucket does not accumulate world-... err, workspace-readable orphans.
+   * This is finally the client path that makes `avatars_delete_own` reachable (it shipped with a
+   * policy AND a grant that nothing ever called). Own-folder is enforced by that policy; a foreign
+   * path just deletes nothing. Best-effort at the call sites — the orphan sweep is the backstop, but
+   * because the bucket is private a leaked object is workspace-readable rather than world-readable, so
+   * we still remove eagerly.
+   */
+  async removeAvatar(path) {
+    if (!path) return;
+    const { error } = await supabase.storage.from('avatars').remove([path]);
+    if (error) throw error;
+  },
+
+  /**
+   * Mint short-lived signed URLs for a batch of avatar object paths — ONE request for the whole set,
+   * not one per avatar (createSignedUrls, PLURAL). Distinct avatar objects on screen ≈ the member
+   * count, so a workspace signs its whole roster in a single round trip. Returns a { path -> url } map;
+   * paths that error (object gone, or not visible to the caller) are simply omitted, so the caller
+   * falls back to initials for them rather than throwing. Access is gated by
+   * avatars_select_own / avatars_select_shared_workspace at sign time.
+   */
+  async signedAvatarUrls(paths, expiresIn = 3600) {
+    const clean = [...new Set((paths || []).filter(Boolean))];
+    if (!clean.length) return {};
+    const { data, error } = await supabase.storage.from('avatars').createSignedUrls(clean, expiresIn);
+    if (error) throw error;
+    const out = {};
+    for (const row of data || []) {
+      if (row && !row.error && row.path && row.signedUrl) out[row.path] = row.signedUrl;
+    }
+    return out;
   },
 };
 

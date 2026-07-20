@@ -199,6 +199,18 @@ const scoreRationale = (task) => {
 ================================================================================= */
 const AppCtx = createContext(null);
 const useApp = () => useContext(AppCtx);
+
+// Signed avatar URLs live ~3600s; re-sign AVATAR_REFRESH_MS before that so a face never flashes to
+// initials at the TTL boundary. Module-scoped so the signing callbacks' deps are unambiguously stable.
+const AVATAR_TTL_MS = 3600 * 1000;
+const AVATAR_REFRESH_MS = 300 * 1000;
+const AVATAR_NEG_MS = 10 * 60 * 1000;   // backoff before retrying a path that failed to sign
+
+// Avatar signing lives in its OWN context, separate from AppCtx on purpose: the signed-URL map
+// changes every time a batch of signs lands, and folding it into the big AppCtx value would re-render
+// every useApp() consumer in the app on each batch. Here only Avatar subscribes.
+const AvatarSignCtx = createContext({ signed: {}, requestSign: () => {} });
+const useAvatarSign = () => useContext(AvatarSignCtx);
 /** Plan + limits abstraction: can(feature), isOver(limit), usage, plan, etc. (see lib/entitlements.js). */
 const useEntitlements = () => useApp().entitlements;
 
@@ -231,6 +243,84 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
   // picker + member-aware views/labels. Loaded per workspace via the workspace_members_list RPC.
   const [members, setMembers] = useState([]);
   const rosterWsRef = useRef(null);   // which workspace `members` belongs to (guards stale refresh results)
+
+  // ---- Avatar signing ------------------------------------------------------------------------
+  // The avatars bucket is PRIVATE, so members.avatar_url now holds a storage PATH, not a URL, and a
+  // renderable URL must be MINTED per object and EXPIRES. This is the batched signing cache: paths are
+  // requested by Avatar components (and eagerly by the roster effect below), collected across a paint,
+  // and signed in ONE createSignedUrls call per batch — never one request per face. `exp` is set short
+  // of the real 3600s TTL so the refresh interval re-signs before a URL actually dies.
+  const [signedAvatars, setSignedAvatars] = useState({});   // path -> { url, exp(ms) }
+  const signedAvatarsRef = useRef(signedAvatars);
+  useEffect(() => { signedAvatarsRef.current = signedAvatars; }, [signedAvatars]);
+  const pendingSignRef = useRef(new Set());
+  const signTimerRef = useRef(null);
+
+  // A cache entry is EITHER a live signed URL (`url` set) OR a NEGATIVE entry (`url:null`) meaning
+  // "this path could not be signed — object gone, or not visible to me". Negative entries are what
+  // stop an unsignable path from being re-requested every tick forever: they carry a backoff `exp`
+  // and are honoured by requestAvatarSign, and the refresh interval skips them entirely.
+  const flushAvatarSign = useCallback(() => {
+    const paths = [...pendingSignRef.current];
+    pendingSignRef.current = new Set();
+    if (!paths.length) return;
+    membersApi.signedAvatarUrls(paths).then(map => {
+      const now = Date.now();
+      const okExp = now + AVATAR_TTL_MS - AVATAR_REFRESH_MS;
+      setSignedAvatars(prev => {
+        let changed = false;
+        const next = { ...prev };
+        for (const p of paths) {
+          if (map[p]) { next[p] = { url: map[p], exp: okExp }; changed = true; }
+          else {
+            // Failed to sign. Write a negative entry ONLY when the state actually moves — a first
+            // failure, a previously-positive entry going bad, or a lapsed backoff. An all-already-
+            // negative batch leaves `changed` false, so setSignedAvatars returns `prev` and React
+            // bails out with NO re-render (this is what the review's Finding 1 needed).
+            const cur = prev[p];
+            if (!cur || cur.url || cur.exp <= now) { next[p] = { url: null, exp: now + AVATAR_NEG_MS }; changed = true; }
+          }
+        }
+        return changed ? next : prev;
+      });
+    }).catch(logCaught('avatars.sign'));
+  }, []);
+
+  // Ask for a signed URL for one path. Deduped + debounced into a single batch per paint. `force`
+  // (the refresh interval, and Avatar's onError) re-mints a live-but-expired URL — but it must NOT
+  // punch through a NEGATIVE backoff, or a permanently-unsignable path loops forever.
+  const requestAvatarSign = useCallback((path, force = false) => {
+    if (!path || /^(https?:|blob:|data:)/.test(path)) return;   // already a usable URL, or a blob preview
+    const cur = signedAvatarsRef.current[path];
+    if (cur && cur.exp > Date.now()) {
+      if (cur.url && !force) return;   // fresh positive URL — nothing to do unless forced
+      if (!cur.url) return;            // negative backoff — never force through it
+    }
+    if (pendingSignRef.current.has(path)) return;
+    pendingSignRef.current.add(path);
+    clearTimeout(signTimerRef.current);
+    signTimerRef.current = setTimeout(flushAvatarSign, 40);
+  }, [flushAvatarSign]);
+
+  // Eagerly sign every avatar path in the roster + my own, so the common case is one request rather
+  // than a flurry of per-Avatar onMount requests (which would still batch, but flash initials first).
+  useEffect(() => {
+    const paths = [];
+    for (const m of members) if (m?.avatarUrl) paths.push(m.avatarUrl);
+    if (currentMember?.avatar_url) paths.push(currentMember.avatar_url);
+    paths.forEach(p => requestAvatarSign(p));
+  }, [members, currentMember, requestAvatarSign]);
+
+  // Proactive refresh: re-sign POSITIVE entries within the refresh window of expiry, so a face never
+  // flashes to initials at the TTL boundary. `e.url &&` is load-bearing — it skips negative entries so
+  // a dead path is never re-signed on a timer (the review's Finding 1). Bounded to rendered paths.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const soon = Date.now() + AVATAR_REFRESH_MS;
+      for (const [p, e] of Object.entries(signedAvatarsRef.current)) if (e.url && e.exp < soon) requestAvatarSign(p, true);
+    }, 60 * 1000);
+    return () => { clearInterval(id); clearTimeout(signTimerRef.current); };
+  }, [requestAvatarSign]);
   // Tasks mid-exit-animation (id present -> the card renders its fade/slide-out before actual removal).
   const [exitingIds, setExitingIds] = useState(() => new Set());
   // Project cards mid-exit-animation (same two-phase pattern as tasks).
@@ -1048,8 +1138,13 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
     dmConversations, dmUnread, dmActiveConv, setDmActiveConv, markDmRead, startDm, refreshDms,
     entitlements, upgradeFeature, requestUpgrade, dismissUpgrade,
   ]);
+  // Separate memo so a sign batch re-renders only Avatars, not every useApp() consumer.
+  const avatarSignValue = useMemo(() => ({ signed: signedAvatars, requestSign: requestAvatarSign }),
+    [signedAvatars, requestAvatarSign]);
+
   return (
     <AppCtx.Provider value={value}>
+     <AvatarSignCtx.Provider value={avatarSignValue}>
       {children}
       {createPortal(
         <div className="fixed left-1/2 -translate-x-1/2 bottom-6 z-[200] flex flex-col items-center gap-2 pointer-events-none w-[calc(100vw-2rem)] max-w-sm">
@@ -1076,6 +1171,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
       <ConfirmModal open={!!importPreview} icon={Upload} tone="primary" confirmLabel="Import" title="Import tasks"
         message={importPreview ? `${importPreview.count} task${importPreview.count === 1 ? '' : 's'} will be added to your existing tasks.` : ''}
         onConfirm={confirmImport} onClose={() => setImportPreview(null)} />
+     </AvatarSignCtx.Provider>
     </AppCtx.Provider>
   );
 }
@@ -3623,26 +3719,61 @@ function ProfileModal({ onClose }) {
   const [statusText, setStatusText] = useState(() => currentMember?.status_text || '');
   const [statusEmoji, setStatusEmoji] = useState(() => currentMember?.status_emoji || '');
   const [bio, setBio] = useState(() => currentMember?.bio || '');
-  const [avatarUrl, setAvatarUrl] = useState(() => currentMember?.avatar_url || null);
+  // avatar_url now holds a storage PATH (private bucket). `avatarPath` is what will be saved; `preview`
+  // is a transient blob: URL for instant feedback on a fresh pick (the signed URL for a just-uploaded
+  // object would otherwise take a round trip to appear). `savedPathRef` is the persisted value at open,
+  // held so we can (a) never delete it until a successful replacement saves, and (b) tell an abandoned
+  // session upload apart from the real saved object.
+  const [avatarPath, setAvatarPath] = useState(() => currentMember?.avatar_url || null);
+  const [preview, setPreview] = useState(null);
+  const savedPathRef = useRef(currentMember?.avatar_url || null);
+  const previewRef = useRef(null);   // current blob URL, so we can revoke the previous one
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [emojiOpen, setEmojiOpen] = useState(false);
   const fileRef = useRef(null);
   const panelRef = useRef(null);
   useEffect(() => { setTimeout(() => panelRef.current?.focus(), 30); }, []);
+  useEffect(() => () => { if (previewRef.current) URL.revokeObjectURL(previewRef.current); }, []);
+
+  const setPreviewBlob = (url) => {
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    previewRef.current = url;
+    setPreview(url);
+  };
+  // A path is an ABANDONED session upload (safe to delete) iff it exists and is not the saved object.
+  const dropIfAbandoned = (path) => {
+    if (path && path !== savedPathRef.current) membersApi.removeAvatar(path).catch(logCaught('avatars.remove'));
+  };
 
   const pickAvatar = async (file) => {
     if (!file) return;
     setErr(''); setBusy(true);
-    try { setAvatarUrl(await membersApi.uploadAvatar(file)); }
-    catch (e) { setErr(e?.message || 'Avatar upload failed.'); }
+    try {
+      const newPath = await membersApi.uploadAvatar(file);
+      dropIfAbandoned(avatarPath);          // replacing a photo re-picked this session — don't leak it
+      setAvatarPath(newPath);
+      setPreviewBlob(URL.createObjectURL(file));   // instant preview; the signed URL catches up in the roster
+    } catch (e) { setErr(e?.message || 'Avatar upload failed.'); }
     finally { setBusy(false); }
+  };
+
+  const removePhoto = () => {
+    dropIfAbandoned(avatarPath);            // an unsaved session upload is deleted now; a saved one waits for save
+    setAvatarPath(null);
+    setPreviewBlob(null);
   };
 
   const save = async () => {
     setErr(''); setBusy(true);
     try {
-      await membersApi.updateProfile({ displayName, statusText, statusEmoji, bio, avatarUrl });
+      await membersApi.updateProfile({ displayName, statusText, statusEmoji, bio, avatarUrl: avatarPath });
+      // The replaced/removed SAVED object is now orphaned — delete it (re-upload deletes the previous).
+      // Only after the save commits, because until then it is still the live avatar.
+      if (savedPathRef.current && savedPathRef.current !== avatarPath) {
+        membersApi.removeAvatar(savedPathRef.current).catch(logCaught('avatars.remove'));
+      }
+      savedPathRef.current = avatarPath;    // so a later close in this session won't delete what we just saved
       // BOTH refreshes: currentMember drives only the top bar; every roster-driven surface (sidebar
       // card, chat facepile, DM list, Members page, comment headers, the profile card itself) reads
       // the workspace roster, which without refreshMembers() kept the old name/photo until a reload.
@@ -3654,28 +3785,34 @@ function ProfileModal({ onClose }) {
     }
   };
 
+  // Cancel / backdrop / Escape: an upload made this session but never saved is garbage — delete it now
+  // rather than leaving it for the hourly sweep (the bucket is private, so a leak is workspace-readable,
+  // not world-readable, but eager cleanup is still right). save() calls onClose directly and never
+  // routes here, so a just-saved object is never touched.
+  const handleClose = () => { dropIfAbandoned(avatarPath); onClose(); };
+
   return createPortal(
     <>
       {/* z-[80]: ProfileModal must layer ABOVE ProfileView (z-[70]) — "Edit profile" inside the profile
           card mounts this as a sibling body portal, and at the old z-[60] the editor painted invisibly
           BEHIND the card (clicking seemed to do nothing while focus sat in the hidden panel). */}
-      <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm" onClick={handleClose} />
       <div className="fixed inset-0 z-[80] flex items-center justify-center p-6 pointer-events-none">
         <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Edit profile"
           className="pointer-events-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5 outline-none max-h-[85vh] overflow-y-auto"
           style={{ animation: 'slideUp .2s ease' }}
           onClick={e => e.stopPropagation()}
-          onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}>
+          onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); handleClose(); } }}>
           <h2 className="text-base font-semibold text-white mb-4">Edit profile</h2>
 
           <div className="flex items-center gap-3 mb-4">
-            <Avatar name={displayName || currentMember?.email} userId={currentMember?.id} photoUrl={avatarUrl} size={56} />
+            <Avatar name={displayName || currentMember?.email} userId={currentMember?.id} photoUrl={preview || avatarPath} size={56} />
             <div className="flex flex-col gap-1.5">
               <button onClick={() => fileRef.current?.click()} disabled={busy}
                 className="h-8 px-3 rounded-lg bg-white/5 border border-white/10 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors disabled:opacity-50">
                 {busy ? 'Working…' : 'Upload photo'}
               </button>
-              {avatarUrl && <button onClick={() => setAvatarUrl(null)} className="text-[11px] text-white/40 hover:text-rose-300 text-left">Remove photo</button>}
+              {(preview || avatarPath) && <button onClick={removePhoto} className="text-[11px] text-white/40 hover:text-rose-300 text-left">Remove photo</button>}
               <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden"
                 onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; pickAvatar(f); }} />
             </div>
@@ -3724,7 +3861,7 @@ function ProfileModal({ onClose }) {
           {err && <p className="text-xs text-rose-300 mb-3 break-words">{err}</p>}
 
           <div className="flex items-center justify-end gap-2">
-            <button onClick={onClose}
+            <button onClick={handleClose}
               className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">Cancel</button>
             <button onClick={save} disabled={busy}
               className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors disabled:opacity-50">Save</button>
@@ -4978,11 +5115,33 @@ function DayDivider({ label }) {
  *  old claim that light CSS "never reaches portaled modals"; AppShell's sheet matches portals too. */
 function Avatar({ name, userId, photoUrl, size = 28, className }) {
   const { theme } = useApp();
+  const { signed, requestSign } = useAvatarSign();
   const light = theme === 'light';
   const c = assigneeColor(userId);
-  const [broken, setBroken] = useState(false);
   const initials = initialsFor(name);
-  const showPhoto = !!photoUrl && !broken;
+
+  // `photoUrl` is now usually a STORAGE PATH (the avatars bucket is private). Resolve it to a
+  // short-lived signed URL through the shared cache; a value that is already a URL (a blob: preview,
+  // a data: URI, or a legacy https URL) is used verbatim. A path with no signed URL yet resolves to
+  // null → the fallback (initials/silhouette) shows until the sign lands, then it swaps in.
+  const isPath = !!photoUrl && !/^(https?:|blob:|data:)/.test(photoUrl);
+  useEffect(() => { if (isPath) requestSign(photoUrl); }, [isPath, photoUrl, requestSign]);
+  const src = isPath ? (signed[photoUrl]?.url || null) : (photoUrl || null);
+
+  // FINDING 3 — the single most important client fix. Previously `broken` was a bare boolean set by
+  // onError and NEVER reset, so ONE expired signed URL degraded a face to initials permanently, until
+  // the component remounted. Instead we remember WHICH src failed. showPhoto is false only while the
+  // current src is the one that errored — so when the refresh interval (or an onError-triggered
+  // re-sign) mints a fresh URL, `src` changes, no longer equals `brokenSrc`, and the <img> retries.
+  // Keyed off src rather than reset in an effect, which also keeps this off the setState-in-effect path.
+  const [brokenSrc, setBrokenSrc] = useState(null);
+  const showPhoto = !!src && brokenSrc !== src;
+  // Cap onError-driven re-signs to ONE per successful-load cycle for a given path. Without this, a
+  // signable-but-undecodable object (a corrupt upload that still signs) would loop: onError → force
+  // re-sign → fresh token → new src → retry → fail → … (the review's Finding 2). A genuinely expired
+  // URL still recovers, because the proactive refresh interval is the primary re-sign path and a
+  // successful load clears this guard so the next expiry may force again.
+  const erroredForRef = useRef(null);
 
   return (
     <span className={cx('rounded-full flex items-center justify-center font-semibold shrink-0 select-none overflow-hidden', className)}
@@ -5005,8 +5164,16 @@ function Avatar({ name, userId, photoUrl, size = 28, className }) {
         // shaves a row of pixels off the top and bottom. The error is a fixed 2px, so it is worst on
         // the small avatars (17% at size 12, 7% at 28). 100%/100% keeps it exactly square at every
         // size; flexShrink guards the same width against the wrapper's flex context.
-        <img src={photoUrl} alt="" width={size} height={size} loading="lazy" decoding="async"
-          onError={() => setBroken(true)}
+        <img src={src} alt="" width={size} height={size} loading="lazy" decoding="async"
+          onLoad={() => { erroredForRef.current = null; }}
+          // On error, fall back to initials AND force a fresh sign ONCE per load-cycle: an expired
+          // signed URL is the expected cause, and re-minting it changes `src`, which `showPhoto` uses
+          // to retry with the new URL. The once-per-path guard stops a corrupt-but-signable object
+          // from looping; a genuinely-missing object just settles on initials.
+          onError={() => {
+            setBrokenSrc(src);
+            if (isPath && erroredForRef.current !== photoUrl) { erroredForRef.current = photoUrl; requestSign(photoUrl, true); }
+          }}
           style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', display: 'block', flexShrink: 0 }} />
       ) : initials ? (
         // aria-hidden for the same reason the other two branches already are (`alt=""` on the photo,
