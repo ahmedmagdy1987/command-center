@@ -110,6 +110,22 @@ begin
   perform set_config('request.jwt.claim.sub', p_user_id::text, true);
   perform set_config('request.jwt.claim.role', 'authenticated', true);
   execute 'set local role authenticated';
+
+  -- HARNESS SELF-CHECK (added 2026-07-22 by the post-deploy audit; RAISES, never records).
+  -- This project's `postgres` has rolbypassrls=true, so a proof that silently fails to switch role
+  -- bypasses RLS entirely and proves NOTHING while still reporting green. Every other RLS suite
+  -- carries a guard of this shape; this file was the one genuine gap (workspace_role_boundary was a
+  -- false positive — it guards on current_user via probe/probe_val and ASSERTS that guard in A00 —
+  -- and task_attachment_orphan_sweep_age_guard is legitimately exempt: it never impersonates at all,
+  -- because it exercises a SECURITY DEFINER cron function as postgres and makes no RLS claim).
+  if current_user <> 'authenticated' then
+    raise exception 'HARNESS BROKEN: impersonation did not take effect (current_user=%)', current_user
+      using errcode = 'P0001';
+  end if;
+  if (select rolbypassrls from pg_roles where rolname = current_user) then
+    raise exception 'HARNESS BROKEN: session role % has rolbypassrls - RLS is not being enforced', current_user
+      using errcode = 'P0001';
+  end if;
 end;
 $$;
 
