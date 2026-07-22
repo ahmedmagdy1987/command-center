@@ -1,9 +1,24 @@
 -- ============================================================================================
--- PROPOSED — avatars PUBLIC -> PRIVATE + signed URLs — ROLLED-BACK PROOF (30 assertions)
+-- avatars PUBLIC -> PRIVATE + signed URLs — ROLLED-BACK PROOF (30 assertions)
 -- ============================================================================================
--- RESULT (run live against nqlzjuxqgajeoypyzlnv, 2026-07-19): total 30 / passed 30 / failed 0.
+-- STATUS: APPLIED 2026-07-22 as 20260722061442, after this proof ran 30/30 GREEN against the live DB
+--         (re-run immediately before apply, on top of 20260722061032).
+-- RESULT (re-run live against nqlzjuxqgajeoypyzlnv, 2026-07-22): total 30 / passed 30 / failed 0.
 -- Post-run verification confirmed the rollback was clean: bucket still public=true, 1 avatar object,
 -- members.avatar_url still the 127-char public URL, 0 new policies, 0 new functions, 0 fixture rows.
+--
+-- ⚠ RE-RUNNING THIS FILE AFTER THE MIGRATION IS APPLIED. R01 asserts the bucket is PUBLIC and R04
+--   asserts the live trigger REJECTS a bare path — both are now false, so R01/R02/R04/R05/R06 WILL
+--   FAIL on a re-run. Same proof-lifecycle conflict as the companion file; use the REWIND pattern
+--   (restore the pre-migration bucket flag + trigger body transaction-locally before RED) to run it
+--   as a regression. The GREEN half (7-30) remains valid as written.
+--
+-- A LIVE POST-APPLY RE-VERIFICATION (11/11, rolled back, against the REAL production rows rather than
+-- synthetic fixtures) additionally confirmed: Tony and Ahmed Magdy can each SELECT the VA's real
+-- avatar object (so createSignedUrl succeeds and a co-member's face renders); the amego outsider
+-- selects zero and lists an empty bucket; Ahmed CANNOT point his avatar_url at the VA's path (22023);
+-- the sweep runs against live data leaving the real avatar intact; and a single URL-shaped value
+-- makes the sweep RAISE 55000 with the object still present.
 --
 -- ONE transaction, begin; … rollback;. Nothing is applied. SYNTHETIC fixtures only.
 -- Shape: RED (prove the blocker + prove finding 5 is real) -> DDL under test -> GREEN.

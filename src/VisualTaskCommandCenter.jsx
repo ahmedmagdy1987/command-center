@@ -3701,9 +3701,11 @@ function TopBar() {
 /**
  * Self-profile editor: display name, status (emoji + text), bio, and avatar upload. Conditionally mounted
  * (so useState initializers prefill from the freshly-loaded currentMember — no set-state-in-effect). Writes
- * via membersApi.updateProfile; the server validates (role-title impersonation, length, storage-hosted
- * avatar) so a rejection surfaces inline. Avatar uploads to the caller's own folder in the public avatars
- * bucket and stores the resulting public URL. Saving re-syncs the top bar (refreshCurrentMember) AND the
+ * via membersApi.updateProfile; the server validates (role-title impersonation, length, and that
+ * avatar_url is a bare storage path in the caller's OWN uid folder) so a rejection surfaces inline.
+ * Avatar uploads to the caller's own folder in the PRIVATE avatars bucket and stores the resulting
+ * storage PATH — never a URL, because a private bucket has no stable one; rendering mints a
+ * short-lived signed URL at paint time. Saving re-syncs the top bar (refreshCurrentMember) AND the
  * workspace roster (refreshMembers) so every identity surface reflects the edit immediately.
  */
 /** Status emojis offered by the profile picker. Every entry is verified against the server's emoji-only

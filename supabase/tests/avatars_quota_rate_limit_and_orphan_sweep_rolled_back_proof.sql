@@ -1,7 +1,23 @@
 -- ============================================================================================
--- ROLLED-BACK PROOF for PROPOSED_avatars_quota_rate_limit_and_orphan_sweep.sql  (37 assertions)
--- STATUS: the change under test is NOT APPLIED. This whole file is ONE begin;…rollback; — nothing
---         here commits, and no apply_migration is involved.
+-- ROLLED-BACK PROOF for 20260722061032_avatars_quota_rate_limit_and_orphan_sweep.sql (37 assertions)
+-- STATUS: APPLIED 2026-07-22 as 20260722061032, after this proof ran 37/37 GREEN against the live DB.
+--         This whole file is ONE begin;…rollback; — nothing here commits.
+--
+-- ⚠ RE-RUNNING THIS FILE AFTER THE MIGRATION IS APPLIED. The RED phase (R01-R06) demonstrates the
+--   disease against rules the migration has since replaced, and section (2) re-applies the DDL under
+--   test transaction-locally, so RED/GREEN still pair correctly on a re-run. BUT R03/R04 assert that
+--   no avatars upload-log trigger and no _sweep_orphan_avatars/cron job EXIST — those are now live,
+--   so R03/R04 WILL FAIL on a re-run. That is expected and is the proof-lifecycle conflict documented
+--   in the 2026-07-19 remediation pass: a proof written BEFORE its migration has two lifecycles. To
+--   re-run this as a regression, apply the REWIND pattern (restore the pre-migration state
+--   transaction-locally before RED). The value of the file as shipped is the GREEN half — in
+--   particular S00, the permanent regression guard against reintroducing set_config() in place of
+--   SET LOCAL.
+--
+-- ⚠ ALSO SUPERSEDED: the sweep body proven here matches by right()-suffix, correct for the URL-shaped
+--   avatar_url column of its time. 20260722061442 converts the column to a bare storage PATH and
+--   replaces that rule with EXACT EQUALITY plus a raise-not-delete fail-safe. See
+--   avatars_private_bucket_and_signed_urls_rolled_back_proof.sql, whose R06 demonstrates exactly why.
 -- ============================================================================================
 --
 -- ############################################################################################
