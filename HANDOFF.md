@@ -1,117 +1,133 @@
-# HANDOFF — post-deploy remediation batch — as of 2026-07-19
+# HANDOFF — avatars private-bucket conversion — as of 2026-07-22
 
 > Orientation for the current state. **This batch is MERGED and LIVE.** `main` is the production
-> branch (Vercel auto-deploys it). One design is finished and **awaiting owner approval before apply**
-> (avatars). After a Deep Freeze wipe follow [`RESTORE.md`](RESTORE.md) first, then read this.
+> branch (Vercel auto-deploys it). After a Deep Freeze wipe follow [`RESTORE.md`](RESTORE.md) first,
+> then read this.
+
+## What just happened, in one paragraph
+
+The `avatars` bucket was the last **public** bucket in the project: reads evaluated no policy and no
+JWT, so every face ever uploaded was a permanent, world-readable asset that "Remove photo" could not
+revoke. It is now **private**, `members.avatar_url` stores a **storage path** instead of a URL,
+rendering mints short-lived signed URLs, and the bucket finally has quotas and an orphan sweep. The
+DB half was applied **before** the client half was merged (owner's call, so production could be
+verified), which opened a ~50-minute degraded window where avatars showed as initials and photo-saves
+failed `22023`. **That window is now CLOSED** by the deploy below.
 
 ## Branch topology
 
 | Branch | What's on it | Status |
 |--------|--------------|--------|
-| **`main`** | tip **`c2004b3`** — merge of `fix/project-delete-avatars-and-unhide`. Deployed; see *What's live*. | live |
-| **`fix/project-delete-avatars-and-unhide`** | tip `78da1b8` — contained in `main`. | merged, can be deleted |
-| **`fix/data-integrity-a11y-and-dead-code`** | tip `85c8d78` — **contained in the branch above**, so also in `main`. | merged, can be deleted |
+| **`main`** | tip **`972b618`** — merge of `feat/avatars-private-signed-urls`. Deployed; see *What's live*. | live |
+| **`feat/avatars-private-signed-urls`** | tip `ea6f994` — contained in `main`. | merged, can be deleted |
+| **`fix/project-delete-avatars-and-unhide`** | tip `78da1b8` — in `main` since `c2004b3`. | merged, can be deleted |
+| **`fix/data-integrity-a11y-and-dead-code`** | tip `85c8d78` — contained in the branch above. | merged, can be deleted |
 
-`c2004b3` (2026-07-19) merged two batches at once, because the second was based on the first:
-`85c8d78` (recurring removal, a11y, dead code, proof repairs) and `78da1b8` (delete_project
-validation + client, unhide). Previous production state was `ce9741a`.
+`972b618` merged two commits: `270f513` (the signed-URL client half) and `ea6f994` (the applied
+migrations, the two inverted test files, and docs). Previous production state was `a463c79`.
 
-## Rollback
+## Rollback — READ THIS BEFORE REVERTING ANYTHING
 
 ```
-git revert -m 1 c2004b3 && git push
+git revert -m 1 972b618 && git push        # parent 1 = a463c79
 ```
-parent 1 = `ce9741a`, the pre-merge production state.
 
-**The `20260719172122` migration STAYS APPLIED on revert.** It is strictly protective: the pre-merge
-client sent the hardcoded seed id `'other'`, which under the new validation fails **loudly** (P0002)
-instead of silently unfiling tasks. Reverting the client and re-applying forward is correct;
-reverting the migration would restore the data-loss path. Same principle as the earlier chat pass —
-**never revert a protective migration to roll back a UI.**
+**⚠ THIS IS NOT A CLEAN ROLLBACK, AND IT IS THE FIRST TIME THAT HAS BEEN TRUE HERE.** Every previous
+rollback line in this project was safe because the migration was strictly protective and could stay
+applied. **This one is different: reverting the client alone re-opens the exact degraded state this
+deploy just closed** — the DB would still be private and path-shaped while the restored client builds
+public URLs and stores URLs.
 
-## What's live (verified 2026-07-19)
+And the DB half **cannot cleanly come with it**: the URL → path backfill is **one-way**, and flipping
+`storage.buckets.public` back to `true` does not restore the old `avatar_url` values. That would
+leave a path-shaped column behind a URL-shaped world and strand every avatar anyway.
 
-- Production serves `index-B1SY169F.js`, **SHA256-identical** to a local build of `c2004b3`
-  (`12d4a38334cac6cd…`). New-code markers present in the served bundle; the recurring-tasks UI is
-  confirmed absent from it.
-- **Recurring tasks REMOVED from the UI** (owner decision: remove now, build later). It had **no
-  backend of any kind** — no DB function, trigger or cron job ever read `tasks.recurring`, and five
-  live tasks had carried active rules since 2026-04-26 without generating one occurrence, while being
-  advertised on every pricing tier. The **column stays** and `sanitize.js` still round-trips it, so
-  every existing rule is preserved for a future build. A design note sits where the code was.
-- **Project delete can no longer strand tasks** (`20260719172122`). `_delete_project` validates the
-  reassign target resolves in the same workspace; the modal offers a real destination **picker** and
-  disables "keep the tasks" when there is nowhere to move them. A shared `defaultProjectId()` fixed
-  the same seed-id assumption in **five** call sites (QuickAdd, ColumnQuickAdd, addTask, the modal).
-- **"Delete for me" is reversible** on both surfaces: an **Undo** toast (8s) at the moment of hiding,
-  plus a persistent **"N hidden — restore"** control in the team-chat and DM headers.
-- **Message menus are keyboard-operable**: focus enters the menu, arrows/Home/End rove, focus-out
-  closes, Escape returns to the trigger, one menu open at a time.
-- Mic-button focus ring restored; the `Avatar` `aria-hidden` regression fixed with an `sr-only` label.
-- Four dead `api.js` exports deleted, each with a note on what superseded it.
+**So: forward-only from here.** If something is wrong with avatars, fix forward with a new commit.
+A true revert would need its own forward migration that re-prefixes the paths back to absolute URLs
+*and* re-flips the bucket, applied in the same deploy as the client revert. Don't improvise that under
+pressure.
+
+## What's live (verified 2026-07-22)
+
+- Production serves **`index-DofwQkiD.js`**, **SHA256-identical** to a local build of `972b618`
+  (`34262957C9810BF7D610858C53F53D929BE59D6CA0A259B114554F03CD7F1809`, 784,129 bytes). The CSS
+  (`index-BAJ4N6IX.css`) matches byte-for-byte too. Previous production bundle was `index-B1SY169F.js`.
+- **The `avatars` bucket is PRIVATE.** Every public URL ever minted for it now returns 400 — that is
+  the point of the change, not a side effect.
+- **`members.avatar_url` stores a bare storage path**, pinned by trigger to the row owner's own uid
+  folder. One live row was backfilled (`0598a0bc-…/ltnts5q5w58m.jpg`); 0 rows are off-shape.
+- **Avatars render from batched signed URLs** (`createSignedUrls`, plural — one request per batch,
+  never one per face), eagerly signed for the roster and re-signed 5 minutes before the 3600s TTL.
+- **Quotas exist at last:** 12 uploads/hr/user (delete-resistant, operations-counted via an
+  append-only log), 20 objects and 20 MB per user, plus the hourly `avatar-orphan-sweep` cron job at
+  `:30` — the project's **third** scheduler.
+- **The sweep has already run for real in production.** `cron.job_run_details` shows it fired at
+  06:30 UTC, 16 minutes after the conversion landed, status `succeeded`, and the live avatar object is
+  still present. That is the exact-equality rule running unsupervised against real data and correctly
+  sparing an in-use avatar.
+- **A live gap was closed, not just a theoretical one.** Before this change the trigger validated only
+  the public-URL *prefix* and never checked the folder belonged to the row owner, while `authenticated`
+  already held `UPDATE (avatar_url)` — so user A could already point their `avatar_url` at user B's
+  object. Harmless while the bucket was public; a private-image leak the instant `avatar_url` became a
+  read grant. Proven blocked live under impersonation (`22023`).
+
+## Verification evidence
+
+| Check | Result |
+|---|---|
+| Quota/sweep migration, rolled-back | **37/37** (incl. S00, the `SET LOCAL` regression guard) |
+| Conversion migration, rolled-back | **30/30** |
+| Live post-apply, against REAL production rows | **11/11** |
+| Full regression, 15 suites | **534/534**, zero failures |
+| Security advisors | clean (only the accepted `auth_leaked_password_protection`) |
+| Build / lint | clean / **12 errors, 2 warnings** (baseline held) |
+| Trigger rewrite fidelity | **zero differing characters** before the `avatar_url` block; emoji regex **byte-identical, 79 octets** |
+
+The 11/11 live pass is the one worth remembering: Tony and Ahmed Magdy each SELECT the VA's real
+avatar object (so signing succeeds and a co-member's face renders), the amego outsider selects **zero**
+and lists an **empty** bucket, Ahmed cannot name the VA's path, the sweep spares the live object, and a
+single URL-shaped value makes the sweep RAISE `55000` instead of deleting.
 
 ## PENDING — owner action
 
-**0. The avatars conversion is BUILT and awaiting a COORDINATED CUTOVER** (branch
-`feat/avatars-private-signed-urls`, tip in that branch). Both migrations are proven (37/37 + 30/30)
-AND the full client half is written (build clean, lint 12/2, full regression 549/549 green, and a
-client-code adversarial review whose two findings — an unsignable-path re-sign loop and a
-corrupt-image onError thrash — were both fixed). **It is deliberately NOT applied and NOT merged**,
-because it is the ONE change that is not backward-compatible with the deployed client:
-  * new trigger rejects a URL → the deployed OLD client (stores `getPublicUrl`) fails avatar upload
-    the instant the migration lands;
-  * new client on the OLD public DB → also fails (old trigger rejects a path).
-So the two halves are strictly simultaneous. **Cutover runbook** (minimises the window to the Vercel
-build, ~30–60s, affecting one existing avatar → initials + any upload attempted mid-window):
-merge branch → Vercel deploys → apply the sweep migration → apply the conversion migration → move
-both migration files to `migrations/` (ledger versions) + both proofs to `tests/` → update the two
-landmine test files (`avatars_upload_rls`, `profile_and_avatar`) to the new expectations → advisors
-+ full regression against the new state. Do NOT apply the migrations while the branch is unmerged.
+**1. Browser verification on production.** The DB-layer behaviour is proven; these are the client-side
+things only a browser can confirm:
+  * **A co-member's avatar renders** (not initials) — the headline fix. The VA's photo should appear
+    for Tony and for Ahmed Magdy.
+  * **Remove photo actually deletes the object**, and a **re-upload does not leak the old one**. These
+    are the paths that finally make `avatars_delete_own` reachable — it shipped with a policy *and* a
+    grant that nothing ever called. Not DB-provable: `storage.protect_delete()` is a statement-level
+    BEFORE DELETE trigger that refuses direct SQL deletes before RLS is ever consulted.
+  * **A stale signed URL recovers instead of sticking at initials.** The one item with no DB-side
+    proof. The 3600s TTL means you will not hit natural expiry by hand — force it by going offline
+    briefly so an `<img>` errors, then restore; the face should come back.
+  * Upload a photo and confirm the save succeeds (it failed `22023` during the degraded window).
 
-**1. Approve the avatars work (designed, proven, NOT applied).** Two migrations that must land
-together, in this order:
-  1. `PROPOSED_avatars_quota_rate_limit_and_orphan_sweep.sql` — **37/37 proven**. Adds the 12/hr
-     upload rate limit (delete-resistant, operations-counted), a 20-object / 20 MB per-user cap, and
-     an hourly orphan sweep with the 1-hour age guard. This is the only bucket of the three with no
-     limits of any kind today.
-  2. `PROPOSED_avatars_private_bucket_and_signed_urls.sql` — the public → private conversion.
-
-**Why private matters here:** `avatars` is the only **public** bucket, so "Remove photo" today leaves
-a **world-readable** image live forever, and a co-member who receives a URL holds a permanent,
-unrevokable, anonymously-fetchable link that outlives their membership.
-
-**The blocker that makes this non-trivial:** `avatars_select_own` is own-folder only. While the bucket
-is public that never mattered (the public endpoint bypasses RLS), but signing requires SELECT — and it
-was *proven by impersonation* that a workspace admin can select **zero** of a co-member's avatar
-objects. Flipping the bucket flag alone would silently degrade **every avatar except your own** to
-initials. A co-workspace SELECT policy is mandatory, alongside a `members_validate_profile` rewrite
-(it pins `avatar_url` to the literal public-URL shape), a backfill of the stored value to a path, and
-the client half (batched `createSignedUrls`, a TTL refresh cache, `Avatar`'s `onError` reset, and
-`removeAvatar` actually deleting the object).
-
-**2. Browser verification of this batch on production.** Worth clicking: delete a project that has
-tasks and confirm the destination picker names a real project; hide a message and use Undo, then hide
-another and use "N hidden — restore"; Tab into a message menu and drive it with arrows; Tab to the
-mic button and confirm you can see focus; check light mode on the new controls.
+**2. V-1, still open from the 2026-07-12 audit:** confirm Supabase **Auth → Confirm email = ON** with
+working SMTP. Not SQL-readable; the whole invite model's email-binding depends on it.
 
 ## Proof-suite health
 
-All 15 suites in `supabase/tests/` run to completion. **519 assertions passing, zero real failures**
-as of the pre-merge run.
+All 15 suites in `supabase/tests/` run to completion: **534 assertions passing, zero failures.**
+Two suites grew this batch — `avatars_upload_rls` 14 → **20** and `profile_and_avatar` 40 → **42** —
+because the conversion deliberately inverts them.
 
-A proof written *before* its migration lands has two lifecycles, and they conflict: its RED phase
-attacks a hole the migration then closes, so on re-run it either fails "expectedly" or aborts the
-whole transaction and reports nothing. Five suites hit this. The fix is the **REWIND** pattern —
-transaction-locally restore the pre-migration body, let RED demonstrate the disease against it, then
-re-apply and let GREEN prove the cure. Applied to `chat_reads`, `dm_reads_identity_lock`,
-`delete_project`, and (this pass) `accept_invitation` and `role_title_match_anchored`.
-`message_hides` could not be rewound — its RED asserted a table did not exist, and recreating that
-would mean DROPping a live table and holding an ACCESS EXCLUSIVE lock mid-run — so that one became a
-structural precondition instead.
+**Two files in `tests/` are NOT re-runnable as-is**, and this is expected rather than broken: the two
+new avatars proofs were written *before* their migrations, so their RED phases assert the
+pre-migration world (`R01` bucket is public; `R03`/`R04` no sweep, no trigger). Those assertions now
+fail by design on a re-run. This is the standing **proof-lifecycle conflict**: a proof written before
+its migration has two lifecycles and they conflict. The fix is the **REWIND** pattern —
+transaction-locally restore the pre-migration state, let RED demonstrate the disease against it, then
+re-apply and let GREEN prove the cure. Already applied to `chat_reads`, `dm_reads_identity_lock`,
+`delete_project`, `accept_invitation` and `role_title_match_anchored`. Both new files say so in their
+headers. They were **excluded from the 534** for that reason; the 534 is the 15 established suites.
 
-`stripe_sandbox_billing` had been **silently un-runnable since it was written** (42501 on its own
-temp results table, because `record_result` is INVOKER and runs as `authenticated` during
-impersonated phases). Fixed with the documented grant; now 45/45.
+**`avatars_upload_rls` and `profile_and_avatar` are landmine files.** The first now proves the
+reference rule in *both* directions, so a folder-level "simplification" of
+`avatars_select_shared_workspace` fails loudly (S06) and reverting the policy fails loudly (S04). The
+second **re-creates `members_validate_profile` inside its own transaction**, so if that rule ever
+changes again it must change there too — the same trap already documented for
+`private._looks_like_role_title`.
 
 ## Known gaps, deliberately deferred
 
@@ -120,7 +136,9 @@ impersonated phases). Fixed with the documented grant; now 45/45.
   on the unmade **per-account vs per-workspace** billing decision — see CLAUDE.md.
 - **Recurring tasks** — removed from the UI, column retained, design note in place.
 - Presence/typing channels remain the accepted realtime metadata residual.
-- **V-1 still open:** confirm Supabase **Auth → Confirm email = ON** with working SMTP.
+- **CDN residual (new, accepted):** flipping the bucket to private may leave edge-cached copies of
+  previously-requested avatar objects reachable for their cache TTL, and it cannot un-see an image
+  someone already saved. Bounded and small; every NEW object is never public for even one instant.
 
 ## Rebuild gaps (honest — read before trusting a from-scratch rebuild)
 
@@ -131,8 +149,9 @@ impersonated phases). Fixed with the documented grant; now 45/45.
 2. **`rls_auto_enable()` + the `ensure_rls` event trigger** and the **original `handle_new_user()`** are
    pre-ledger/out-of-band; the baseline holds best-effort copies (later `CREATE OR REPLACE`d by real
    migrations, so the final state is correct on replay).
-3. **Two ledger entries had no local file — recovered** verbatim from
-   `supabase_migrations.schema_migrations.statements` and committed.
+3. **The ledger and the repo now agree exactly** — re-verified 2026-07-22, **66/66 in both directions**,
+   zero orphans on either side. The old "two ledger entries have no local file" caveat is **resolved**;
+   both files were recovered and committed. Don't reintroduce that note.
 
 ## DB change discipline
 
@@ -147,6 +166,20 @@ self-validating guard.
 its DELETE half stayed unreachable for three more. A migration and the client work that makes it
 reachable belong in the SAME piece of work.
 
+**⚠ NEW THIS BATCH — ordering a non-backward-compatible cutover.** This was the first change where the
+DB and client halves were *mutually* incompatible (new trigger rejects a URL; old client stores one).
+The written runbook said merge → deploy → apply. We did the reverse, deliberately, so the DB could be
+verified before shipping the client — and that traded a ~60-second window for a ~50-minute one. It was
+the right call *here* (a two-person internal tool, one avatar affected, nothing lost) but **it is not
+the default.** With real users, apply the client-compatible half first, or make the DB half accept
+both shapes during a transition. When the halves are genuinely simultaneous, minimise the window.
+
+**Statement order inside a migration can substitute for transactionality.** The conversion put the
+backfill and its refuse-to-commit guard *before* the sweep's rule change, so the exact-equality rule
+cannot exist without a completed backfill — true even if a runner executed statement-by-statement. The
+sweep additionally RAISES rather than deletes anything it cannot parse. Two independent mitigations
+for one sharp edge; both were exercised against live data.
+
 **Failure modes worth checking by hand in any new proof:** an unqualified `delete from <table>` (runs
 as the bypassrls session role — a match-all delete of live data saved only by the rollback);
 `text || tgenabled` (`"char"`, ambiguous operator — the file errors out entirely); a temp results
@@ -158,6 +191,6 @@ which raises 42501 because this project's `postgres` is not a superuser — use 
 1. [`RESTORE.md`](RESTORE.md): toolchain → clone → git identity/TLS → `npm install` → launch `claude`
    from inside the repo (loads `.mcp.json`) → recreate `.env` → auth the Supabase MCP.
 2. `git checkout main`. Sanity: `npm run build`, `npm run lint` (expect **12 errors / 2 warnings**).
-3. The open item is the avatars approval (see *PENDING*), then CLAUDE.md's *Roadmap*.
+3. The open items are the browser verification above, V-1, then CLAUDE.md's *Roadmap*.
 
 ## CLAUDE.md is the durable project guide — this HANDOFF is batch-scoped and disposable.

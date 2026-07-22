@@ -2,23 +2,20 @@
 
 > Orientation file so any future session is instantly up to speed. Last verified against the
 > live DB on **2026-07-22** — current through `20260722061442`
-> (avatars_private_bucket_and_signed_urls).
+> (avatars_private_bucket_and_signed_urls). The **avatars private-bucket conversion** is **MERGED AND
+> LIVE** — `main` tip **`972b618`**, production serves `index-DofwQkiD.js`, SHA256-identical to a
+> local build of that tree; regression **534/534**; the `avatars` bucket is now PRIVATE and
+> `members.avatar_url` stores a storage **path**, not a URL. See *Avatars private conversion
+> (2026-07-22)*.
 >
-> > ### 🔴 CUTOVER IS HALF-DONE RIGHT NOW — READ THIS FIRST
-> > Both avatars migrations are **APPLIED to the live DB** (`20260722061032` quota/rate-limit/sweep,
-> > `20260722061442` public→private) but the client half is **NOT MERGED** — it sits on
-> > `feat/avatars-private-signed-urls` (tip `270f513` + this pass). Vercel deploys from `main`, so
-> > **production is serving the OLD client against the NEW schema**. Until that branch merges:
-> > * **every avatar renders as initials** — the old client builds `getPublicUrl()` links and the
-> >   bucket is now private, so those URLs return 400;
-> > * **saving a profile WITH a photo fails** with `22023` — the old client writes an absolute URL and
-> >   the rewritten trigger accepts only a bare own-uid path. (Saving name/status/bio is unaffected.)
-> >
-> > Nothing is lost and nothing is corrupt: the one live avatar object and its `members.avatar_url`
-> > row were converted intact, and every proof ran rolled-back. **The fix is forward — merge and
-> > deploy the branch.** Do NOT "fix" this by flipping the bucket back to public: the backfill is
-> > one-way (see *ROLLBACK IS NOT SYMMETRIC*), so that would leave a path-shaped column behind a
-> > URL-shaped world and strand every avatar anyway.
+> > ### 🔴 THE ONE ROLLBACK LINE IN THIS PROJECT THAT IS NOT SAFE
+> > `git revert -m 1 972b618` restores the CLIENT but **not** the database, and unlike every other
+> > entry in this file **that is not a safe end state**: the bucket stays private and the column stays
+> > path-shaped, so a reverted client would build public URLs against a private bucket and store URLs
+> > the trigger rejects — re-opening the exact degraded state the merge closed. The DB half cannot
+> > cleanly come with it either: the URL→path backfill is **one-way**, and `update storage.buckets set
+> > public=true` does NOT restore the old values. **Forward-only from here** — fix avatars with a new
+> > commit, never by reverting this merge.
 >
 > Previous anchor: `20260719172122`
 > (delete_project_validate_reassign_target); see *Remediation pass (2026-07-19)*, which stopped
@@ -622,7 +619,7 @@ Files on a task (briefs, deliverables, images, docs). Three DB migrations + a cl
 - **Proven:** feasibility A-E 14/14 (delegation matrix + happy path + outsider blocks); quotas (size, per-task
   20, rate 60 delete-resistant); orphan sweep 5/5; regression isolation 36/36 + role 40/40 + storage 14/14.
 
-## Avatars private conversion (2026-07-22) — **DB APPLIED, CLIENT NOT MERGED**
+## Avatars private conversion (2026-07-22) — **MERGED AND LIVE**
 
 Two migrations, applied in this order on 2026-07-22 after each was re-proven rolled-back against the
 live DB immediately beforehand. Advisors clean (only the accepted `auth_leaked_password_protection`
@@ -638,15 +635,24 @@ workspace-visible + own-private, notifications recipient-scoped, and the amego o
 | 1 | `20260722061032` | `avatars_quota_rate_limit_and_orphan_sweep` | **37/37** rolled-back |
 | 2 | `20260722061442` | `avatars_private_bucket_and_signed_urls` | **30/30** rolled-back, then **11/11** live post-apply |
 
-> ### 🔴 THE HALVES ARE SPLIT RIGHT NOW — THIS IS THE ONE THING TO KNOW
-> The owner directed DB-apply-first with the branch left unmerged for production verification. That
-> **inverts the runbook this section used to carry** (which said merge → deploy → apply, and "do NOT
-> apply the migrations on their own"). The inversion is deliberate and owner-approved, but it means
-> the incompatibility window is **open now, not for 30 seconds**: `main` still serves the old client,
-> so **every avatar renders as initials** and **saving a profile with a photo fails `22023`**.
-> Name/status/bio saves are unaffected; no data is lost or corrupt. **Resolve forward: merge
-> `feat/avatars-private-signed-urls`.** Reverting the bucket to public does NOT undo this — the
-> backfill is one-way.
+**Deployed 2026-07-22** as merge `972b618` (parent 1 `a463c79`). Production serves
+`index-DofwQkiD.js` — SHA256 `34262957…CD7F1809`, 784,129 bytes — **byte-identical** to a local build
+of the merged tree, CSS included. **The sweep has since run for real in production**: `avatar-orphan-
+sweep` fired at 06:30 UTC, 16 minutes after the conversion landed, status `succeeded`, and the live
+avatar object is still present — the exact-equality rule running unsupervised against real data and
+correctly sparing an in-use avatar.
+
+> ### THE CUTOVER RAN IN REVERSE ORDER — WHAT THAT COST, AND WHEN NOT TO REPEAT IT
+> The owner directed DB-apply-first with the branch left unmerged so production could be verified
+> before the client shipped. That **inverted the runbook this section used to carry** (merge → deploy
+> → apply). It was deliberate and owner-approved, and it worked — but it traded a ~60-second
+> incompatibility window for a **~50-minute** one, during which every avatar rendered as initials and
+> photo-saves failed `22023`. Nothing was lost: the one live avatar object and its `avatar_url` row
+> converted intact. **Closed by merge `972b618`.**
+> **The lesson, for the next mutually-incompatible change:** this was the right call for a two-person
+> internal tool with one avatar in play; it is **not the default**. With real users, either ship a DB
+> half that accepts BOTH shapes during a transition, or keep the halves simultaneous and minimise the
+> window. The DB-first inversion is only safe when you can afford the whole window.
 
 **1 — quota / rate limit / sweep.** `avatars` was the only bucket of the three with **no rate limit,
 no byte quota and no object cap**; this adds 12/hr (delete-resistant, operations-counted via an
@@ -1155,10 +1161,10 @@ notifications** (`20260626111955`), **guest nav cleanup + the scalable `Assignee
 pg_cron** (`20260626152555`/`…152653`), the **per-account Free/Pro packaging realignment** (config only), and
 the **chat pass** — team-chat read receipts (`20260719134628`), the `dm_reads` cursor-repudiation fix
 (`20260719134702`), and team-chat "Delete for me" (`20260719134752`), all three **shipped wired into the UI
-in the same change** (see *Chat pass (2026-07-19)*). **DB-applied but NOT yet merged:** the avatars
-quota/rate-limit/sweep (`20260722061032`) and the public→private conversion (`20260722061442`) — the
-client half is on `feat/avatars-private-signed-urls` and **must be merged to restore avatar rendering**
-(see *Avatars private conversion (2026-07-22)*).
+in the same change** (see *Chat pass (2026-07-19)*), and the **avatars private-bucket conversion** —
+quota/rate-limit/sweep (`20260722061032`) + public→private with signed URLs (`20260722061442`),
+**merged and live at `972b618`** (see *Avatars private conversion (2026-07-22)*). With that, **all
+three storage buckets are private** and none is missing a rate limit, quota or orphan sweep.
 `members.role` is vestigial for authz. **(Lint baseline was 31/2 at the time of this entry; it is 12 errors / 2 warnings as of 2026-07-19 — see *Chat pass (2026-07-19)*.)**
 
 **Invite-as-role is DONE** (`20260626135949`) — an owner/admin picks member/guest at invite time (the
