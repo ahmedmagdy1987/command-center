@@ -1,16 +1,33 @@
 # Command Center — project guide for Claude
 
 > Orientation file so any future session is instantly up to speed. Last verified against the
-> live DB on **2026-07-19** — current through `20260719172122`
+> live DB on **2026-07-22** — current through `20260722061442`
+> (avatars_private_bucket_and_signed_urls).
+>
+> > ### 🔴 CUTOVER IS HALF-DONE RIGHT NOW — READ THIS FIRST
+> > Both avatars migrations are **APPLIED to the live DB** (`20260722061032` quota/rate-limit/sweep,
+> > `20260722061442` public→private) but the client half is **NOT MERGED** — it sits on
+> > `feat/avatars-private-signed-urls` (tip `270f513` + this pass). Vercel deploys from `main`, so
+> > **production is serving the OLD client against the NEW schema**. Until that branch merges:
+> > * **every avatar renders as initials** — the old client builds `getPublicUrl()` links and the
+> >   bucket is now private, so those URLs return 400;
+> > * **saving a profile WITH a photo fails** with `22023` — the old client writes an absolute URL and
+> >   the rewritten trigger accepts only a bare own-uid path. (Saving name/status/bio is unaffected.)
+> >
+> > Nothing is lost and nothing is corrupt: the one live avatar object and its `members.avatar_url`
+> > row were converted intact, and every proof ran rolled-back. **The fix is forward — merge and
+> > deploy the branch.** Do NOT "fix" this by flipping the bucket back to public: the backfill is
+> > one-way (see *ROLLBACK IS NOT SYMMETRIC*), so that would leave a path-shaped column behind a
+> > URL-shaped world and strand every avatar anyway.
+>
+> Previous anchor: `20260719172122`
 > (delete_project_validate_reassign_target); see *Remediation pass (2026-07-19)*, which stopped
 > "Keep the tasks" from silently unfiling them, made "Delete for me" reversible, and removed the
 > recurring-tasks UI that had **no backend at all**. Earlier the same day, *Chat pass (2026-07-19)*
 > shipped team-chat read receipts + "Delete for me" and closed a **live cursor-repudiation hole in
 > `dm_reads`**. Both are **merged and live** — `main` tip **`c2004b3`**, regression **519/519**;
 > rollback `git revert -m 1 c2004b3`, and LEAVE the migration applied (see that section's box).
-> **AWAITING APPROVAL:** the avatars quota/rate-limit/sweep + public→private conversion, designed and
-> proven but deliberately NOT applied — see *Avatars hardening (proposed)*.
-> Previous anchor: `20260718195854`
+> Earlier anchor: `20260718195854`
 > (accept_invitation_email_confirm_guard); see *DB pass (2026-07-18)*. Earlier anchor:
 > **task file attachments** shipped 2026-07-12 (see *Task attachments*). Two production bugs were found
 > and fixed on 2026-07-15 — a live self-service **impersonation** hole and an orphan sweep that could
@@ -115,6 +132,13 @@ carries a `workspace_id`.
 - Storage: private bucket **`task-attachments`** (25 MB cap, image+pdf+text/csv+zip+office allowlist,
   no svg/executables); objects at `<workspace_id>/<task_id>/<uuid>.<ext>`, signed-URL download;
   2 GB/workspace byte quota + 2000-object cap + 60/hr/user op-rate limit (see *Task attachments*).
+- Storage: **`avatars`** — **PRIVATE since 2026-07-22** (`20260722061442`; it was the last public
+  bucket). 2 MB cap, png/jpeg/webp/gif only — **never add svg**, it is stored XSS the moment anything
+  renders it inline. Objects at `<uid>/<client-random>.<ext>`; 12/hr/user op-rate limit + 20 objects
+  + 20 MB per user; hourly orphan sweep. **`members.avatar_url` stores the storage PATH, not a URL**,
+  and that column is a **capability** — it grants co-workspace read on the object it names, so it is
+  pinned by trigger to the row owner's own uid folder. Rendering mints short-lived signed URLs
+  (batched `createSignedUrls`). See *Avatars private conversion (2026-07-22)*.
 
 ### Private helper functions (the RLS engine)
 SECURITY DEFINER, `search_path=''`, EXECUTE granted to `authenticated` only (revoked from
@@ -528,9 +552,11 @@ For a true behavior-preservation proof, also run a temporary **second-workspace 
   isolation proof; re-run security advisors) → **add the matching file to `supabase/migrations/`**
   (named `<version>_<description>.sql`, version = the one the remote ledger assigned via
   `list_migrations`, since `apply_migration` does NOT write the file) → commit + push. Migrations are
-  idempotent (create-if-not-exists / drop-if-exists / create-or-replace). *(Pre-existing ledger quirk:
-  the remote has 2 early entries with no local file — `20260529185644` and a duplicate `…233941` — the
-  live schema still matches the repo's files; left as-is.)*
+  idempotent (create-if-not-exists / drop-if-exists / create-or-replace). *(The long-standing "2 early
+  ledger entries with no local file" quirk — `20260529185644` and a duplicate `…233941` — is **RESOLVED
+  and this note was stale**: both files exist in `supabase/migrations/`. Re-verified 2026-07-22 by
+  diffing the remote ledger against the repo in both directions — **66/66 exact, zero orphans on either
+  side**. If you re-check and it still balances, don't reintroduce the caveat.)*
 - **Deep Freeze wipes this machine on reboot.** The DB is safe on Supabase, but local code is not —
   **always push to GitHub.** Don't leave work uncommitted/unpushed. After a wipe, follow
   **[`RESTORE.md`](RESTORE.md)** to rebuild the local env (toolchain → clone → git TLS fix →
@@ -596,57 +622,121 @@ Files on a task (briefs, deliverables, images, docs). Three DB migrations + a cl
 - **Proven:** feasibility A-E 14/14 (delegation matrix + happy path + outsider blocks); quotas (size, per-task
   20, rate 60 delete-resistant); orphan sweep 5/5; regression isolation 36/36 + role 40/40 + storage 14/14.
 
-## Avatars hardening (PROPOSED 2026-07-19 — designed + proven, **NOT APPLIED**, awaiting approval)
+## Avatars private conversion (2026-07-22) — **DB APPLIED, CLIENT NOT MERGED**
 
-Two migrations that **must land together, in this order, in the same deploy as their client half**.
-Either alone leaves the product broken: the first leaves "Remove photo" orphaning, the second breaks
-rendering. Files in `supabase/proposed/`.
+Two migrations, applied in this order on 2026-07-22 after each was re-proven rolled-back against the
+live DB immediately beforehand. Advisors clean (only the accepted `auth_leaked_password_protection`
+WARN). Regression after: **534 assertions across 15 suites, zero failures** (isolation 48/48 · role
+143/143 · profile 42/42 · avatars-upload-RLS 20/20 · stripe 45/45 · the rest unchanged). Build clean;
+lint held at the **12 errors / 2 warnings** baseline. Per-user baseline unchanged in every invariant
+that matters — projects/members/messages equal across all WS1 members (6/3/15), tasks =
+workspace-visible + own-private, notifications recipient-scoped, and the amego outsider still reads
+**0** on every workspace-scoped surface.
 
-1. **`PROPOSED_avatars_quota_rate_limit_and_orphan_sweep.sql` — 37/37 proven.** `avatars` is the only
-   bucket of the three with **no rate limit, no byte quota and no object cap**; this adds 12/hr
-   (delete-resistant, operations-counted via an append-only log), 20 objects / 20 MB per user, and an
-   hourly orphan sweep carrying the 20260715142424 **age guard**.
-   **→ Landmine already paid for once:** the first draft used
-   `perform set_config('session_replication_role','replica',true)`, which raises **42501** because
-   this project's `postgres` is **not a superuser** — the cron job would have errored every hour
-   forever, silently. Use `SET LOCAL`, as the shipped precedent does. The proof now carries a
-   permanent regression guard (S00) against reintroducing it.
-2. **`PROPOSED_avatars_private_bucket_and_signed_urls.sql` — 30/30 proven.** Flips the bucket to
-   PRIVATE. **Why:** it is the only public bucket, so "Remove photo" leaves a **world-readable** image
-   live forever, and any co-member who receives a URL holds a permanent, unrevokable,
-   anonymously-fetchable link that outlives their membership.
-   **The design in one line:** `avatar_url` stops storing a URL and stores the **storage PATH**; a
-   co-workspace SELECT policy gates on the object being *referenced* by a members row you may see;
-   and the sweep's matching rule becomes exact equality against that same column — giving one
-   invariant: **an object is VISIBLE iff it is REFERENCED iff it is NOT SWEPT.**
+| # | Ledger version | What | Proof |
+|---|---|---|---|
+| 1 | `20260722061032` | `avatars_quota_rate_limit_and_orphan_sweep` | **37/37** rolled-back |
+| 2 | `20260722061442` | `avatars_private_bucket_and_signed_urls` | **30/30** rolled-back, then **11/11** live post-apply |
+
+> ### 🔴 THE HALVES ARE SPLIT RIGHT NOW — THIS IS THE ONE THING TO KNOW
+> The owner directed DB-apply-first with the branch left unmerged for production verification. That
+> **inverts the runbook this section used to carry** (which said merge → deploy → apply, and "do NOT
+> apply the migrations on their own"). The inversion is deliberate and owner-approved, but it means
+> the incompatibility window is **open now, not for 30 seconds**: `main` still serves the old client,
+> so **every avatar renders as initials** and **saving a profile with a photo fails `22023`**.
+> Name/status/bio saves are unaffected; no data is lost or corrupt. **Resolve forward: merge
+> `feat/avatars-private-signed-urls`.** Reverting the bucket to public does NOT undo this — the
+> backfill is one-way.
+
+**1 — quota / rate limit / sweep.** `avatars` was the only bucket of the three with **no rate limit,
+no byte quota and no object cap**; this adds 12/hr (delete-resistant, operations-counted via an
+append-only `private.avatar_upload_log`), 20 objects / 20 MB per user, and the third pg_cron job
+`avatar-orphan-sweep` (`30 * * * *`) carrying the 20260715142424 **age guard**.
+**→ Landmine already paid for once:** the first draft used
+`perform set_config('session_replication_role','replica',true)`, which raises **42501** because this
+project's `postgres` is **not a superuser** — the cron job would have errored every hour forever,
+silently. Use `SET LOCAL`, as the shipped precedent does. The proof carries a permanent regression
+guard (S00) against reintroducing it.
+
+**2 — public → private.** It was the only public bucket, so "Remove photo" left a **world-readable**
+image live forever, and any co-member who received a URL held a permanent, unrevokable,
+anonymously-fetchable link that outlived their membership. **The design in one line:** `avatar_url`
+stops storing a URL and stores the **storage PATH**; a co-workspace SELECT policy gates on the object
+being *referenced* by a members row you may see; and the sweep's matching rule becomes exact equality
+against that same column — giving one invariant: **an object is VISIBLE iff it is REFERENCED iff it
+is NOT SWEPT.**
 
 **Four things a future reader must not undo:**
-- **The hard blocker:** `avatars_select_own` is own-folder ONLY. While the bucket is public that never
-  mattered (the public endpoint bypasses RLS), but signing needs SELECT — proven by impersonation
-  that a workspace admin selects **zero** of a co-member's avatar objects. Flipping the flag alone
-  silently degrades **every avatar except your own** to initials.
-- **The trigger pin became a CONTROL.** `members_validate_profile` pins the path to the ROW OWNER's
-  own uid. Under the old URL rule that was tidiness; now that `avatar_url` **grants read access to
-  the object it names**, without the pin user A could set it to user B's path and publish B's private
-  image to A's whole workspace.
+- **The hard blocker:** `avatars_select_own` is own-folder ONLY. While the bucket was public that never
+  mattered (the public endpoint bypasses RLS), but signing needs SELECT — reproduced live in the RED
+  phase, where a co-member selected **zero** of a peer's avatar object. Flipping the flag alone
+  silently degrades **every avatar except your own** to initials. `avatars_select_own` is KEPT and
+  still load-bearing: it is how you read your own just-uploaded, not-yet-saved object.
+- **The trigger pin is a CONTROL — and it closed a gap that was LIVE.** The docs used to imply
+  `members_validate_profile` already pinned the path to the row owner's uid. **It did not.** The
+  pre-change body validated only the public-URL *prefix*, and `authenticated` already held
+  `UPDATE (avatar_url)` — so user A could point their `avatar_url` at user B's object *before* this
+  change. Harmless while the bucket was public (anyone could fetch it anyway); the instant
+  `avatar_url` **grants read access to the object it names**, it becomes A publishing B's private
+  image to A's whole workspace. Now pinned to `^<new.id>/[A-Za-z0-9._-]{1,200}$` — pinned to
+  **`new.id`, not `auth.uid()`**, so the backfill and future DEFINER maintenance (which run as
+  postgres with no `auth.uid()`) still work, and single-segment so sub-paths/traversal are foreclosed.
 - **The sweep rule is the sharpest edge.** Suffix matching via `right()` *happens to still work* under
   a path column — it fails **silently correct**, which is exactly what makes it dangerous. Replaced
   with exact equality, which **cannot** match a legacy URL, so a skipped backfill would make the next
-  hourly run **delete a live avatar**. Mitigated twice: a refuse-to-commit backfill guard, and a
-  fail-safe that RAISES rather than deletes if any `avatar_url` is not a bare path.
+  hourly run **delete a live avatar** — and the one live object predated the change by six days, so
+  the 1-hour age guard would NOT have saved it. Mitigated twice: a refuse-to-commit backfill guard,
+  and a fail-safe that RAISES `55000` rather than deletes if any `avatar_url` is not a bare path.
+  Both were exercised live (rolled back).
 - **`storage.protect_delete()` is a STATEMENT-level BEFORE DELETE trigger**, so a direct SQL delete on
   `storage.objects` raises 42501 *before RLS is consulted* — an avatars DELETE-policy outcome is
   therefore **not behaviourally provable in SQL** (the proof pins it structurally instead, and says
   so). This is also why the sweep's `SET LOCAL session_replication_role='replica'` is load-bearing.
 
-**Client half (specified, not written):** `uploadAvatar` returns a path; a batched `createSignedUrls`
-(**plural** — one request per workspace, not per avatar) cache with TTL refresh; **`Avatar`'s
-`onError` must reset on `photoUrl` change** or one expired URL permanently degrades a face to
-initials; `removeAvatar` actually deleting the object on Remove-photo AND on re-upload.
+**Live post-apply verification (11/11, rolled back, against the REAL production rows):** Tony and
+Ahmed Magdy each SELECT the VA's real avatar object → signing succeeds and a co-member's face renders;
+the amego outsider selects **zero** and lists an **empty** bucket (it was world-readable before);
+Ahmed **cannot** point his `avatar_url` at the VA's path (`22023`); the old public-URL shape is
+rejected; the sweep runs against live data leaving the real avatar intact; and one URL-shaped value
+makes the sweep RAISE `55000` with the object still present.
 
-**Two test files must change in the SAME commit** (house landmine rule): `avatars_upload_rls` (its
-S01/S02 are *deliberately inverted* by the new co-workspace policy) and `profile_and_avatar` (it
-plants public-URL values the new trigger rejects).
+**Backfill result:** exactly one row converted — the VA's 127-char public URL → the bare path
+`0598a0bc-…/ltnts5q5w58m.jpg`, which matches its storage object by exact equality. **0** rows are not
+a bare own-uid path; **0** objects are collectable by the sweep.
+
+**Trigger rewrite was verified byte-exact.** `members_validate_profile` was recreated in full, so the
+`display_name` / `status_text` / `status_emoji` / `bio` blocks were compared to the pre-image after
+apply: **zero differing characters**, and the emoji-range regex is **byte-identical (79 octets)**.
+Only the `avatar_url` block changed.
+
+**Client half (branch `feat/avatars-private-signed-urls`, tip `270f513` + this pass).**
+`uploadAvatar` returns a path; a dedicated `AvatarSignCtx` + a batched signing cache in AppProvider
+(`createSignedUrls`, **plural** — one request per batch, never one per face) that eagerly signs the
+roster and proactively re-signs 5 min before the 3600s TTL; `Avatar` resolves a path→signed-URL
+through that cache and — the finding-3 fix — tracks the failed `src` in `brokenSrc` (keyed off `src`,
+not a sticky boolean) so a refreshed URL retries instead of degrading to initials forever, with
+`onError` force-re-signing once per load-cycle. `removeAvatar` deletes the object on Remove-photo, on
+re-upload (the previous session object), and on save (the replaced saved object); `savedPathRef`
+guarantees the SAVED object is never deleted before a replacement commits. ProfileModal shows a
+`blob:` preview on pick. Verified there is **no `getPublicUrl` anywhere in `src/`**.
+
+**The two inverted test files were updated in the same commit** (house landmine rule):
+- `avatars_upload_rls` (14 → **20** assertions). Its S-group now proves the reference rule in BOTH
+  directions, because that distinction *is* the design: a peer's **unreferenced** object stays hidden
+  (S01/S02), a peer's **referenced** object becomes visible (S04/S05 — the hard blocker), a peer's
+  superseded object **in the same folder** stays hidden (S06 — so a folder-level "simplification"
+  fails loudly), and an outsider still sees nothing (S07). A10 now plants a bare path; A11/A12 pin the
+  rejection of the old URL shape and of another user's path.
+- `profile_and_avatar` (40 → **42**). It **re-creates `members_validate_profile` inside its own
+  transaction**, so it had to track the shipped body or it would silently prove a rule that no longer
+  exists — the same landmine already flagged for `_looks_like_role_title`. Bucket now created PRIVATE;
+  W18 plants the path shape; W21/W22 added for the old-URL and foreign-path rejections.
+
+**⚠ Re-running the two avatars proofs as regressions needs the REWIND pattern.** Both were written
+BEFORE their migrations, so their RED phases assert the pre-migration world (`R01` bucket is public,
+`R03`/`R04` no sweep/trigger exists). Those assertions now fail *by design* on a re-run. This is the
+proof-lifecycle conflict documented in the 2026-07-19 remediation pass; the headers of both files say
+so explicitly.
 
 ## Remediation pass (2026-07-19, later the same day) — data integrity, a11y, dead code
 
@@ -1065,7 +1155,10 @@ notifications** (`20260626111955`), **guest nav cleanup + the scalable `Assignee
 pg_cron** (`20260626152555`/`…152653`), the **per-account Free/Pro packaging realignment** (config only), and
 the **chat pass** — team-chat read receipts (`20260719134628`), the `dm_reads` cursor-repudiation fix
 (`20260719134702`), and team-chat "Delete for me" (`20260719134752`), all three **shipped wired into the UI
-in the same change** (see *Chat pass (2026-07-19)*).
+in the same change** (see *Chat pass (2026-07-19)*). **DB-applied but NOT yet merged:** the avatars
+quota/rate-limit/sweep (`20260722061032`) and the public→private conversion (`20260722061442`) — the
+client half is on `feat/avatars-private-signed-urls` and **must be merged to restore avatar rendering**
+(see *Avatars private conversion (2026-07-22)*).
 `members.role` is vestigial for authz. **(Lint baseline was 31/2 at the time of this entry; it is 12 errors / 2 warnings as of 2026-07-19 — see *Chat pass (2026-07-19)*.)**
 
 **Invite-as-role is DONE** (`20260626135949`) — an owner/admin picks member/guest at invite time (the

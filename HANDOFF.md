@@ -52,6 +52,22 @@ reverting the migration would restore the data-loss path. Same principle as the 
 
 ## PENDING — owner action
 
+**0. The avatars conversion is BUILT and awaiting a COORDINATED CUTOVER** (branch
+`feat/avatars-private-signed-urls`, tip in that branch). Both migrations are proven (37/37 + 30/30)
+AND the full client half is written (build clean, lint 12/2, full regression 549/549 green, and a
+client-code adversarial review whose two findings — an unsignable-path re-sign loop and a
+corrupt-image onError thrash — were both fixed). **It is deliberately NOT applied and NOT merged**,
+because it is the ONE change that is not backward-compatible with the deployed client:
+  * new trigger rejects a URL → the deployed OLD client (stores `getPublicUrl`) fails avatar upload
+    the instant the migration lands;
+  * new client on the OLD public DB → also fails (old trigger rejects a path).
+So the two halves are strictly simultaneous. **Cutover runbook** (minimises the window to the Vercel
+build, ~30–60s, affecting one existing avatar → initials + any upload attempted mid-window):
+merge branch → Vercel deploys → apply the sweep migration → apply the conversion migration → move
+both migration files to `migrations/` (ledger versions) + both proofs to `tests/` → update the two
+landmine test files (`avatars_upload_rls`, `profile_and_avatar`) to the new expectations → advisors
++ full regression against the new state. Do NOT apply the migrations while the branch is unmerged.
+
 **1. Approve the avatars work (designed, proven, NOT applied).** Two migrations that must land
 together, in this order:
   1. `PROPOSED_avatars_quota_rate_limit_and_orphan_sweep.sql` — **37/37 proven**. Adds the 12/hr

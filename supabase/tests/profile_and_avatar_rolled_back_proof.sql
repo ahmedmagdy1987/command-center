@@ -1,6 +1,18 @@
 -- ============================================================================
 -- PROFILE + AVATAR + DISPLAY_NAME HARDENING (members) — ROLLED-BACK PROOF
--- 40 assertions. Rolled back. Proves the single profile+avatar+display_name migration.
+-- 42 assertions. Rolled back. Proves the single profile+avatar+display_name migration.
+--
+-- ⚠ THIS FILE RE-CREATES public.members_validate_profile AND private._looks_like_role_title INSIDE
+--   ITS OWN TRANSACTION. That is the standing landmine (first flagged for _looks_like_role_title in
+--   20260718195827): if either rule changes again, change it HERE TOO or this suite silently proves a
+--   body that no longer ships.
+--
+-- UPDATED FOR avatars_private_bucket_and_signed_urls: `avatar_url` no longer stores an absolute public
+--   URL, it stores the bare storage PATH, pinned to the ROW OWNER'S OWN uid folder. That pin is a
+--   CONTROL, not tidiness — the column now GRANTS READ ACCESS to the object it names (via
+--   avatars_select_shared_workspace), so a foreign path would publish another user's private image to
+--   your workspace (W22). W18 plants the new shape, W19/W20 keep the arbitrary-https and javascript:
+--   rejections, and W21 pins the rejection of the OLD public-URL shape. The bucket is created PRIVATE.
 -- ============================================================================
 -- IMPERSONATION DEFENSE (precise scope): status_text, status_emoji AND display_name reject role/authority
 --   titles written as ASCII / FULLWIDTH / MATHEMATICAL / ZERO-WIDTH-split / SPACED (NFKC + separator-strip),
@@ -78,10 +90,16 @@ begin
     if length(new.avatar_url) > 2048 then
       raise exception 'avatar_url is too long' using errcode = '22023';
     end if;
-    -- storage-hosted ONLY: must be an object in OUR public avatars bucket. Closes the cross-viewer
-    -- tracking-pixel vector (an arbitrary https host is rejected). NB: project ref hardcoded (this host).
-    if new.avatar_url !~ '^https://nqlzjuxqgajeoypyzlnv\.supabase\.co/storage/v1/object/public/avatars/' then
-      raise exception 'avatar_url must be an uploaded avatar (storage-hosted)' using errcode = '22023';
+    -- PATH, not URL (avatars_private_bucket_and_signed_urls). The bucket is private, so there is no
+    -- stable URL to store; this value is what avatars_select_shared_workspace and
+    -- _sweep_orphan_avatars compare to storage.objects.name. Pinned to THIS ROW'S OWN uid folder,
+    -- because avatar_url now GRANTS READ ACCESS to the object it names — a foreign path would let one
+    -- user publish another user's image to their workspace. Single segment only (no '/' in the class)
+    -- forecloses sub-paths and traversal. An arbitrary https host is still rejected, so the
+    -- cross-viewer tracking-pixel vector stays closed.
+    if new.avatar_url !~ ('^' || new.id::text || '/[A-Za-z0-9._-]{1,200}$') then
+      raise exception 'avatar_url must be a storage path in your own avatars folder (<your-user-id>/<file>)'
+        using errcode = '22023';
     end if;
   end if;
 
@@ -163,11 +181,14 @@ $fn$;
 revoke all on function public.workspace_members_list(uuid) from public, anon;
 grant execute on function public.workspace_members_list(uuid) to authenticated;
 
--- avatars storage bucket (public, image-only, 2 MB) + own-folder write policies. Public read is via the
--- CDN public URL; avatar_url is pinned to this bucket's public prefix (above), closing the tracking residual.
+-- avatars storage bucket (PRIVATE since avatars_private_bucket_and_signed_urls, image-only, 2 MB) +
+-- own-folder write policies. Reads are signed URLs, not a CDN public URL, so SELECT is now load-bearing
+-- for rendering; avatar_url stores the object PATH (pinned to the row owner's own folder, above).
+-- `on conflict do nothing` would NOT flip an existing row, so `public` is set explicitly below.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('avatars','avatars', true, 2097152, array['image/png','image/jpeg','image/webp','image/gif'])
+values ('avatars','avatars', false, 2097152, array['image/png','image/jpeg','image/webp','image/gif'])
 on conflict (id) do nothing;
+update storage.buckets set public = false where id = 'avatars';
 drop policy if exists avatars_insert_own on storage.objects;
 create policy avatars_insert_own on storage.objects for insert to authenticated
   with check (bucket_id='avatars' and (storage.foldername(name))[1] = (select auth.uid())::text);
@@ -186,6 +207,25 @@ create policy avatars_delete_own on storage.objects for delete to authenticated
 drop policy if exists avatars_select_own on storage.objects;
 create policy avatars_select_own on storage.objects for select to authenticated
   using (bucket_id='avatars' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+-- Own-folder SELECT alone would degrade every co-worker's face to initials under a private bucket
+-- (signing requires SELECT). The conversion adds a second, ADDITIVE policy gated on the object being
+-- REFERENCED by a members row the caller may see. Restated here so this file mirrors the live set;
+-- the visibility behaviour itself is asserted in avatars_upload_rls_rolled_back_proof.sql.
+create or replace function private.is_visible_avatar_object(p_name text) returns boolean
+language sql stable security definer set search_path to '' as $fn$
+  select exists (
+    select 1 from public.members m
+     where m.avatar_url = p_name
+       and (m.id = auth.uid() or private.shares_workspace(m.id))
+  );
+$fn$;
+revoke execute on function private.is_visible_avatar_object(text) from public, anon;
+grant  execute on function private.is_visible_avatar_object(text) to authenticated;
+
+drop policy if exists avatars_select_shared_workspace on storage.objects;
+create policy avatars_select_shared_workspace on storage.objects for select to authenticated
+  using (bucket_id = 'avatars' and private.is_visible_avatar_object(name));
 
 -- ---------------------------------------------------------------------------
 -- (2) HARNESS
@@ -214,7 +254,7 @@ declare
   v_ws uuid := gen_random_uuid();
   v_actual text; v_msg text; v_n int; v_email text; v_bio text; v_avatar text; v_status text; v_avatar_url text;
   c_role  constant text := 'status may not impersonate a role or title';
-  c_av    constant text := 'avatar_url must be an uploaded avatar (storage-hosted)';
+  c_av    constant text := 'avatar_url must be a storage path in your own avatars folder (<your-user-id>/<file>)';
   c_dn    constant text := 'display name may not impersonate a role or title';
   c_emoji constant text := 'status emoji must be an emoji, not letters or letter-like symbols';
 begin
@@ -233,7 +273,8 @@ begin
   insert into public.tasks (id,title,privacy,project,status,workspace_id,created_by,assignee_id)
   values ('pf-t-'||v_sfx,'peer task','workspace','other','inbox',v_ws,v_member,v_guest);
 
-  v_avatar_url := 'https://nqlzjuxqgajeoypyzlnv.supabase.co/storage/v1/object/public/avatars/'||v_member||'/a.png';
+  -- a bare own-uid PATH — the private-bucket shape. The old absolute public URL is now rejected (W19).
+  v_avatar_url := v_member::text||'/a.png';
   update public.members set status_text='on a call', status_emoji='🛠️',
          avatar_url=v_avatar_url, bio='building things' where id=v_member;
 
@@ -328,13 +369,11 @@ begin
   begin update public.members set bio=repeat('y',281) where id=v_member; v_actual:='ALLOWED'; v_msg:=''; exception when others then v_actual:=sqlstate; v_msg:=sqlerrm; end;
   execute 'reset role'; insert into _r values (17,'W17 bio over length cap rejected','22023|bio is too long (max 280 characters)',v_actual||'|'||v_msg,v_actual='22023' and v_msg='bio is too long (max 280 characters)');
 
-  begin perform pg_temp.imp(v_member); update public.members set avatar_url='https://nqlzjuxqgajeoypyzlnv.supabase.co/storage/v1/object/public/avatars/'||v_member||'/new.png' where id=v_member;
+  begin perform pg_temp.imp(v_member); update public.members set avatar_url=v_member::text||'/new.png' where id=v_member;
     execute 'reset role'; select avatar_url into v_status from public.members where id=v_member; raise exception 'PD_UNDO';
   exception when others then execute 'reset role'; if sqlerrm<>'PD_UNDO' then raise; end if; end;
-  insert into _r values (18,'W18 storage-hosted avatar_url allowed + stored',
-    'https://nqlzjuxqgajeoypyzlnv.supabase.co/storage/v1/object/public/avatars/'||v_member||'/new.png',
-    coalesce(v_status,'NULL'),
-    v_status='https://nqlzjuxqgajeoypyzlnv.supabase.co/storage/v1/object/public/avatars/'||v_member||'/new.png');
+  insert into _r values (18,'W18 bare own-uid storage PATH allowed + stored (private-bucket shape)',
+    v_member::text||'/new.png', coalesce(v_status,'NULL'), v_status=v_member::text||'/new.png');
 
   perform pg_temp.imp(v_member);
   begin update public.members set avatar_url='https://evil.example/px.gif?ws=1' where id=v_member; v_actual:='ALLOWED'; v_msg:=''; exception when others then v_actual:=sqlstate; v_msg:=sqlerrm; end;
@@ -464,8 +503,23 @@ begin
     v_actual:='ALLOWED'; exception when others then v_actual:=sqlstate; end;
   execute 'reset role'; insert into _r values (40,'S02 member CANNOT upload to ANOTHER user avatars folder','42501',v_actual,v_actual='42501');
 
+  -- ===== AVATAR_URL IS NOW A CAPABILITY (private-bucket conversion) =====
+  -- The column no longer merely describes a picture: avatars_select_shared_workspace grants READ on
+  -- the object it names to everyone sharing a workspace with this member. Two rejections therefore
+  -- matter more than they used to, and both are pinned here.
+  perform pg_temp.imp(v_member);
+  begin update public.members set
+          avatar_url='https://nqlzjuxqgajeoypyzlnv.supabase.co/storage/v1/object/public/avatars/'||v_member||'/a.png'
+        where id=v_member; v_actual:='ALLOWED'; v_msg:=''; exception when others then v_actual:=sqlstate; v_msg:=sqlerrm; end;
+  execute 'reset role'; insert into _r values (41,'W21 the OLD public-URL shape is now rejected (column stores a path)','22023|'||c_av,v_actual||'|'||v_msg,v_actual='22023' and v_msg=c_av);
+
+  perform pg_temp.imp(v_member);
+  begin update public.members set avatar_url=v_peer::text||'/a.png' where id=v_member;
+        v_actual:='ALLOWED'; v_msg:=''; exception when others then v_actual:=sqlstate; v_msg:=sqlerrm; end;
+  execute 'reset role'; insert into _r values (42,'W22 [CONTROL] ANOTHER user''s path rejected — avatar_url is a read grant, so a foreign path would publish their image','22023|'||c_av,v_actual||'|'||v_msg,v_actual='22023' and v_msg=c_av);
+
   -- ===== completeness =====
-  select count(*) into v_n from _r; if v_n <> 40 then raise exception 'INCOMPLETE: % rows, expected 40', v_n; end if;
+  select count(*) into v_n from _r; if v_n <> 42 then raise exception 'INCOMPLETE: % rows, expected 42', v_n; end if;
   if exists (select 1 from _r where pass is null) then raise exception 'NULL pass value'; end if;
 end
 $pf$;
