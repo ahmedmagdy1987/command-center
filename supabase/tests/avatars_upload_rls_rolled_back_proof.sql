@@ -57,12 +57,15 @@ create policy avatars_update_own on storage.objects for update to authenticated
 
 -- The co-workspace SELECT added by the private-bucket conversion. Restated here (create-or-replace /
 -- drop-create) so this file describes the policy set it actually asserts against.
+-- Mirrors the LIVE body as of 20260722080911: the guest-scoped `can_see_member_avatar` replaced
+-- `shares_workspace` (which that migration DROPPED — restating the old body here would now fail at
+-- function-creation time, not at assertion time).
 create or replace function private.is_visible_avatar_object(p_name text) returns boolean
 language sql stable security definer set search_path to '' as $fn$
   select exists (
     select 1 from public.members m
      where m.avatar_url = p_name
-       and (m.id = auth.uid() or private.shares_workspace(m.id))
+       and private.can_see_member_avatar(m.id)
   );
 $fn$;
 revoke execute on function private.is_visible_avatar_object(text) from public, anon;

@@ -7,11 +7,20 @@
 -- Post-run verification confirmed the rollback was clean: bucket still public=true, 1 avatar object,
 -- members.avatar_url still the 127-char public URL, 0 new policies, 0 new functions, 0 fixture rows.
 --
--- ⚠ RE-RUNNING THIS FILE AFTER THE MIGRATION IS APPLIED. R01 asserts the bucket is PUBLIC and R04
---   asserts the live trigger REJECTS a bare path — both are now false, so R01/R02/R04/R05/R06 WILL
---   FAIL on a re-run. Same proof-lifecycle conflict as the companion file; use the REWIND pattern
---   (restore the pre-migration bucket flag + trigger body transaction-locally before RED) to run it
---   as a regression. The GREEN half (7-30) remains valid as written.
+-- ⚠⚠ THIS FILE NO LONGER RUNS AT ALL POST-APPLY — AND IT IS WORSE THAN "SOME ASSERTIONS FAIL".
+--   Measured 2026-07-22: the transaction **ABORTS DURING RED FIXTURE SETUP** and reports NOTHING —
+--   zero of the 30 assertions are recorded, so a careless reader sees an error, not a verdict.
+--       ERROR: 22023 avatar_url must be a storage path in your own avatars folder
+--       at line ~118:  update public.members set avatar_url = v_base||pA where id = uA;
+--   The fixtures deliberately plant TODAY'S public-URL-shaped `avatar_url`; the live
+--   `members_validate_profile` (rewritten by the very migration this file proves) rejects a URL.
+--   Beyond that, R01 asserts the bucket is PUBLIC and R04 asserts the trigger REJECTS a bare path —
+--   both now false.
+--   **To run this as a regression it needs the REWIND pattern**: restore the pre-migration bucket
+--   flag AND the pre-migration trigger body transaction-locally before the RED block, then re-apply
+--   the shipped bodies before GREEN. See guest_scoped_avatar_visibility_rolled_back_proof.sql for a
+--   worked example of a REWIND-built suite that stays green forever.
+--   The GREEN half (7-30) remains valid as written; it is only the RED setup that cannot run.
 --
 -- A LIVE POST-APPLY RE-VERIFICATION (11/11, rolled back, against the REAL production rows rather than
 -- synthetic fixtures) additionally confirmed: Tony and Ahmed Magdy can each SELECT the VA's real
@@ -196,12 +205,17 @@ $red$;
 update storage.buckets set public = false where id = 'avatars';
 
 -- PART 2 — co-workspace SELECT, gated on the object being REFERENCED (not on the folder)
+-- ⚠ SUPERSEDED BY 20260722080911. As originally shipped this called `private.shares_workspace`,
+-- which had NO guest clause and let a guest read any co-member's referenced avatar. That helper was
+-- DROPPED, so restating the original body here would now fail at function-creation time. The
+-- guest-scoped `private.can_see_member_avatar` is substituted; the assertions below concern
+-- non-guest and outsider callers only, so none of them changes meaning.
 create or replace function private.is_visible_avatar_object(p_name text) returns boolean
 language sql stable security definer set search_path to '' as $fn$
   select exists (
     select 1 from public.members m
      where m.avatar_url = p_name
-       and (m.id = auth.uid() or private.shares_workspace(m.id))
+       and private.can_see_member_avatar(m.id)
   );
 $fn$;
 revoke execute on function private.is_visible_avatar_object(text) from public, anon;

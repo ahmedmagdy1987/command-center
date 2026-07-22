@@ -123,6 +123,15 @@ language sql security definer set search_path to '' as $fn$
   join public.members m on m.id = wm.user_id
   where wm.workspace_id = p_workspace_id
     and private.is_workspace_member(p_workspace_id)
+    -- ⚠⚠ SYNC DEBT (added 2026-07-22 by 20260722080911_guest_scoped_avatar_visibility).
+    -- The guest clause below is DUPLICATED, deliberately, by `private.can_see_member_avatar`, which
+    -- gates which avatar STORAGE OBJECTS a caller may read (and therefore sign a URL for). The two
+    -- were left separate because unifying them means rewriting this RPC, which carries 40+ live
+    -- assertions, inside what was a security fix — a blast radius not worth taking there.
+    -- **IF YOU CHANGE THIS RULE, CHANGE IT IN BOTH PLACES**, or a guest's roster and their avatar
+    -- visibility will silently disagree. That disagreement is exactly the defect 20260722080911
+    -- fixed: the avatar predicate had no guest clause at all, so a guest could read the avatar of a
+    -- co-member this rule deliberately hides from them. See CLAUDE.md, *Guest predicate sync debt*.
     and (
       (select r from caller) is distinct from 'guest'
       or wm.user_id = (select uid from caller)

@@ -1,12 +1,16 @@
 # Command Center — project guide for Claude
 
 > Orientation file so any future session is instantly up to speed. Last verified against the
-> live DB on **2026-07-22** — current through `20260722061442`
-> (avatars_private_bucket_and_signed_urls). The **avatars private-bucket conversion** is **MERGED AND
+> live DB on **2026-07-22** — current through `20260722080911`
+> (guest_scoped_avatar_visibility). The **avatars private-bucket conversion** is **MERGED AND
 > LIVE** — `main` tip **`972b618`**, production serves `index-DofwQkiD.js`, SHA256-identical to a
-> local build of that tree; regression **534/534**; the `avatars` bucket is now PRIVATE and
-> `members.avatar_url` stores a storage **path**, not a URL. See *Avatars private conversion
-> (2026-07-22)*.
+> local build of that tree; the `avatars` bucket is now PRIVATE and `members.avatar_url` stores a
+> storage **path**, not a URL. See *Avatars private conversion (2026-07-22)*.
+>
+> **APPLIED, NOT MERGED:** `20260722080911` closes a guest over-exposure that the post-deploy audit
+> found in that conversion — see *Guest avatar scope fix (2026-07-22)*. DB-only, no client change, so
+> production is **not** in a mismatched state this time; the branch
+> `fix/guest-avatar-visibility-scope` carries only the migration file, proofs and docs.
 >
 > > ### 🔴 THE ONE ROLLBACK LINE IN THIS PROJECT THAT IS NOT SAFE
 > > `git revert -m 1 972b618` restores the CLIENT but **not** the database, and unlike every other
@@ -738,11 +742,74 @@ guarantees the SAVED object is never deleted before a replacement commits. Profi
   exists — the same landmine already flagged for `_looks_like_role_title`. Bucket now created PRIVATE;
   W18 plants the path shape; W21/W22 added for the old-URL and foreign-path rejections.
 
-**⚠ Re-running the two avatars proofs as regressions needs the REWIND pattern.** Both were written
-BEFORE their migrations, so their RED phases assert the pre-migration world (`R01` bucket is public,
-`R03`/`R04` no sweep/trigger exists). Those assertions now fail *by design* on a re-run. This is the
-proof-lifecycle conflict documented in the 2026-07-19 remediation pass; the headers of both files say
-so explicitly.
+**⚠ The two avatars proofs DO NOT RUN AT ALL post-apply — and it is worse than "some assertions
+fail".** Measured 2026-07-22: both **abort mid-transaction and emit no verdict whatsoever** (one
+during RED fixture setup, one inside GREEN), because their fixtures plant the old public-URL-shaped
+`avatar_url` that the rewritten trigger now rejects with `22023`. A careless reader sees a SQL error,
+not a red assertion — which is exactly how a suite rots into being ignored. Both headers now record
+the exact failing line and error. Fixing them means the **REWIND** pattern;
+`guest_scoped_avatar_visibility_rolled_back_proof.sql` is the worked example of a REWIND-built suite
+that stays green forever, and is why the guest fix is re-runnable while these two are not.
+
+## Guest avatar scope fix (2026-07-22) — `20260722080911`, **APPLIED, branch not merged**
+
+A post-deploy security audit of the conversion above found — and **reproduced live** — that a
+**GUEST could read (and therefore sign a URL for) the avatar object of an ARBITRARY co-member**: a
+person the roster deliberately hides from them, and whose `members` row they cannot read at all.
+Measured under impersonation: guest → non-peer avatar object = **1 row**, while the same guest got
+**0** from `public.members` and **0** from `workspace_members_list`.
+
+**Root cause, and the reusable lesson.** `private.is_visible_avatar_object` is SECURITY DEFINER *on
+purpose* — a storage policy whose correctness rides on another table's RLS is a coupling that breaks
+quietly. But DEFINER means the guest exclusion baked into `public.members`' own policy no longer
+applies, so the share check had to be restated by hand — and it reached for
+`private.shares_workspace`, the **pre-2026-07-06** helper with no guest clause, instead of the
+guest-scoped rule `20260706035653` introduced everywhere else.
+**→ The moment a storage-policy helper becomes DEFINER, every visibility rule it used to inherit
+must be restated by hand. Enumerate them; do not assume.** Contrast `voice_notes_select_member`,
+a NON-definer `EXISTS` over `messages`, which inherits the guest exclusion for free (verified live:
+a guest reads 0 of a team-chat voice-note object).
+
+**The obvious fix was the wrong one.** `can_see_member_profile`'s guest branch is `me.role <>
+'guest'`, so for a GUEST CALLER it collapses to `p_target = auth.uid()` — **self only**. Using it
+would have returned 0 for a guest's genuine task/DM peers and degraded their faces to initials.
+The proof pins the product intent empirically (R03): the roster **does** return those peers to the
+guest, so they must keep rendering. The shipped predicate `private.can_see_member_avatar` therefore
+mirrors the **roster's** guest clause — non-guest sees any co-member; guest sees self, plus anyone
+they share a **task** or a **DM** with — generalised to "in at least one shared workspace".
+
+**Also dropped `private.shares_workspace`** — after the swap it had **zero** references anywhere
+(asserted). It was the last pre-guest-scoping visibility helper still alive, and leaving a
+guest-blind helper lying around is exactly how this defect happened.
+
+**Proven 13/13 rolled-back** (incl. an anti-vacuity mutation: reverting the predicate makes the leak
+return) and **7/7 live post-apply** — non-peer → 0, task-peer → 1, DM-peer → 1, guest listing exactly
+{own, task-peer, DM-peer}, non-guest and outsider unchanged, and Tony still sees the VA's real
+production avatar. Non-guests are provably unaffected: for them the predicate reduces to the same
+membership overlap, and `me.role <> 'guest'` short-circuits before the task/DM subqueries run.
+
+**→ THREE proof files had to change in the same commit**, and the reason is worth knowing: they each
+`create or replace` `is_visible_avatar_object` to mirror live, with a body calling the dropped helper.
+A `language sql` body is validated **at creation time**, so they would have failed on the DDL, not on
+an assertion — a confusing failure mode. `avatars_upload_rls`, `profile_and_avatar` and
+`avatars_private_bucket_and_signed_urls` now call `can_see_member_avatar`.
+
+### Guest predicate sync debt (deliberate — referenced by both migration comments)
+
+`private.can_see_member_avatar` (`20260722080911`) and `private._workspace_members_list`
+(`20260716110514`) now implement the **same guest rule in two places** and **can drift**. Left
+separate on purpose: unifying them means rewriting an RPC carrying 40+ live assertions, inside what
+was a security fix — a blast radius not worth taking there. **If you change the guest visibility
+rule, change it in BOTH.** Inline warnings sit on each. Unify if the rule ever changes for a third
+reason.
+
+### Harness-consistency note (same audit)
+
+The audit's first pass flagged three suites as missing a `rolbypassrls` self-check. On inspection
+only **one** was real: `stripe_sandbox_billing` (guard added). `workspace_role_boundary` was a **false
+positive** — it guards on `current_user` inside `probe`/`probe_val` and *asserts that guard* in A00,
+which is stronger; and `task_attachment_orphan_sweep_age_guard` is **legitimately exempt** — it never
+impersonates, because it exercises a DEFINER cron function as postgres and makes no RLS claim.
 
 ## Remediation pass (2026-07-19, later the same day) — data integrity, a11y, dead code
 

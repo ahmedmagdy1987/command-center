@@ -3,16 +3,20 @@
 -- STATUS: APPLIED 2026-07-22 as 20260722061032, after this proof ran 37/37 GREEN against the live DB.
 --         This whole file is ONE begin;…rollback; — nothing here commits.
 --
--- ⚠ RE-RUNNING THIS FILE AFTER THE MIGRATION IS APPLIED. The RED phase (R01-R06) demonstrates the
---   disease against rules the migration has since replaced, and section (2) re-applies the DDL under
---   test transaction-locally, so RED/GREEN still pair correctly on a re-run. BUT R03/R04 assert that
---   no avatars upload-log trigger and no _sweep_orphan_avatars/cron job EXIST — those are now live,
---   so R03/R04 WILL FAIL on a re-run. That is expected and is the proof-lifecycle conflict documented
---   in the 2026-07-19 remediation pass: a proof written BEFORE its migration has two lifecycles. To
---   re-run this as a regression, apply the REWIND pattern (restore the pre-migration state
---   transaction-locally before RED). The value of the file as shipped is the GREEN half — in
---   particular S00, the permanent regression guard against reintroducing set_config() in place of
---   SET LOCAL.
+-- ⚠⚠ THIS FILE NO LONGER RUNS AT ALL POST-APPLY — AND IT IS WORSE THAN "SOME ASSERTIONS FAIL".
+--   Measured 2026-07-22: the transaction **ABORTS INSIDE THE GREEN BLOCK** and reports NOTHING.
+--   Rows 1-22 were inserted into _r but the final SELECTs never execute, so no verdict is emitted:
+--       ERROR: 22023 avatar_url must be a storage path in your own avatars folder
+--       at line ~515:  update public.members set avatar_url = v_url_pfx||n_ref_old where id = uS;
+--   The sweep fixtures reference avatars by the OLD public-URL shape; 20260722061442 converted the
+--   column to a bare storage path and its trigger now rejects a URL.
+--   Separately, R03/R04 assert that no avatars upload-log trigger and no _sweep_orphan_avatars/cron
+--   job EXIST — both are now live, so they would fail too if execution ever reached them.
+--   **To run this as a regression it needs the REWIND pattern** (restore the pre-migration trigger
+--   body and predicate transaction-locally before RED, re-apply before GREEN). See
+--   guest_scoped_avatar_visibility_rolled_back_proof.sql for a worked example.
+--   The value of the file as shipped is the GREEN half — in particular S00, the permanent regression
+--   guard against reintroducing set_config() in place of SET LOCAL.
 --
 -- ⚠ ALSO SUPERSEDED: the sweep body proven here matches by right()-suffix, correct for the URL-shaped
 --   avatar_url column of its time. 20260722061442 converts the column to a bare storage PATH and
