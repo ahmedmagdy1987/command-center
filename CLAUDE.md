@@ -7,10 +7,9 @@
 > local build of that tree; the `avatars` bucket is now PRIVATE and `members.avatar_url` stores a
 > storage **path**, not a URL. See *Avatars private conversion (2026-07-22)*.
 >
-> **APPLIED, NOT MERGED:** `20260722080911` closes a guest over-exposure that the post-deploy audit
-> found in that conversion — see *Guest avatar scope fix (2026-07-22)*. DB-only, no client change, so
-> production is **not** in a mismatched state this time; the branch
-> `fix/guest-avatar-visibility-scope` carries only the migration file, proofs and docs.
+> `20260722080911` closes a guest over-exposure the post-deploy audit found in that conversion —
+> **MERGED AND LIVE** at **`f83f538`** (see *Guest avatar scope fix (2026-07-22)*). DB-only, no
+> `src/` files, so the bundle is unchanged: production still serves `index-DofwQkiD.js`.
 >
 > > ### 🔴 THE ONE ROLLBACK LINE IN THIS PROJECT THAT IS NOT SAFE
 > > `git revert -m 1 972b618` restores the CLIENT but **not** the database, and unlike every other
@@ -751,7 +750,13 @@ the exact failing line and error. Fixing them means the **REWIND** pattern;
 `guest_scoped_avatar_visibility_rolled_back_proof.sql` is the worked example of a REWIND-built suite
 that stays green forever, and is why the guest fix is re-runnable while these two are not.
 
-## Guest avatar scope fix (2026-07-22) — `20260722080911`, **APPLIED, branch not merged**
+## Guest avatar scope fix (2026-07-22) — `20260722080911`, **MERGED AND LIVE** (`f83f538`)
+
+> **Rollback is NORMAL here** — `git revert -m 1 f83f538 && git push` (parent 1 = `88306dd`), and
+> **LEAVE the migration applied**. It only TIGHTENS visibility and touches no client contract, so it
+> is strictly protective. Note the deliberate contrast with `972b618` directly above, which is the
+> one merge in this project whose revert is *not* safe.
+
 
 A post-deploy security audit of the conversion above found — and **reproduced live** — that a
 **GUEST could read (and therefore sign a URL for) the avatar object of an ARBITRARY co-member**: a

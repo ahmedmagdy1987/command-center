@@ -1,10 +1,10 @@
-# HANDOFF — avatars private-bucket conversion — as of 2026-07-22
+# HANDOFF — avatars private-bucket conversion + guest scope fix — as of 2026-07-22
 
 > Orientation for the current state. **This batch is MERGED and LIVE.** `main` is the production
 > branch (Vercel auto-deploys it). After a Deep Freeze wipe follow [`RESTORE.md`](RESTORE.md) first,
 > then read this.
 
-## What just happened, in one paragraph
+## What just happened, in two paragraphs
 
 The `avatars` bucket was the last **public** bucket in the project: reads evaluated no policy and no
 JWT, so every face ever uploaded was a permanent, world-readable asset that "Remove photo" could not
@@ -12,40 +12,54 @@ revoke. It is now **private**, `members.avatar_url` stores a **storage path** in
 rendering mints short-lived signed URLs, and the bucket finally has quotas and an orphan sweep. The
 DB half was applied **before** the client half was merged (owner's call, so production could be
 verified), which opened a ~50-minute degraded window where avatars showed as initials and photo-saves
-failed `22023`. **That window is now CLOSED** by the deploy below.
+failed `22023`. **That window is closed** by `972b618`.
+
+A **post-deploy security audit of that work then found a real defect** and it was fixed the same day:
+the new avatar visibility predicate had **no guest clause**, so a GUEST could read — and sign a URL
+for — the avatar object of an *arbitrary* co-member the roster deliberately hides from them.
+Reproduced live, fixed by `20260722080911`, merged as `f83f538`. Details below under
+*Guest scope fix*.
 
 ## Branch topology
 
 | Branch | What's on it | Status |
 |--------|--------------|--------|
-| **`main`** | tip **`972b618`** — merge of `feat/avatars-private-signed-urls`. Deployed; see *What's live*. | live |
-| **`feat/avatars-private-signed-urls`** | tip `ea6f994` — contained in `main`. | merged, can be deleted |
+| **`main`** | tip **`f83f538`** — merge of `fix/guest-avatar-visibility-scope`. Deployed; see *What's live*. | live |
+| **`fix/guest-avatar-visibility-scope`** | tip `d60e0d4` — contained in `main`. | merged, can be deleted |
+| **`feat/avatars-private-signed-urls`** | tip `ea6f994` — in `main` since `972b618`. | merged, can be deleted |
 | **`fix/project-delete-avatars-and-unhide`** | tip `78da1b8` — in `main` since `c2004b3`. | merged, can be deleted |
 | **`fix/data-integrity-a11y-and-dead-code`** | tip `85c8d78` — contained in the branch above. | merged, can be deleted |
 
-`972b618` merged two commits: `270f513` (the signed-URL client half) and `ea6f994` (the applied
-migrations, the two inverted test files, and docs). Previous production state was `a463c79`.
+`972b618` merged `270f513` (the signed-URL client half) and `ea6f994` (the applied migrations, the two
+inverted test files, docs). `f83f538` merged `d60e0d4` (the guest scope fix — **no `src/` files**).
 
-## Rollback — READ THIS BEFORE REVERTING ANYTHING
+## Rollback — THE TWO MERGES ARE NOT EQUALLY SAFE
 
+**`f83f538` (guest scope fix) — NORMAL, safe:**
+```
+git revert -m 1 f83f538 && git push        # parent 1 = 88306dd
+```
+**Leave `20260722080911` applied.** It only TIGHTENS visibility and touches no client contract, so it
+is strictly protective — the standard case. The branch has no `src/` files, so reverting it changes
+nothing a user sees; it just removes the migration file, proofs and docs from the repo.
+
+**`972b618` (private-bucket conversion) — ⚠ NOT A CLEAN ROLLBACK. The one exception in this project.**
 ```
 git revert -m 1 972b618 && git push        # parent 1 = a463c79
 ```
-
-**⚠ THIS IS NOT A CLEAN ROLLBACK, AND IT IS THE FIRST TIME THAT HAS BEEN TRUE HERE.** Every previous
-rollback line in this project was safe because the migration was strictly protective and could stay
-applied. **This one is different: reverting the client alone re-opens the exact degraded state this
-deploy just closed** — the DB would still be private and path-shaped while the restored client builds
-public URLs and stores URLs.
+Every *other* rollback line here is safe because the migration is protective and can stay applied.
+**This one is different: reverting the client alone re-opens the exact degraded state that deploy
+closed** — the DB would still be private and path-shaped while the restored client builds public URLs
+and stores URLs.
 
 And the DB half **cannot cleanly come with it**: the URL → path backfill is **one-way**, and flipping
 `storage.buckets.public` back to `true` does not restore the old `avatar_url` values. That would
 leave a path-shaped column behind a URL-shaped world and strand every avatar anyway.
 
-**So: forward-only from here.** If something is wrong with avatars, fix forward with a new commit.
-A true revert would need its own forward migration that re-prefixes the paths back to absolute URLs
-*and* re-flips the bucket, applied in the same deploy as the client revert. Don't improvise that under
-pressure.
+**So: forward-only on the conversion.** If something is wrong with avatars, fix forward with a new
+commit — which is exactly what the guest scope fix did. A true revert would need its own forward
+migration re-prefixing the paths back to absolute URLs *and* re-flipping the bucket, applied in the
+same deploy as the client revert. Don't improvise that under pressure.
 
 ## What's live (verified 2026-07-22)
 
@@ -70,6 +84,28 @@ pressure.
   already held `UPDATE (avatar_url)` — so user A could already point their `avatar_url` at user B's
   object. Harmless while the bucket was public; a private-image leak the instant `avatar_url` became a
   read grant. Proven blocked live under impersonation (`22023`).
+- **Guest avatar visibility is scoped to the roster's rule** (`20260722080911`): a guest sees their
+  own avatar plus those of people they actually share a **task** or a **DM** with, and **nothing
+  else**. Non-guests and outsiders are unchanged. `private.shares_workspace` — the last
+  pre-guest-scoping helper — is **dropped**, with zero references remaining.
+
+## Guest scope fix — what the audit found
+
+`private.is_visible_avatar_object` is SECURITY DEFINER *on purpose*: a storage policy whose
+correctness rides on another table's RLS is a coupling that breaks quietly. But going DEFINER means
+the guest exclusion baked into `public.members`' own policy no longer applies, so the share check had
+to be restated by hand — and it reached for `private.shares_workspace`, the **pre-2026-07-06** helper
+with no guest clause, instead of the guest-scoped rule `20260706035653` introduced everywhere else.
+
+**→ The reusable lesson: the moment a storage-policy helper becomes DEFINER, every visibility rule it
+used to inherit must be restated by hand. Enumerate them; do not assume.** Contrast
+`voice_notes_select_member`, a NON-definer `EXISTS` over `messages`, which inherits the guest
+exclusion for free (verified live: a guest reads 0 of a team-chat voice-note object).
+
+**The obvious fix would have been wrong.** `can_see_member_profile`'s guest branch is
+`me.role <> 'guest'`, so for a GUEST CALLER it collapses to self-only — it would have blanked a
+guest's genuine task/DM peers. The proof pins the product intent empirically: the roster **does**
+return those peers to the guest, so their faces must keep rendering.
 
 ## Verification evidence
 
@@ -77,8 +113,10 @@ pressure.
 |---|---|
 | Quota/sweep migration, rolled-back | **37/37** (incl. S00, the `SET LOCAL` regression guard) |
 | Conversion migration, rolled-back | **30/30** |
-| Live post-apply, against REAL production rows | **11/11** |
-| Full regression, 15 suites | **534/534**, zero failures |
+| Conversion, live post-apply against REAL production rows | **11/11** |
+| Guest scope fix, rolled-back | **13/13** (incl. an anti-vacuity mutation that makes the leak return) |
+| Guest scope fix, live post-apply | **7/7** |
+| Full regression, 16 re-runnable suites | **547/547**, zero failures |
 | Security advisors | clean (only the accepted `auth_leaked_password_protection`) |
 | Build / lint | clean / **12 errors, 2 warnings** (baseline held) |
 | Trigger rewrite fidelity | **zero differing characters** before the `avatar_url` block; emoji regex **byte-identical, 79 octets** |
@@ -86,7 +124,9 @@ pressure.
 The 11/11 live pass is the one worth remembering: Tony and Ahmed Magdy each SELECT the VA's real
 avatar object (so signing succeeds and a co-member's face renders), the amego outsider selects **zero**
 and lists an **empty** bucket, Ahmed cannot name the VA's path, the sweep spares the live object, and a
-single URL-shaped value makes the sweep RAISE `55000` instead of deleting.
+single URL-shaped value makes the sweep RAISE `55000` instead of deleting. The 7/7 guest pass adds:
+non-peer → **0**, task-peer → **1**, DM-peer → **1**, guest listing exactly {own, task-peer, DM-peer},
+non-guest and outsider unchanged, and Tony still sees the VA's real production avatar.
 
 ## PENDING — owner action
 
@@ -108,26 +148,39 @@ working SMTP. Not SQL-readable; the whole invite model's email-binding depends o
 
 ## Proof-suite health
 
-All 15 suites in `supabase/tests/` run to completion: **534 assertions passing, zero failures.**
-Two suites grew this batch — `avatars_upload_rls` 14 → **20** and `profile_and_avatar` 40 → **42** —
-because the conversion deliberately inverts them.
+**16 of the 18 files in `supabase/tests/` run to completion: 547 assertions passing, zero failures.**
+Three suites changed this batch — `avatars_upload_rls` 14 → **20**, `profile_and_avatar` 40 → **42**
+(the conversion deliberately inverts both), and the new `guest_scoped_avatar_visibility` at **13**.
 
-**Two files in `tests/` are NOT re-runnable as-is**, and this is expected rather than broken: the two
-new avatars proofs were written *before* their migrations, so their RED phases assert the
-pre-migration world (`R01` bucket is public; `R03`/`R04` no sweep, no trigger). Those assertions now
-fail by design on a re-run. This is the standing **proof-lifecycle conflict**: a proof written before
-its migration has two lifecycles and they conflict. The fix is the **REWIND** pattern —
-transaction-locally restore the pre-migration state, let RED demonstrate the disease against it, then
-re-apply and let GREEN prove the cure. Already applied to `chat_reads`, `dm_reads_identity_lock`,
-`delete_project`, `accept_invitation` and `role_title_match_anchored`. Both new files say so in their
-headers. They were **excluded from the 534** for that reason; the 534 is the 15 established suites.
+**TWO FILES DO NOT RUN AT ALL, and it is worse than "some assertions fail."** The two avatars proofs
+were written *before* their migrations, and post-apply they **abort mid-transaction and emit no
+verdict whatsoever** — one during RED fixture setup, one inside GREEN, both `22023` because their
+fixtures plant the old public-URL-shaped `avatar_url` the rewritten trigger rejects. A careless reader
+sees a SQL error, not a red assertion, which is exactly how a suite rots into being ignored. Both
+headers now record the precise failing line and error. They are **excluded from the 547**.
 
-**`avatars_upload_rls` and `profile_and_avatar` are landmine files.** The first now proves the
-reference rule in *both* directions, so a folder-level "simplification" of
-`avatars_select_shared_workspace` fails loudly (S06) and reverting the policy fails loudly (S04). The
-second **re-creates `members_validate_profile` inside its own transaction**, so if that rule ever
-changes again it must change there too — the same trap already documented for
-`private._looks_like_role_title`.
+The cure is the **REWIND** pattern — transaction-locally restore the pre-migration state, let RED
+demonstrate the disease against it, then re-apply and let GREEN prove the cure. Already used by
+`chat_reads`, `dm_reads_identity_lock`, `delete_project`, `accept_invitation`,
+`role_title_match_anchored`, and — as the cleanest worked example — the new
+`guest_scoped_avatar_visibility`, which is why *that* proof still runs 13/13 after its own migration
+shipped. Copy that one when retrofitting the other two.
+
+**Three files are landmines.** `avatars_upload_rls` proves the reference rule in *both* directions, so
+a folder-level "simplification" of `avatars_select_shared_workspace` fails loudly (S06) and reverting
+the policy fails loudly (S04). `profile_and_avatar` **re-creates `members_validate_profile` inside its
+own transaction**, so if that rule changes it must change there too — the same trap documented for
+`private._looks_like_role_title`. And **all three avatars proofs re-create
+`is_visible_avatar_object`**: when `shares_workspace` was dropped they would have failed on the *DDL*,
+not on an assertion, because a `language sql` body is validated at **creation** time. That is a
+confusing failure mode worth recognising quickly.
+
+**Harness guards.** `stripe_sandbox_billing` gained the missing `rolbypassrls` self-check this batch
+(it still passes 45/45, which is itself proof its impersonation was real). `workspace_role_boundary`
+was a **false positive** in the audit's first pass — it guards on `current_user` inside
+`probe`/`probe_val` and *asserts that guard* in A00, which is stronger. And
+`task_attachment_orphan_sweep_age_guard` is **legitimately exempt**: it never impersonates, because it
+exercises a DEFINER cron function as postgres and makes no RLS claim.
 
 ## Known gaps, deliberately deferred
 
@@ -136,9 +189,20 @@ changes again it must change there too — the same trap already documented for
   on the unmade **per-account vs per-workspace** billing decision — see CLAUDE.md.
 - **Recurring tasks** — removed from the UI, column retained, design note in place.
 - Presence/typing channels remain the accepted realtime metadata residual.
-- **CDN residual (new, accepted):** flipping the bucket to private may leave edge-cached copies of
+- **CDN residual (accepted):** flipping the bucket to private may leave edge-cached copies of
   previously-requested avatar objects reachable for their cache TTL, and it cannot un-see an image
   someone already saved. Bounded and small; every NEW object is never public for even one instant.
+- **Guest predicate sync debt (new, deliberate — owner decision 2026-07-22: leave as documented
+  debt).** `private.can_see_member_avatar` (`20260722080911`) and `private._workspace_members_list`
+  (`20260716110514`) now implement the **same guest rule in two places** and can drift. Unifying them
+  means rewriting an RPC carrying 40+ live assertions, which was not worth doing inside a security
+  fix and is not worth doing speculatively. **If you change the guest visibility rule, change it in
+  BOTH** — inline warnings sit on each, plus a CLAUDE.md section. Unify only if it actually causes a
+  problem.
+- **Avatar object filenames are `Math.random()`-derived**, not crypto-random:
+  `sanitize.js uid()` = 8 base36 chars of `Math.random()` + 4 chars of `Date.now()`. Path secrecy is
+  not a security boundary here (RLS is), so this is a residual rather than a hole — but note it if a
+  future change ever makes knowing a path sufficient to read it.
 
 ## Rebuild gaps (honest — read before trusting a from-scratch rebuild)
 
