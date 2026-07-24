@@ -127,6 +127,23 @@ VITE_SUPABASE_URL=https://nqlzjuxqgajeoypyzlnv.supabase.co
 VITE_SUPABASE_ANON_KEY=<anon key>
 ```
 
+> **⚠️ Write `.env` as UTF-8 WITHOUT a BOM (Windows footgun, root-caused 2026-07-24).** PowerShell 5.1's
+> `Set-Content -Encoding utf8` prepends a UTF-8 BOM, which renames the first key to `‹BOM›VITE_SUPABASE_URL`,
+> so `VITE_SUPABASE_URL` is **undefined at build time**. `src/lib/supabase.js` then throws at module top
+> level and rolldown's dead-code elimination strips the **entire app**: `npm run build` exits 0 but emits a
+> ~335 kB **app-less** `index-DrGuCE8m.js` instead of the real ~784 kB `index-DofwQkiD.js`. Write it
+> BOM-less instead:
+
+```powershell
+$c = "VITE_SUPABASE_URL=https://nqlzjuxqgajeoypyzlnv.supabase.co`nVITE_SUPABASE_ANON_KEY=<key>`n"
+[System.IO.File]::WriteAllText("C:\Users\bdstd\Documents\projects\command-center\.env", $c, (New-Object System.Text.UTF8Encoding($false)))
+```
+
+A **build guard in `vite.config.js`** now catches this whole class of bug: if `VITE_SUPABASE_URL` or
+`VITE_SUPABASE_ANON_KEY` is missing (BOM, typo, absent file), `npm run build` **fails loudly** (non-zero
+exit, no bundle) instead of silently shipping an empty app. It checks `process.env` too, so Vercel's
+dashboard env vars satisfy it and production builds unchanged.
+
 Get the anon key one of three ways:
 - **Supabase MCP** (after step 6 auth): call `get_publishable_keys` — it returns the legacy
   `anon` JWT (use that for `VITE_SUPABASE_ANON_KEY`) plus a modern `sb_publishable_…` key

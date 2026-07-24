@@ -69,6 +69,12 @@
   VITE_SUPABASE_URL=https://nqlzjuxqgajeoypyzlnv.supabase.co
   VITE_SUPABASE_ANON_KEY=<anon/publishable key from the Supabase dashboard>
   ```
+  **⚠️ Write `.env` as UTF-8 WITHOUT a BOM.** PowerShell 5.1 `Set-Content -Encoding utf8` adds a BOM that
+  makes `VITE_SUPABASE_URL` undefined at build → `supabase.js` throws at module top level → rolldown DCE
+  strips the whole app → `npm run build` exits 0 but emits a ~335 kB **app-less** bundle (`index-DrGuCE8m.js`)
+  instead of the real ~784 kB `index-DofwQkiD.js` (root-caused 2026-07-24; RESTORE.md §5 has the BOM-less
+  write snippet). A **build guard in `vite.config.js`** now fails the build LOUDLY when either var is missing
+  (it checks `process.env` too, so Vercel builds unchanged), so this can't silently recur.
 
 ### Key files
 - `src/VisualTaskCommandCenter.jsx` — the whole UI (single large file): `AppProvider` (state,
