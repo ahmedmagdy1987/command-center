@@ -91,8 +91,8 @@
    * ------------------------------------------------------------------- */
   --color-text-primary: 247 248 252;   /* #FFFFFF   was text-white, /95, /90, /85 */
   --color-text-secondary: 167 176 197; /* #B5B6BA ~ white/70 over canvas  (/80, /70) */
-  --color-text-muted: 114 125 152;     /* #898A91 ~ white/55 over canvas  (/60, /55, /50) */
-  --color-text-faint: 84 94 120;     /* #696B74 ~ white/40 over canvas  (/45 .. /20) */
+  --color-text-muted: 139 150 177; /* #8B96B1  5.5:1 worst-case */
+  --color-text-faint: 125 135 161; /* #7D87A1  4.5:1 worst-case */
 
   /* ---------------------------------------------------------------------
    * FILLS — the translucent washes that used to be `bg-white/[0.0N]`.
@@ -314,8 +314,8 @@
 
   --color-text-primary: 24 32 51;      /* #17181C */
   --color-text-secondary: 69 80 107;    /* #3A3C44 */
-  --color-text-muted: 107 117 144;       /* #5A5D69 */
-  --color-text-faint: 138 147 171;     /* #6A6D79 */
+  --color-text-muted: 90 100 127; /* #5A647F  5.5:1 */
+  --color-text-faint: 104 113 137; /* #687189  4.5:1 */
 
   --color-scrollbar: rgba(0, 0, 0, 0.15);
   --color-scrollbar-hover: rgba(0, 0, 0, 0.25);
@@ -364,7 +364,7 @@
 
   /* Status colours darken too — the dark-theme brights wash out on white.
    * The -text role converges onto the same value the old sheet hand-wrote. */
-  --color-success: 5 150 105;          /* #059669  fills stay saturated */
+  --color-success: 5 134 97; /* #058661 — darkened so WHITE on a success fill clears 4.5:1 (was 3.77) */
   --color-success-hover: 4 120 87;     /* #047857 */
   --color-success-text: 4 120 87;      /* #047857 */
 
@@ -410,8 +410,8 @@
 
   --color-text-primary: 247 248 252;
   --color-text-secondary: 190 198 216;
-  --color-text-muted: 150 160 184;
-  --color-text-faint: 118 128 152;
+  --color-text-muted: 157 167 191;
+  --color-text-faint: 140 150 174;
 
   --color-fill-subtle: rgba(255, 255, 255, 0.03);
   --color-fill: rgba(255, 255, 255, 0.06);
