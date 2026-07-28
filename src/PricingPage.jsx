@@ -40,7 +40,7 @@ export default function PricingPage({ session }) {
   };
 
   return (
-    <div ref={rootRef} data-surface="dark" className="pp-root min-h-screen bg-canvas text-white relative">
+    <div ref={rootRef} data-surface="dark" className="pp-root min-h-screen bg-canvas text-primary relative">
       <style>{`
 
         /* Entrance (fill: both; static styles = final state, so reduce shows the complete page) */
@@ -196,14 +196,14 @@ export default function PricingPage({ session }) {
             <div className="relative mt-6 flex justify-center gap-3">
               {session ? (
                 <Magnetic>
-                  <Link to="/" className="h-12 px-6 rounded-xl bg-brand-gradient-cta text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
+                  <Link to="/" className="h-12 px-6 rounded-xl bg-brand-gradient-cta text-brand-fg font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
                     Back to Command Center <ArrowRight className="w-4 h-4" />
                   </Link>
                 </Magnetic>
               ) : (
                 <>
                   <Magnetic>
-                    <Link to="/signup" className="h-12 px-6 rounded-xl bg-brand-gradient-cta text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
+                    <Link to="/signup" className="h-12 px-6 rounded-xl bg-brand-gradient-cta text-brand-fg font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
                       Get started free <ArrowRight className="w-4 h-4" />
                     </Link>
                   </Magnetic>
@@ -226,7 +226,7 @@ export default function PricingPage({ session }) {
 const cx = (...xs) => xs.filter(Boolean).join(' ');
 const cycleBtn = (active) =>
   cx('inline-flex items-center h-9 px-4 rounded-full text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text',
-    active ? 'bg-inverse text-inverse-fg' : 'text-muted hover:text-white');
+    active ? 'bg-inverse text-inverse-fg' : 'text-muted hover:text-primary');
 
 function cellFor(row, plan) {
   if (row.type === 'always') return <Check className="w-4 h-4 text-success-text mx-auto" />;
@@ -244,7 +244,7 @@ function PlanCard({ plan, annual, onChoose }) {
   const savings = annualSavings(plan);
   const ctaCls = cx('h-10 w-full rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-[.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text',
     plan.popular
-      ? 'bg-brand-gradient-cta text-white hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110'
+      ? 'bg-brand-gradient-cta text-brand-fg hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110'
       : plan.paid
         ? 'bg-inverse text-inverse-fg hover:bg-inverse/90'
         : 'border border-line bg-fill text-primary hover:bg-fill-strong');
@@ -262,7 +262,7 @@ function PlanCard({ plan, annual, onChoose }) {
         : 'border-line-subtle bg-gradient-to-br from-fill-subtle to-transparent hover:border-brand-hover/25 hover:shadow-xl hover:shadow-brand/40',
     )}>
       {plan.popular && (
-        <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 h-6 rounded-full bg-brand-gradient-cta text-white text-micro font-bold uppercase tracking-widest flex items-center shadow-lg shadow-brand-alt/30">
+        <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 h-6 rounded-full bg-brand-gradient-cta text-brand-fg text-micro font-bold uppercase tracking-widest flex items-center shadow-lg shadow-brand-alt/30">
           Most popular
         </div>
       )}

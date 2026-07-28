@@ -121,7 +121,7 @@ export default function CheckoutScreen({ session }) {
               <>
                 <div className="flex items-center gap-2 mb-1">
                   <Lock className="w-4 h-4 text-brand-text" />
-                  <h3 className="text-base font-semibold text-white">Payment</h3>
+                  <h3 className="text-base font-semibold text-primary">Payment</h3>
                   <span className="ml-auto text-micro font-semibold uppercase tracking-widest text-warning-text/90 bg-warning/10 border border-warning-hover/20 rounded-full px-2 h-5 flex items-center">Coming soon</span>
                 </div>
                 <p className="text-note text-muted leading-relaxed mb-4">
@@ -131,7 +131,7 @@ export default function CheckoutScreen({ session }) {
                   <div>
                     <label htmlFor="checkout-email" className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5 block">Email</label>
                     <input id="checkout-email" type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="you@example.com"
-                      className="w-full bg-input border border-line rounded-xl px-3 h-11 text-sm text-white placeholder-faint outline-none focus:border-brand-hover/50 focus:bg-input-focus transition-colors" />
+                      className="w-full bg-input border border-line rounded-xl px-3 h-11 text-sm text-primary placeholder-faint outline-none focus:border-brand-hover/50 focus:bg-input-focus transition-colors" />
                   </div>
                   {error && (
                     <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-danger/10 border border-danger/20 text-xs text-danger-text">
@@ -139,7 +139,7 @@ export default function CheckoutScreen({ session }) {
                     </div>
                   )}
                   <button type="submit" disabled={busy}
-                    className="w-full h-11 rounded-xl bg-brand-gradient-cta text-white font-semibold text-sm flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-brand-alt/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+                    className="w-full h-11 rounded-xl bg-brand-gradient-cta text-brand-fg font-semibold text-sm flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-brand-alt/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
                     {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : (<>Register interest <ArrowRight className="w-4 h-4" /></>)}
                   </button>
                 </form>
@@ -159,11 +159,11 @@ export default function CheckoutScreen({ session }) {
 const cx = (...xs) => xs.filter(Boolean).join(' ');
 const cycleBtn = (active) =>
   cx('inline-flex items-center h-8 px-3.5 rounded-full text-xs font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-brand-text',
-    active ? 'bg-inverse text-inverse-fg' : 'text-muted hover:text-white');
+    active ? 'bg-inverse text-inverse-fg' : 'text-muted hover:text-primary');
 
 function Shell({ children }) {
   return (
-    <div data-surface="dark" className="min-h-screen bg-canvas text-white relative overflow-hidden px-5 lg:px-8 py-6">
+    <div data-surface="dark" className="min-h-screen bg-canvas text-primary relative overflow-hidden px-5 lg:px-8 py-6">
       <style>{`
         .primary-cta { height: 2.75rem; padding: 0 1.25rem; border-radius: 0.75rem; display:inline-flex; align-items:center; justify-content:center; gap:0.5rem; font-size:0.875rem; font-weight:600; color:#fff; background-image:linear-gradient(to right,#8b5cf6,#d946ef); transition:all .2s; }
         .primary-cta:hover { box-shadow: 0 10px 25px -5px rgba(217,70,239,0.3); }
@@ -175,7 +175,7 @@ function Shell({ children }) {
         <header className="flex items-center justify-between h-12 mb-6">
           <Link to="/" className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand-alt/20">
-              <Sparkles className="w-4 h-4 text-white" />
+              <Sparkles className="w-4 h-4 text-brand-fg" />
             </div>
             <span className="text-[15px] font-semibold font-display tracking-tight">Command Center</span>
           </Link>
@@ -201,7 +201,7 @@ function Centered({ title, body, children, tone }) {
           <CheckCircle2 className="w-6 h-6 text-success-text" />
         </div>
       )}
-      <h2 className="text-lg font-semibold text-white mb-1">{title}</h2>
+      <h2 className="text-lg font-semibold text-primary mb-1">{title}</h2>
       <p className="text-compact text-muted max-w-sm mx-auto mb-5">{body}</p>
       <div className="flex justify-center">{children}</div>
     </div>

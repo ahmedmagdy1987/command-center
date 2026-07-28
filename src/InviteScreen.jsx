@@ -85,7 +85,7 @@ export default function InviteScreen({ session }) {
         // ---- Signed out: sign in or create an account ----
         <>
           <div className="text-center mb-5">
-            <h2 className="text-base font-semibold text-white">{signupMode ? 'Create your account' : 'Sign in to continue'}</h2>
+            <h2 className="text-base font-semibold text-primary">{signupMode ? 'Create your account' : 'Sign in to continue'}</h2>
             <p className="text-meta text-faint mt-1">Use the email your invitation was sent to.</p>
           </div>
           <form onSubmit={submitAuth} className="space-y-4">
@@ -137,7 +137,7 @@ export default function InviteScreen({ session }) {
       ) : (
         // Valid + email matches -> accept
         <div className="text-center">
-          <h2 className="text-base font-semibold text-white mb-1">Join {preview.workspace_name}</h2>
+          <h2 className="text-base font-semibold text-primary mb-1">Join {preview.workspace_name}</h2>
           <p className="text-note text-faint mb-5">You'll be added to this workspace, signed in as {myEmail}.</p>
           {acceptErr && <div className="mb-4"><AuthBanner tone="error">{acceptErr}</AuthBanner></div>}
           <AuthCTA type="button" onClick={accept} busy={accepting} busyLabel="Accepting…" disabled={accepting}>

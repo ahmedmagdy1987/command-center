@@ -16,10 +16,10 @@ import { supabase } from './lib/supabase';
 
 function FullScreenSpinner() {
   return (
-    <div data-surface="dark" className="min-h-screen bg-canvas text-white flex items-center justify-center">
+    <div data-surface="dark" className="min-h-screen bg-canvas text-primary flex items-center justify-center">
       
       <div className="w-12 h-12 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-2xl shadow-brand-alt/30 animate-pulse">
-        <Sparkles className="w-6 h-6 text-white" />
+        <Sparkles className="w-6 h-6 text-brand-fg" />
       </div>
     </div>
   );

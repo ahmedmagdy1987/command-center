@@ -53,7 +53,7 @@ function NavTextLink({ to, className = '', children }) {
   return (
     <Link
       to={to}
-      className={`relative h-9 px-3.5 rounded-lg text-sm font-medium text-secondary hover:text-white items-center transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text after:content-[''] after:absolute after:left-3.5 after:right-3.5 after:bottom-1.5 after:h-px after:bg-gradient-to-r after:from-brand-hover after:to-brand-alt-hover after:origin-left after:scale-x-0 hover:after:scale-x-100 after:transition-transform after:duration-300 motion-reduce:after:transition-none ${className}`}
+      className={`relative h-9 px-3.5 rounded-lg text-sm font-medium text-secondary hover:text-primary items-center transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text after:content-[''] after:absolute after:left-3.5 after:right-3.5 after:bottom-1.5 after:h-px after:bg-gradient-to-r after:from-brand-hover after:to-brand-alt-hover after:origin-left after:scale-x-0 hover:after:scale-x-100 after:transition-transform after:duration-300 motion-reduce:after:transition-none ${className}`}
     >
       {children}
     </Link>
@@ -83,7 +83,7 @@ export function SiteHeader({ session }) {
       <div className="relative max-w-6xl mx-auto px-5 lg:px-8 h-14 flex items-center justify-between">
         <Link to="/" className="group flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
           <div className="w-7 h-7 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand-alt/20 transition-transform duration-300 motion-reduce:transition-none group-hover:scale-110 group-hover:rotate-6">
-            <Sparkles className="w-3.5 h-3.5 text-white" />
+            <Sparkles className="w-3.5 h-3.5 text-brand-fg" />
           </div>
           <span className="text-[15px] font-semibold font-display tracking-tight">Command Center</span>
         </Link>
@@ -111,8 +111,8 @@ function FooterCol({ title, links }) {
         {links.map(([label, to]) => (
           <li key={label}>
             {to.startsWith('mailto:')
-              ? <a href={to} className="inline-block py-1.5 text-muted hover:text-white transition-colors">{label}</a>
-              : <Link to={to} className="inline-block py-1.5 text-muted hover:text-white transition-colors">{label}</Link>}
+              ? <a href={to} className="inline-block py-1.5 text-muted hover:text-primary transition-colors">{label}</a>
+              : <Link to={to} className="inline-block py-1.5 text-muted hover:text-primary transition-colors">{label}</Link>}
           </li>
         ))}
       </ul>
@@ -131,7 +131,7 @@ export function SiteFooter() {
           <div className="max-w-xs">
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 rounded-md bg-brand-gradient flex items-center justify-center">
-                <Sparkles className="w-3 h-3 text-white" />
+                <Sparkles className="w-3 h-3 text-brand-fg" />
               </div>
               <span className="text-secondary font-semibold font-display tracking-tight">Command Center</span>
             </div>

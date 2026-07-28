@@ -19,7 +19,7 @@ const SECTIONS = [
 
 export default function PrivacyPage({ session }) {
   return (
-    <div data-surface="dark" className="min-h-screen bg-canvas text-white flex flex-col">
+    <div data-surface="dark" className="min-h-screen bg-canvas text-primary flex flex-col">
       
       <SiteHeader session={session} />
       <main className="flex-1 w-full max-w-3xl mx-auto px-5 lg:px-8 py-12">

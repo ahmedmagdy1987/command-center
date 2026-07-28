@@ -29,7 +29,7 @@ export default function AuthShell({
   children,
 }) {
   return (
-    <div data-surface="dark" className="au-root min-h-screen bg-canvas text-white flex items-center justify-center p-6 relative overflow-hidden">
+    <div data-surface="dark" className="au-root min-h-screen bg-canvas text-primary flex items-center justify-center p-6 relative overflow-hidden">
       <style>{`
 
         /* Entrance (fill: both; static styles = final state) */
@@ -60,9 +60,9 @@ export default function AuthShell({
         {/* Brand lockup */}
         <div className="au-in flex flex-col items-center mb-8">
           <div className="w-14 h-14 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-2xl shadow-brand-alt/30 mb-4">
-            <Icon className="w-7 h-7 text-white" />
+            <Icon className="w-7 h-7 text-brand-fg" />
           </div>
-          <h1 className="text-2xl font-semibold text-white font-display tracking-tight">{heading}</h1>
+          <h1 className="text-2xl font-semibold text-primary font-display tracking-tight">{heading}</h1>
           {tagline && <p className="text-sm text-faint mt-1 text-center">{tagline}</p>}
         </div>
 
@@ -100,7 +100,7 @@ export function AuthField({ icon: Icon, ...props }) {
       <Icon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-faint pointer-events-none" />
       <input
         {...props}
-        className="w-full bg-input border border-line rounded-xl pl-10 pr-3 h-11 text-sm text-white placeholder-faint outline-none focus:border-brand-hover/60 focus:bg-input-focus focus:ring-2 focus:ring-brand/20 transition-colors"
+        className="w-full bg-input border border-line rounded-xl pl-10 pr-3 h-11 text-sm text-primary placeholder-faint outline-none focus:border-brand-hover/60 focus:bg-input-focus focus:ring-2 focus:ring-brand/20 transition-colors"
       />
     </div>
   );
@@ -130,7 +130,7 @@ export function AuthCTA({ children, busy = false, busyLabel = 'Working…', disa
         type={type}
         onClick={onClick}
         disabled={disabled}
-        className="w-full h-11 rounded-xl bg-brand-gradient-cta text-white font-semibold text-sm flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] disabled:opacity-50 disabled:cursor-not-allowed transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text"
+        className="w-full h-11 rounded-xl bg-brand-gradient-cta text-brand-fg font-semibold text-sm flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] disabled:opacity-50 disabled:cursor-not-allowed transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text"
       >
         {busy ? (<><Loader2 className="w-4 h-4 animate-spin" /> {busyLabel}</>) : children}
       </button>

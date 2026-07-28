@@ -53,6 +53,11 @@ const shortcutLabel = (key) => (IS_MAC ? `⌘${key}` : `Ctrl+${key}`);
    CONSTANTS
 ================================================================================= */
 // Per-assignee color, deterministic from the user id, + the neutral "unassigned" style.
+// DELIBERATELY OUTSIDE the semantic token layer in src/styles/tokens.css. This is a CATEGORICAL
+// palette — its job is to make people distinguishable from each other, not to express meaning or
+// react to the theme. Forcing it through brand/status tokens would collapse seven identities onto
+// one hue. It is consumed as inline style (hex + a 14% `soft` tint), never as a class.
+// Phase 2 may re-tune these hues to sit alongside the Corlyvo palette; that is a separate decision.
 const ASSIGNEE_PALETTE = [
   { hex: '#a78bfa', soft: 'rgba(167,139,250,0.14)' },
   { hex: '#34d399', soft: 'rgba(52,211,153,0.14)' },
@@ -1275,7 +1280,7 @@ function IconButton({ icon: Icon, label, active, onClick }) {
       className={cx(
         'inline-flex items-center justify-center w-9 h-9 rounded-xl transition-all duration-200',
         'border border-line-subtle hover:border-line',
-        active ? 'bg-fill-strong text-white' : 'bg-fill-subtle text-muted hover:bg-fill hover:text-primary',
+        active ? 'bg-fill-strong text-primary' : 'bg-fill-subtle text-muted hover:bg-fill hover:text-primary',
       )}>
       <Icon className="w-4 h-4" />
     </button>
@@ -1355,8 +1360,8 @@ function ChangePasswordModal({ open, onClose }) {
     <div className="fixed inset-0 z-50 bg-overlay backdrop-blur-sm flex items-center justify-center p-4 animate-[fadeIn_.15s_ease]" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-line bg-surface-raised shadow-2xl p-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white font-display">Change password</h3>
-          <button onClick={onClose} className="text-muted hover:text-white"><X className="w-4 h-4" /></button>
+          <h3 className="text-lg font-semibold text-primary font-display">Change password</h3>
+          <button onClick={onClose} className="text-muted hover:text-primary"><X className="w-4 h-4" /></button>
         </div>
 
         {success ? (
@@ -1371,18 +1376,18 @@ function ChangePasswordModal({ open, onClose }) {
             <div>
               <label className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5 block">Current password</label>
               <input type="password" value={current} onChange={e => setCurrent(e.target.value)} required autoFocus
-                className="w-full bg-input border border-line rounded-lg px-3 h-10 text-sm text-white outline-none focus:border-brand-hover/50" />
+                className="w-full bg-input border border-line rounded-lg px-3 h-10 text-sm text-primary outline-none focus:border-brand-hover/50" />
             </div>
             <div>
               <label className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5 block">New password</label>
               <input type="password" value={next} onChange={e => setNext(e.target.value)} required minLength={10}
                 placeholder="At least 10 characters"
-                className="w-full bg-input border border-line rounded-lg px-3 h-10 text-sm text-white placeholder-faint outline-none focus:border-brand-hover/50" />
+                className="w-full bg-input border border-line rounded-lg px-3 h-10 text-sm text-primary placeholder-faint outline-none focus:border-brand-hover/50" />
             </div>
             <div>
               <label className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5 block">Confirm new password</label>
               <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} required
-                className="w-full bg-input border border-line rounded-lg px-3 h-10 text-sm text-white outline-none focus:border-brand-hover/50" />
+                className="w-full bg-input border border-line rounded-lg px-3 h-10 text-sm text-primary outline-none focus:border-brand-hover/50" />
             </div>
 
             {error && (
@@ -1398,7 +1403,7 @@ function ChangePasswordModal({ open, onClose }) {
                 Cancel
               </button>
               <button type="submit" disabled={loading || !current || !next || !confirm}
-                className="flex-1 h-10 rounded-lg bg-brand-gradient-cta text-white font-semibold text-sm hover:shadow-lg hover:shadow-brand-alt/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2">
+                className="flex-1 h-10 rounded-lg bg-brand-gradient-cta text-brand-fg font-semibold text-sm hover:shadow-lg hover:shadow-brand-alt/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2">
                 {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Change'}
               </button>
             </div>
@@ -1606,7 +1611,7 @@ function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onE
           <div className="px-3 pt-1 pb-1.5 text-micro font-medium uppercase tracking-widest text-faint">Mention someone</div>
           {filtered.map((m, i) => (
             <button key={m.userId} type="button" onMouseDown={(ev) => { ev.preventDefault(); pick(m); }} onMouseEnter={() => setActive(i)}
-              className={cx('w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left', i === active ? 'bg-brand/25 text-white' : 'text-primary')}>
+              className={cx('w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left', i === active ? 'bg-brand/25 text-primary' : 'text-primary')}>
               <Avatar name={m.displayName || m.email} userId={m.userId} photoUrl={m.avatarUrl} size={20} />
               <span className="truncate">{m.displayName || m.email}</span>
             </button>
@@ -1985,7 +1990,7 @@ function TaskModal() {
             onChange={e => set({ title: e.target.value })}
             readOnly={!canEditTask}
             maxLength={500}
-            className="w-full bg-transparent text-xl sm:text-2xl font-semibold text-white placeholder-faint outline-none font-display read-only:cursor-default break-words"
+            className="w-full bg-transparent text-xl sm:text-2xl font-semibold text-primary placeholder-faint outline-none font-display read-only:cursor-default break-words"
             placeholder="Task title"
           />
           {t.createdBy && (() => { const cr = resolveAssignee(t.createdBy); return (
@@ -2131,7 +2136,7 @@ function SelectPill({ label, value, options, onChange, color, disabled = false }
       <select value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
         aria-label={label}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-default">
-        {options.map(([v,l]) => <option key={v} value={v} className="bg-surface-raised text-white">{l}</option>)}
+        {options.map(([v,l]) => <option key={v} value={v} className="bg-surface-raised text-primary">{l}</option>)}
       </select>
     </div>
   );
@@ -2230,7 +2235,7 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field', di
                   <button key={String(o[0]) || 'unassigned'} type="button" role="option" aria-selected={isSel}
                     onMouseEnter={() => setActive(i)} onClick={() => choose(o)}
                     className={cx('w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-left transition-colors',
-                      i === active ? 'bg-brand/25 text-white' : 'text-primary hover:bg-fill')}>
+                      i === active ? 'bg-brand/25 text-primary' : 'text-primary hover:bg-fill')}>
                     {av.all ? (
                       <span className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 bg-fill-strong text-muted"><Users className="w-3 h-3" /></span>
                     ) : (
@@ -2260,7 +2265,7 @@ function ToggleChip({ active, onClick, icon: Icon, label, color, disabled = fals
   return (
     <button onClick={onClick} disabled={disabled}
       className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-default',
-        active ? 'text-white' : cx('text-muted border-line bg-fill', !disabled && 'hover:bg-fill-strong'))}
+        active ? 'text-primary' : cx('text-muted border-line bg-fill', !disabled && 'hover:bg-fill-strong'))}
       style={active ? { background: `${color}22`, borderColor: `${color}55`, color } : {}}>
       <Icon className="w-3.5 h-3.5" />{label}
     </button>
@@ -2332,7 +2337,7 @@ function QuickAdd() {
           <input ref={inputRef} value={title} onChange={e => setTitle(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') submit(); }}
             placeholder="What needs to get done?" maxLength={500}
-            className="flex-1 bg-transparent text-lg text-white outline-none placeholder-faint font-display" />
+            className="flex-1 bg-transparent text-lg text-primary outline-none placeholder-faint font-display" />
           <kbd className="text-micro text-faint bg-fill border border-line rounded px-1.5 py-0.5">Enter</kbd>
         </div>
         <div className="p-4 space-y-3">
@@ -2344,7 +2349,7 @@ function QuickAdd() {
             <span className="self-center text-meta font-medium text-faint">Visibility</span>
             <button onClick={() => setPrivacy(privacy === 'private' ? 'workspace' : 'private')}
               className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
-                privacy === 'private' ? 'text-white' : 'text-muted border-line bg-fill')}
+                privacy === 'private' ? 'text-primary' : 'text-muted border-line bg-fill')}
               style={privacy === 'private' ? { background: 'rgba(167,139,250,0.14)', borderColor: '#a78bfa55', color: '#a78bfa' } : {}}>
               <Lock className="w-3 h-3" />{privacy === 'private' ? 'Private' : 'Shared'}
             </button>
@@ -2353,7 +2358,7 @@ function QuickAdd() {
             {Object.values(PRIORITIES).map(p => (
               <button key={p.id} onClick={() => setPriority(p.id)}
                 className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
-                  priority === p.id ? 'text-white' : 'text-muted border-line bg-fill')}
+                  priority === p.id ? 'text-primary' : 'text-muted border-line bg-fill')}
                 style={priority === p.id ? { background: p.bg, borderColor: p.ring, color: p.hex } : {}}>
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: p.hex, boxShadow: `0 0 8px ${p.glow}` }} />{p.label}
               </button>
@@ -2493,7 +2498,7 @@ function CommandPalette() {
           <Command className="w-4 h-4 text-faint" />
           <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)} onKeyDown={handleKey}
             placeholder="Search tasks, messages, or run a command…"
-            className="flex-1 bg-transparent text-base text-white outline-none placeholder-faint" />
+            className="flex-1 bg-transparent text-base text-primary outline-none placeholder-faint" />
           <kbd className="text-micro text-faint bg-fill border border-line rounded px-1.5 py-0.5">Esc</kbd>
         </div>
         <div className="max-h-96 overflow-y-auto py-2">
@@ -2505,7 +2510,7 @@ function CommandPalette() {
                 return (
                   <button key={c.id} onClick={c.run} onMouseEnter={() => setIdx(i)}
                     className={cx('w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm transition-colors',
-                      active ? 'bg-fill-strong text-white' : 'text-secondary hover:bg-fill')}>
+                      active ? 'bg-fill-strong text-primary' : 'text-secondary hover:bg-fill')}>
                     <c.icon className="w-4 h-4" />{c.label}
                   </button>
                 );
@@ -2521,7 +2526,7 @@ function CommandPalette() {
                 return (
                   <button key={t.id} onClick={() => { setEditingTask(t); setPaletteOpen(false); }} onMouseEnter={() => setIdx(ii)}
                     className={cx('w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm transition-colors',
-                      active ? 'bg-fill-strong text-white' : 'text-secondary hover:bg-fill')}>
+                      active ? 'bg-fill-strong text-primary' : 'text-secondary hover:bg-fill')}>
                     <PriorityDot priority={t.priority} />
                     <span className="flex-1 truncate">{t.title}</span>
                     <AssigneeChip assigneeId={t.assigneeId} showLabel={false} />
@@ -2542,7 +2547,7 @@ function CommandPalette() {
                 return (
                   <button key={`${m.kind}-${m.id}`} onClick={() => openMessage(m)} onMouseEnter={() => setIdx(ii)}
                     className={cx('w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm transition-colors',
-                      active ? 'bg-fill-strong text-white' : 'text-secondary hover:bg-fill')}>
+                      active ? 'bg-fill-strong text-primary' : 'text-secondary hover:bg-fill')}>
                     {/* The face says who; the DM/Team glyph stays as the small kind marker. */}
                     <Avatar name={sender.known ? who : ''} userId={m.senderId} photoUrl={sender.avatarUrl} size={20} />
                     <span className="flex-1 min-w-0 truncate">{m.body}</span>
@@ -2581,7 +2586,7 @@ function Sidebar() {
   const item = (id, icon, label, badge) => (
     <button onClick={() => setView(id)}
       className={cx('w-full flex items-center gap-3 px-3 h-10 rounded-xl text-sm transition-all',
-        view === id ? 'bg-fill-strong text-white border border-line' : 'text-muted hover:text-white hover:bg-fill border border-transparent')}>
+        view === id ? 'bg-fill-strong text-primary border border-line' : 'text-muted hover:text-primary hover:bg-fill border border-transparent')}>
       {React.createElement(icon, { className: 'w-4 h-4' })}
       <span className="flex-1 text-left font-medium">{label}</span>
       {badge != null && badge > 0 && (
@@ -2595,10 +2600,10 @@ function Sidebar() {
       <div className="px-5 pt-6 pb-5 border-b border-line-subtle">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand-alt/20">
-            <Sparkles className="w-4 h-4 text-white" />
+            <Sparkles className="w-4 h-4 text-brand-fg" />
           </div>
           <div className="leading-tight">
-            <div className="text-[15px] font-semibold text-white font-display tracking-tight">Command Center</div>
+            <div className="text-[15px] font-semibold text-primary font-display tracking-tight">Command Center</div>
             <div className="text-micro text-faint uppercase tracking-widest">Visual task management</div>
           </div>
         </div>
@@ -2635,7 +2640,7 @@ function Sidebar() {
         <div className="rounded-xl border border-line-subtle bg-fill-subtle p-3">
           <div className="text-micro uppercase tracking-widest text-faint mb-1.5">Overview</div>
           <div className="flex items-baseline gap-2">
-            <div className="text-2xl font-semibold text-white font-display">{counts.all}</div>
+            <div className="text-2xl font-semibold text-primary font-display">{counts.all}</div>
             <div className="text-meta text-faint">open tasks</div>
           </div>
           {counts.overdue > 0 && (
@@ -2710,7 +2715,7 @@ function MobileTabs() {
               {more.map(it => (
                 <button key={it.id} onClick={() => go(it.id)}
                   className={cx('w-full flex items-center gap-3 px-3 h-12 rounded-xl text-left transition-colors',
-                    view === it.id ? 'bg-fill-strong text-white' : 'text-secondary hover:bg-fill')}>
+                    view === it.id ? 'bg-fill-strong text-primary' : 'text-secondary hover:bg-fill')}>
                   <it.icon className="w-4 h-4 shrink-0" />
                   <span className="flex-1 text-sm font-medium">{it.label}</span>
                   {it.badge > 0 && (
@@ -2729,7 +2734,7 @@ function MobileTabs() {
           {primary.map(it => (
             <button key={it.id} onClick={() => go(it.id)}
               className={cx('relative flex-1 min-w-0 py-2.5 flex flex-col items-center justify-center gap-0.5 transition-colors',
-                view === it.id ? 'text-white' : 'text-faint')}>
+                view === it.id ? 'text-primary' : 'text-faint')}>
               <it.icon className="w-5 h-5" />
               {it.badge > 0 && (
                 <span className="absolute top-1.5 left-1/2 translate-x-2 min-w-[14px] h-3.5 px-1 rounded-full bg-danger text-danger-text text-[8px] font-bold leading-none flex items-center justify-center">{it.badge > 9 ? '9+' : it.badge}</span>
@@ -2740,7 +2745,7 @@ function MobileTabs() {
           {more.length > 0 && (
             <button onClick={() => setMoreOpen(o => !o)} aria-label="More destinations" aria-expanded={moreOpen}
               className={cx('relative flex-1 min-w-0 py-2.5 flex flex-col items-center justify-center gap-0.5 transition-colors',
-                moreActive || moreOpen ? 'text-white' : 'text-faint')}>
+                moreActive || moreOpen ? 'text-primary' : 'text-faint')}>
               <MoreHorizontal className="w-5 h-5" />
               {moreBadge > 0 && <span className="absolute top-1.5 left-1/2 translate-x-2 w-2 h-2 rounded-full bg-danger" />}
               <span className="text-[9px] font-medium tracking-wide">More</span>
@@ -3136,7 +3141,7 @@ function CreateWorkspaceForm({ onCreated, submitLabel = 'Create workspace', auto
       <div className="au-in" style={{ animationDelay: '.2s' }}>
         <input value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus={autoFocus}
           placeholder="e.g. Acme Marketing"
-          className="w-full bg-input border border-line rounded-xl px-3 h-11 text-sm text-white placeholder-faint outline-none focus:border-brand-hover/60 focus:bg-input-focus focus:ring-2 focus:ring-brand/20 transition-colors" />
+          className="w-full bg-input border border-line rounded-xl px-3 h-11 text-sm text-primary placeholder-faint outline-none focus:border-brand-hover/60 focus:bg-input-focus focus:ring-2 focus:ring-brand/20 transition-colors" />
       </div>
       {error && <AuthBanner tone="error">{error}</AuthBanner>}
       <div className="au-in" style={{ animationDelay: '.26s' }}>
@@ -3167,13 +3172,13 @@ function ConfirmModal({ open, title, message, confirmLabel = 'Delete', confirmDi
           style={{ animation: 'slideUp .2s ease' }}
           onClick={e => e.stopPropagation()}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}>
-          <h2 className="text-base font-semibold text-white mb-1">{title}</h2>
+          <h2 className="text-base font-semibold text-primary mb-1">{title}</h2>
           {message && <p className="text-xs text-muted mb-4 break-words">{message}</p>}
           <div className="flex items-center justify-end gap-2">
             <button onClick={onClose}
               className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">Cancel</button>
             <button ref={btnRef} onClick={onConfirm} disabled={confirmDisabled}
-              className={cx('h-9 px-4 rounded-xl text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
+              className={cx('h-9 px-4 rounded-xl text-primary text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
                 confirmDisabled ? 'bg-danger/40 text-muted cursor-not-allowed'
                   : tone === 'danger' ? 'bg-danger hover:bg-danger-hover' : 'bg-brand hover:bg-brand-hover')}>
               <Icon className="w-3.5 h-3.5" />{confirmLabel}
@@ -3238,7 +3243,7 @@ function ProjectDeleteModal({ open, project, projects, taskCount, isOwner, onCan
           style={{ animation: 'slideUp .2s ease' }}
           onClick={e => e.stopPropagation()}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); handleCancel(); } }}>
-          <h2 className="text-base font-semibold text-white mb-1 break-words">Delete “{project.name}”?</h2>
+          <h2 className="text-base font-semibold text-primary mb-1 break-words">Delete “{project.name}”?</h2>
 
           {checking && <p className="text-xs text-muted mb-4">Checking for tasks…</p>}
           {errored && <p className="text-xs text-danger-text mb-4">Couldn't check this project's tasks. Please try again.</p>}
@@ -3255,7 +3260,7 @@ function ProjectDeleteModal({ open, project, projects, taskCount, isOwner, onCan
                 <input type="radio" name="pdmode" checked={mode === 'unassign'} disabled={noDestination}
                   onChange={() => setMode('unassign')} className="mt-0.5" />
                 <span className="text-xs text-secondary min-w-0 flex-1">
-                  <span className="font-medium text-white">Keep the tasks</span>
+                  <span className="font-medium text-primary">Keep the tasks</span>
                   {noDestination
                     ? <> — unavailable: this is the only project, so there is nowhere to move them.</>
                     : <> — move them to another project, then delete “{project.name}”.</>}
@@ -3268,7 +3273,7 @@ function ProjectDeleteModal({ open, project, projects, taskCount, isOwner, onCan
                       <select value={destId} onChange={e => { setDest(e.target.value); setMode('unassign'); }}
                         onClick={e => e.stopPropagation()}
                         aria-label="Destination project for the kept tasks"
-                        className="flex-1 min-w-0 h-8 px-2 rounded-lg bg-fill border border-line text-xs text-white outline-none focus:border-brand-hover/50">
+                        className="flex-1 min-w-0 h-8 px-2 rounded-lg bg-fill border border-line text-xs text-primary outline-none focus:border-brand-hover/50">
                         {candidates.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                       </select>
                     </span>
@@ -3286,7 +3291,7 @@ function ProjectDeleteModal({ open, project, projects, taskCount, isOwner, onCan
                 <div className="pt-1">
                   <p className="text-meta text-muted mb-1.5">Type <span className="text-secondary font-medium">{project.name}</span> to confirm:</p>
                   <input autoFocus value={confirmText} onChange={e => setConfirmText(e.target.value)}
-                    className="w-full h-9 px-3 rounded-xl bg-fill border border-line text-xs text-white outline-none focus:border-danger-hover/50"
+                    className="w-full h-9 px-3 rounded-xl bg-fill border border-line text-xs text-primary outline-none focus:border-danger-hover/50"
                     placeholder={project.name} aria-label="Type the project name to confirm deletion" />
                 </div>
               )}
@@ -3297,7 +3302,7 @@ function ProjectDeleteModal({ open, project, projects, taskCount, isOwner, onCan
             <button onClick={handleCancel}
               className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">Cancel</button>
             <button onClick={doConfirm} disabled={!canConfirm}
-              className={cx('h-9 px-4 rounded-xl text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
+              className={cx('h-9 px-4 rounded-xl text-primary text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
                 !canConfirm ? 'bg-fill-strong text-faint cursor-not-allowed'
                   : mode === 'cascade' ? 'bg-danger hover:bg-danger-hover' : 'bg-brand hover:bg-brand-hover')}>
               <Trash2 className="w-3.5 h-3.5" />
@@ -3337,12 +3342,12 @@ function UpgradeModal() {
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); dismissUpgrade(); } }}>
           <div className="flex items-center gap-2 mb-3">
             <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-brand to-brand-alt flex items-center justify-center shrink-0 shadow-lg shadow-brand-alt/25">
-              <Sparkles className="w-4 h-4 text-white" />
+              <Sparkles className="w-4 h-4 text-brand-fg" />
             </span>
             <div className="text-micro font-semibold uppercase tracking-widest text-brand-text/80">{tier.name} feature</div>
             <button onClick={dismissUpgrade} aria-label="Close" className="ml-auto text-faint hover:text-secondary transition-colors"><X className="w-4 h-4" /></button>
           </div>
-          <h2 className="text-base font-semibold text-white mb-1">{meta.isLimit ? meta.label : `Unlock ${meta.label}`}</h2>
+          <h2 className="text-base font-semibold text-primary mb-1">{meta.isLimit ? meta.label : `Unlock ${meta.label}`}</h2>
           {meta.blurb && <p className="text-xs text-muted mb-4 leading-relaxed">{meta.blurb}</p>}
           <div className="rounded-xl border border-line bg-fill-subtle px-3 py-2.5 mb-4 text-note text-muted">
             Included on <span className="font-semibold text-primary">{tier.name}</span> and up.
@@ -3351,7 +3356,7 @@ function UpgradeModal() {
             <button onClick={() => go('/pricing')}
               className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">See all plans</button>
             <button onClick={() => go(`/checkout?plan=${tier.id}`)}
-              className="h-9 px-4 rounded-xl text-white text-xs font-semibold bg-brand-gradient-cta hover:shadow-lg hover:shadow-brand-alt/30 transition-all inline-flex items-center gap-1.5">
+              className="h-9 px-4 rounded-xl text-brand-fg text-xs font-semibold bg-brand-gradient-cta hover:shadow-lg hover:shadow-brand-alt/30 transition-all inline-flex items-center gap-1.5">
               Upgrade to {tier.name}<ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -3377,7 +3382,7 @@ function PlanPreviewBanner() {
       <div className="pointer-events-auto inline-flex items-center gap-2 px-3 h-9 rounded-full border border-warning-hover/30 bg-warning/15 backdrop-blur text-meta text-warning-text shadow-lg">
         <span className="w-1.5 h-1.5 rounded-full bg-warning-hover shrink-0" />
         Previewing the <span className="font-semibold">{entitlements.plan.name}</span> plan
-        <button onClick={exit} className="ml-1 font-semibold text-warning-text hover:text-white underline underline-offset-2 transition-colors">Exit</button>
+        <button onClick={exit} className="ml-1 font-semibold text-warning-text hover:text-primary underline underline-offset-2 transition-colors">Exit</button>
       </div>
     </div>
   );
@@ -3441,7 +3446,7 @@ function ProjectModal({ open, onClose, project }) {
           onClick={e => e.stopPropagation()}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-semibold text-white">{editing ? 'Edit project' : 'New project'}</h2>
+            <h2 className="text-base font-semibold text-primary">{editing ? 'Edit project' : 'New project'}</h2>
             <button type="button" onClick={onClose} className="text-faint hover:text-secondary transition-colors"><X className="w-4 h-4" /></button>
           </div>
 
@@ -3472,7 +3477,7 @@ function ProjectModal({ open, onClose, project }) {
             {PROJECT_ICONS.map(ic => (
               <button key={ic} type="button" onClick={() => setIcon(ic)}
                 className={cx('w-7 h-7 rounded-lg text-sm flex items-center justify-center transition-colors',
-                  icon === ic ? 'bg-fill-strong text-white' : 'bg-fill text-muted hover:bg-fill-strong')}>{ic}</button>
+                  icon === ic ? 'bg-fill-strong text-primary' : 'bg-fill text-muted hover:bg-fill-strong')}>{ic}</button>
             ))}
           </div>
 
@@ -3481,7 +3486,7 @@ function ProjectModal({ open, onClose, project }) {
             <button type="button" onClick={onClose}
               className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">Cancel</button>
             <button type="submit" disabled={busy}
-              className={cx('h-9 px-4 rounded-xl text-xs font-semibold text-white transition-colors', busy ? 'bg-brand/40 cursor-not-allowed' : 'bg-brand hover:bg-brand-hover')}>
+              className={cx('h-9 px-4 rounded-xl text-xs font-semibold text-primary transition-colors', busy ? 'bg-brand/40 cursor-not-allowed' : 'bg-brand hover:bg-brand-hover')}>
               {editing ? 'Save changes' : 'Create project'}
             </button>
           </div>
@@ -3501,7 +3506,7 @@ function CreateWorkspaceModal({ open, onClose }) {
         <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-line bg-surface-raised shadow-2xl p-5"
           style={{ animation: 'slideUp .2s ease' }} onClick={e => e.stopPropagation()}>
           <div className="flex items-center justify-between mb-1">
-            <h2 className="text-base font-semibold text-white">Create workspace</h2>
+            <h2 className="text-base font-semibold text-primary">Create workspace</h2>
             <button onClick={onClose} className="text-faint hover:text-secondary transition-colors"><X className="w-4 h-4" /></button>
           </div>
           <p className="text-xs text-faint mb-4">A fresh space for a team's tasks, projects, and chat. You'll be its owner.</p>
@@ -3521,7 +3526,7 @@ function WorkspaceSwitcher() {
   const [createOpen, setCreateOpen] = useState(false);
   const current = workspaces.find(w => w.id === currentWorkspaceId);
   if (!current) return null;
-  const badgeCls = 'w-4 h-4 rounded-md bg-gradient-to-br from-brand to-brand-alt flex items-center justify-center text-[8px] font-bold text-white shrink-0';
+  const badgeCls = 'w-4 h-4 rounded-md bg-gradient-to-br from-brand to-brand-alt flex items-center justify-center text-[8px] font-bold text-brand-fg shrink-0';
   const initial = (name) => (name || 'W').slice(0, 1).toUpperCase();
   return (
     <div className="relative shrink-0">
@@ -3538,7 +3543,7 @@ function WorkspaceSwitcher() {
             <div className="px-3 py-1.5 text-micro font-medium uppercase tracking-widest text-faint">Workspaces</div>
             {workspaces.map(w => (
               <button key={w.id} onClick={() => { switchWorkspace(w.id); setOpen(false); }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-fill hover:text-white transition-colors">
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-fill hover:text-primary transition-colors">
                 <span className={badgeCls}>{initial(w.name)}</span>
                 <span className="flex-1 truncate text-left">{w.name}</span>
                 {w.id === currentWorkspaceId && <Check className="w-3.5 h-3.5 text-brand-text shrink-0" />}
@@ -3550,7 +3555,7 @@ function WorkspaceSwitcher() {
                 <div className="px-3 py-1.5 text-micro font-medium uppercase tracking-widest text-faint">Invitations</div>
                 {pendingInvites.map(inv => (
                   <button key={inv.id} onClick={() => { setOpen(false); acceptInvitation(inv.token).catch(err => reportError(err, 'invitations.accept')); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-fill hover:text-white transition-colors">
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-fill hover:text-primary transition-colors">
                     <span className="w-4 h-4 rounded-md bg-success/20 border border-success-hover/30 flex items-center justify-center shrink-0"><UserPlus className="w-2.5 h-2.5 text-success-text" /></span>
                     <span className="flex-1 text-left truncate">Join {inv.workspaceName}</span>
                   </button>
@@ -3559,7 +3564,7 @@ function WorkspaceSwitcher() {
             )}
             <div className="my-1 h-px bg-fill-strong" />
             <button onClick={() => { setOpen(false); if (entitlements.atWorkspaceLimit) requestUpgrade('workspaces'); else setCreateOpen(true); }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-fill hover:text-white transition-colors">
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-fill hover:text-primary transition-colors">
               <span className="w-4 h-4 rounded-md border border-dashed border-line-strong flex items-center justify-center shrink-0"><Plus className="w-2.5 h-2.5" /></span>
               <span className="flex-1 text-left">Create workspace</span>
             </button>
@@ -3595,7 +3600,7 @@ function TopBar() {
       <div className="flex items-center gap-2 px-4 lg:px-6 h-14">
         <div className="lg:hidden flex items-center gap-2 mr-2">
           <div className="w-7 h-7 rounded-md bg-brand-gradient flex items-center justify-center">
-            <Sparkles className="w-3.5 h-3.5 text-white" />
+            <Sparkles className="w-3.5 h-3.5 text-brand-fg" />
           </div>
         </div>
 
@@ -3605,7 +3610,7 @@ function TopBar() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-faint pointer-events-none" />
           <input id="global-search" value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
             placeholder="Search tasks… ( / )"
-            className="search-input w-full bg-input border border-line rounded-xl pl-9 pr-8 h-9 text-sm text-white placeholder-faint outline-none focus:border-brand-hover/50 focus:bg-input-focus transition-colors" />
+            className="search-input w-full bg-input border border-line rounded-xl pl-9 pr-8 h-9 text-sm text-primary placeholder-faint outline-none focus:border-brand-hover/50 focus:bg-input-focus transition-colors" />
           {filters.search && (
             <button onClick={() => setFilters(f => ({ ...f, search: '' }))} aria-label="Clear search"
               className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-md flex items-center justify-center text-faint hover:text-secondary hover:bg-fill-strong transition-colors">
@@ -3636,7 +3641,7 @@ function TopBar() {
           <IconButton icon={Command} label={`Command palette (${shortcutLabel('K')})`} onClick={() => setPaletteOpen(true)} />
           <button onClick={() => setQuickAddOpen(true)}
             className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-inverse text-inverse-fg text-xs font-semibold hover:bg-inverse/90 transition-colors">
-            <Plus className="w-3.5 h-3.5" />New<kbd className="hidden sm:inline text-[9px] text-inverse-fg/50 bg-fill-strong rounded px-1 py-0.5">N</kbd>
+            <Plus className="w-3.5 h-3.5" />New<kbd className="hidden sm:inline text-[9px] text-inverse-fg/50 bg-inverse-fg/10 rounded px-1 py-0.5">N</kbd>
           </button>
           <NotificationBell />
           <div className="relative">
@@ -3804,7 +3809,7 @@ function ProfileModal({ onClose }) {
           style={{ animation: 'slideUp .2s ease' }}
           onClick={e => e.stopPropagation()}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); handleClose(); } }}>
-          <h2 className="text-base font-semibold text-white mb-4">Edit profile</h2>
+          <h2 className="text-base font-semibold text-primary mb-4">Edit profile</h2>
 
           <div className="flex items-center gap-3 mb-4">
             <Avatar name={displayName || currentMember?.email} userId={currentMember?.id} photoUrl={preview || avatarPath} size={56} />
@@ -3821,7 +3826,7 @@ function ProfileModal({ onClose }) {
 
           <label className="block text-meta text-muted mb-1">Display name</label>
           <input value={displayName} onChange={e => setDisplayName(e.target.value)} maxLength={60}
-            className="w-full h-9 px-3 mb-3 rounded-xl bg-fill border border-line text-xs text-white outline-none focus:border-brand-hover/50" />
+            className="w-full h-9 px-3 mb-3 rounded-xl bg-fill border border-line text-xs text-primary outline-none focus:border-brand-hover/50" />
 
           <label className="block text-meta text-muted mb-1">Status</label>
           <div className="flex gap-2 mb-2">
@@ -3831,7 +3836,7 @@ function ProfileModal({ onClose }) {
               {statusEmoji || <Plus className="w-3.5 h-3.5 text-faint" />}
             </button>
             <input value={statusText} onChange={e => setStatusText(e.target.value)} maxLength={80} placeholder="What are you up to?" aria-label="Status text"
-              className="flex-1 h-9 px-3 rounded-xl bg-fill border border-line text-xs text-white outline-none focus:border-brand-hover/50" />
+              className="flex-1 h-9 px-3 rounded-xl bg-fill border border-line text-xs text-primary outline-none focus:border-brand-hover/50" />
           </div>
           {/* An INLINE grid, not a floating popover: the modal panel is overflow-y-auto, which would clip an
               absolutely-positioned one. Picking is the only input path — the server accepts emoji only, so a
@@ -3856,7 +3861,7 @@ function ProfileModal({ onClose }) {
 
           <label className="block text-meta text-muted mb-1">Bio</label>
           <textarea value={bio} onChange={e => setBio(e.target.value)} maxLength={280} rows={3}
-            className="w-full px-3 py-2 rounded-xl bg-fill border border-line text-xs text-white outline-none focus:border-brand-hover/50 resize-none" />
+            className="w-full px-3 py-2 rounded-xl bg-fill border border-line text-xs text-primary outline-none focus:border-brand-hover/50 resize-none" />
           <div className="text-micro text-faint text-right mb-3">{bio.length}/280</div>
 
           {err && <p className="text-xs text-danger-text mb-3 break-words">{err}</p>}
@@ -3865,7 +3870,7 @@ function ProfileModal({ onClose }) {
             <button onClick={handleClose}
               className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">Cancel</button>
             <button onClick={save} disabled={busy}
-              className="h-9 px-4 rounded-xl bg-brand hover:bg-brand-hover text-white text-xs font-semibold transition-colors disabled:opacity-50">Save</button>
+              className="h-9 px-4 rounded-xl bg-brand hover:bg-brand-hover text-brand-fg text-xs font-semibold transition-colors disabled:opacity-50">Save</button>
           </div>
         </div>
       </div>
@@ -3905,9 +3910,10 @@ function PersonButton({ personId, children, className, title }) {
  * person has LEFT; for a GUEST the roster is row-scoped server-side (self + task co-participants + DM
  * peers), so an ACTIVE member can be absent — that gets the "limited" state, never a false "has left".
  *
- * Portaled to <body> — which does NOT keep it dark: data-theme is stamped on <html> and AppShell's
- * global [data-theme="light"] overrides match portaled nodes too, so in light mode this panel renders
- * LIGHT like every other modal. (An earlier comment here claimed the opposite; it was wrong.)
+ * Portaled to <body> — which does NOT keep it dark. data-theme is stamped on <html>, and the design
+ * tokens are declared there, so a portaled node inherits the light values like any other node: in
+ * light mode this panel renders LIGHT like every other modal. (An earlier comment claimed the
+ * opposite; it was wrong then, and it is wrong now for a different reason.)
  */
 function ProfileView() {
   const { profileUserId, closeProfile, personOf, startDm, isGuest } = useApp();
@@ -3955,7 +3961,7 @@ function ProfileView() {
                "no longer in this workspace" about an active admin was simply false. */
             <div className="text-center py-4">
               <Avatar name="" userId={profileUserId} size={72} className="mx-auto mb-3" />
-              <h2 className="text-base font-semibold text-white mb-1">{isGuest ? 'Profile unavailable' : 'No longer in this workspace'}</h2>
+              <h2 className="text-base font-semibold text-primary mb-1">{isGuest ? 'Profile unavailable' : 'No longer in this workspace'}</h2>
               <p className="text-xs text-muted">
                 {isGuest
                   ? 'As a guest you can see full profiles only for people on your tasks or in your direct messages.'
@@ -3966,7 +3972,7 @@ function ProfileView() {
             <>
               <div className="flex flex-col items-center text-center">
                 <Avatar name={p.name} userId={p.id} photoUrl={p.avatarUrl} size={72} className="mb-3" />
-                <h2 className="text-base font-semibold text-white break-words">{p.name}{p.isSelf && <span className="text-faint font-normal"> (you)</span>}</h2>
+                <h2 className="text-base font-semibold text-primary break-words">{p.name}{p.isSelf && <span className="text-faint font-normal"> (you)</span>}</h2>
                 <div className="mt-1.5 flex items-center gap-2">
                   <span className="text-micro uppercase tracking-wide px-2 py-0.5 rounded-full border border-line bg-fill text-muted">{p.role}</span>
                 </div>
@@ -3987,14 +3993,14 @@ function ProfileView() {
                   className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">Close</button>
                 {p.isSelf ? (
                   <button onClick={() => setEditing(true)}
-                    className="h-9 px-4 rounded-xl bg-brand hover:bg-brand-hover text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5">
+                    className="h-9 px-4 rounded-xl bg-brand hover:bg-brand-hover text-brand-fg text-xs font-semibold transition-colors inline-flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5" />Edit profile
                   </button>
                 ) : (
                   /* Failure keeps the card OPEN with an inline error — the old handler closed
                      immediately and swallowed the rejection, so a failed start looked like a no-op. */
                   <button onClick={message} disabled={dmBusy}
-                    className="h-9 px-4 rounded-xl bg-brand hover:bg-brand-hover text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
+                    className="h-9 px-4 rounded-xl bg-brand hover:bg-brand-hover text-brand-fg text-xs font-semibold transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
                     <MessageSquare className="w-3.5 h-3.5" />{dmBusy ? 'Opening…' : 'Message'}
                   </button>
                 )}
@@ -4009,7 +4015,7 @@ function ProfileView() {
   );
 }
 function MenuItem({ icon: Icon, children, onClick }) {
-  return <button onClick={onClick} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-fill hover:text-white transition-colors">
+  return <button onClick={onClick} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-fill hover:text-primary transition-colors">
     <Icon className="w-3.5 h-3.5" />{children}
   </button>;
 }
@@ -4025,7 +4031,7 @@ function FilterPill({ label, value, options, onChange }) {
       <select value={value} onChange={e => onChange(e.target.value)}
         aria-label={label}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
-        {options.map(([v,l]) => <option key={v} value={v} className="bg-surface-raised text-white">{l}</option>)}
+        {options.map(([v,l]) => <option key={v} value={v} className="bg-surface-raised text-primary">{l}</option>)}
       </select>
     </div>
   );
@@ -4038,7 +4044,7 @@ function ViewHeader({ title, subtitle, accent }) {
   return (
     <div className="mb-6 flex items-end justify-between gap-4">
       <div>
-        <h1 className="text-2xl lg:text-3xl font-semibold text-white font-display tracking-tight" style={{ letterSpacing: '-0.01em' }}>{title}</h1>
+        <h1 className="text-2xl lg:text-3xl font-semibold text-primary font-display tracking-tight" style={{ letterSpacing: '-0.01em' }}>{title}</h1>
         {subtitle && <p className="text-sm text-faint mt-1">{subtitle}</p>}
       </div>
       {accent && <div className="hidden sm:block text-micro uppercase tracking-widest text-faint">{accent}</div>}
@@ -4053,7 +4059,7 @@ function Card({ children, className, title, subtitle, action, accent }) {
       {(title || action) && (
         <div className="flex items-center justify-between px-5 pt-4 pb-3">
           <div>
-            {title && <h3 className="text-compact font-semibold text-white font-display tracking-tight">{title}</h3>}
+            {title && <h3 className="text-compact font-semibold text-primary font-display tracking-tight">{title}</h3>}
             {subtitle && <p className="text-meta text-faint mt-0.5">{subtitle}</p>}
           </div>
           {action}
@@ -4121,7 +4127,7 @@ function DashboardView() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {top3.map((r, i) => (
               <div key={r.t.id} className="relative">
-                <div className="absolute -top-2 -left-2 z-10 w-7 h-7 rounded-full bg-gradient-to-br from-brand to-brand-alt text-white text-xs font-bold flex items-center justify-center shadow-lg shadow-brand-alt/30 font-display">
+                <div className="absolute -top-2 -left-2 z-10 w-7 h-7 rounded-full bg-gradient-to-br from-brand to-brand-alt text-brand-fg text-xs font-bold flex items-center justify-center shadow-lg shadow-brand-alt/30 font-display">
                   {i + 1}
                 </div>
                 <Tooltip content={`Why: ${scoreRationale(r.t)}`} className="block w-full">
@@ -4208,7 +4214,7 @@ function DashboardView() {
                 </linearGradient>
               </defs>
             </svg>
-            <div className="absolute inset-0 flex items-center justify-center text-lg font-semibold text-white font-display">{progress}%</div>
+            <div className="absolute inset-0 flex items-center justify-center text-lg font-semibold text-primary font-display">{progress}%</div>
           </div>
           <div className="flex-1 grid grid-cols-3 gap-3 text-center">
             <Metric label="Open" value={open.length} />
@@ -4229,7 +4235,7 @@ function StatCard({ label, value, color, icon, onClick }) {
       <div className="absolute top-0 right-0 w-24 h-24 rounded-full opacity-20 blur-2xl" style={{ background: color }} />
       <div className="relative">
         <div className="flex items-center gap-1.5 text-micro uppercase tracking-widest text-faint mb-2">{icon}{label}</div>
-        <div className="text-3xl font-semibold text-white font-display tabular-nums" style={{ color }}>{value}</div>
+        <div className="text-3xl font-semibold text-primary font-display tabular-nums" style={{ color }}>{value}</div>
       </div>
     </Tag>
   );
@@ -4237,7 +4243,7 @@ function StatCard({ label, value, color, icon, onClick }) {
 function Metric({ label, value }) {
   return (
     <div className="rounded-xl border border-line-subtle bg-fill-subtle py-2">
-      <div className="text-xl font-semibold text-white font-display tabular-nums">{value}</div>
+      <div className="text-xl font-semibold text-primary font-display tabular-nums">{value}</div>
       <div className="text-micro uppercase tracking-widest text-faint">{label}</div>
     </div>
   );
@@ -4292,9 +4298,9 @@ function FirstRunPanel() {
       <div className="absolute top-0 right-0 w-72 h-72 rounded-full bg-brand/10 blur-3xl pointer-events-none" />
       <div className="relative max-w-xl">
         <div className="w-11 h-11 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand-alt/25 mb-4">
-          <Sparkles className="w-5 h-5 text-white" />
+          <Sparkles className="w-5 h-5 text-brand-fg" />
         </div>
-        <h2 className="text-2xl font-semibold text-white font-display tracking-tight">Welcome to Command Center</h2>
+        <h2 className="text-2xl font-semibold text-primary font-display tracking-tight">Welcome to Command Center</h2>
         <p className="mt-2 text-sm text-muted leading-relaxed">
           One shared place for who’s doing what — tasks, a board, and your schedule, plus team chat and
           direct messages. Start by adding your first task.
@@ -4417,7 +4423,7 @@ function KanbanColumn({ column, tasks }) {
       <div className="px-4 pt-4 pb-3 border-b border-line-subtle flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="w-1.5 h-1.5 rounded-full" style={{ background: columnAccent, boxShadow: `0 0 8px ${columnAccent}99` }} />
-          <h4 className="text-sm font-semibold text-white font-display tracking-tight">{column.label}</h4>
+          <h4 className="text-sm font-semibold text-primary font-display tracking-tight">{column.label}</h4>
           <span className="text-micro text-faint bg-fill border border-line rounded-md px-1.5 h-4 flex items-center">{tasks.length}</span>
         </div>
       </div>
@@ -4459,7 +4465,7 @@ function PrivateView() {
             <div className="inline-flex items-center gap-1.5 rounded-full border border-line bg-input backdrop-blur px-2.5 h-6 text-micro font-medium uppercase tracking-widest text-secondary mb-3">
               <Lock className="w-3 h-3" />Private · you + assignee
             </div>
-            <h1 className="text-3xl lg:text-4xl font-semibold text-white font-display tracking-tight" style={{letterSpacing:'-0.02em'}}>Private tasks</h1>
+            <h1 className="text-3xl lg:text-4xl font-semibold text-primary font-display tracking-tight" style={{letterSpacing:'-0.02em'}}>Private tasks</h1>
             <p className="text-sm text-muted mt-2 max-w-md">Private tasks are visible only to you and anyone they're assigned to, never the whole workspace.</p>
           </div>
           <button onClick={() => setQuickAddOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-inverse text-inverse-fg text-xs font-semibold hover:bg-inverse/90">
@@ -4527,7 +4533,7 @@ function MyTasksView() {
             <div className="inline-flex items-center gap-1.5 rounded-full border border-success/20 bg-success/10 px-2.5 h-6 text-micro font-medium uppercase tracking-widest text-success-text mb-3">
               <UserCog className="w-3 h-3" />Assigned to me
             </div>
-            <h1 className="text-3xl lg:text-4xl font-semibold text-white font-display tracking-tight">My Tasks</h1>
+            <h1 className="text-3xl lg:text-4xl font-semibold text-primary font-display tracking-tight">My Tasks</h1>
             <p className="text-sm text-muted mt-2">Everything assigned to you. Prioritize and get it done.</p>
           </div>
           <button onClick={() => setQuickAddOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-success text-inverse-fg text-xs font-semibold hover:bg-success-hover">
@@ -4606,7 +4612,7 @@ function MatrixQuad({ id, title, subtitle, tasks, accent }) {
       <div className="pointer-events-none absolute inset-x-6 -top-10 h-20 rounded-full opacity-40 blur-2xl" style={{ background: accent }} />
       <div className="relative flex items-start justify-between mb-3">
         <div>
-          <h4 className="text-sm font-semibold text-white font-display" style={{ color: accent }}>{title}</h4>
+          <h4 className="text-sm font-semibold text-primary font-display" style={{ color: accent }}>{title}</h4>
           <p className="text-meta text-faint mt-0.5">{subtitle}</p>
         </div>
         <span className="text-micro text-faint bg-fill border border-line rounded-md px-1.5 h-5 flex items-center">{tasks.length}</span>
@@ -4753,7 +4759,7 @@ function ProjectsView() {
                       {p.icon}
                     </div>
                     <div>
-                      <h3 className="text-base font-semibold text-white font-display">{p.name}</h3>
+                      <h3 className="text-base font-semibold text-primary font-display">{p.name}</h3>
                       <div className="text-meta text-faint">{open.length} open · {done.length} done</div>
                     </div>
                   </div>
@@ -4849,7 +4855,7 @@ function ScheduleView() {
                 'border-line-subtle bg-fill-subtle')}>
               <div className="text-center">
                 <div className="text-micro uppercase tracking-widest text-faint">{weekday}</div>
-                <div className={cx('text-2xl font-semibold font-display tabular-nums leading-none mt-1', d.isToday ? 'text-brand-text' : 'text-white')}>{dayNum}</div>
+                <div className={cx('text-2xl font-semibold font-display tabular-nums leading-none mt-1', d.isToday ? 'text-brand-text' : 'text-primary')}>{dayNum}</div>
                 <div className="text-micro text-faint mt-0.5">{month}</div>
                 {d.isToday && <div className="inline-flex mt-2 text-[9px] font-semibold uppercase tracking-widest text-brand-text">Today</div>}
               </div>
@@ -4946,10 +4952,13 @@ const pickAudioMime = () => {
 let nowPlayingAudio = null;
 
 // Custom, theme-aware voice-note player: play/pause, seekable waveform, elapsed / total.
-// Colors are INLINE rather than Tailwind classes on purpose — light mode here is retrofitted via
-// `[data-theme="light"]` rules that live inside per-view <style> blocks, so a class-based fill only
-// gets themed while the view that declares the rule is mounted (which is why the old bar washed out
-// in a cold-loaded DM). Inline styles read `theme` straight from context and are correct everywhere.
+// Colors are INLINE rather than Tailwind classes. The original reason is now GONE: light mode used to
+// be retrofitted by `[data-theme="light"]` rules living inside per-view <style> blocks, so a
+// class-based fill was only themed while the view that declared the rule was mounted — which is why
+// the bar washed out in a cold-loaded DM. Design tokens are global, so a class-based fill would now
+// be correct everywhere too. Inline is retained because the waveform also needs per-bar computed
+// values; if you convert it, `bg-fill`/`bg-brand` are the right tokens and the cold-load bug cannot
+// return.
 function AudioPlayer({ url, duration, seed, pending }) {
   const { theme } = useApp();
   const light = theme === 'light';
@@ -5111,9 +5120,11 @@ function DayDivider({ label }) {
  *  tint built for dark surfaces, so `soft` background + `hex` text is unreadable on light. Light mode
  *  therefore swaps to a soft hex tint with near-black text (a solid `hex` fill was tried first and read
  *  as a wall of loud color discs). Doing it here — rather than per call site — is what lets every avatar
- *  in the app be light-safe at once. NB on mechanism: inline styles are unaffected by the global
- *  [data-theme="light"] override sheet either way, so theme is read from context — but do NOT repeat the
- *  old claim that light CSS "never reaches portaled modals"; AppShell's sheet matches portals too. */
+ *  in the app be light-safe at once. NB on mechanism: inline styles are unaffected by CSS theming
+ *  either way, so theme is read from context. Do NOT repeat the old claim that light CSS "never
+ *  reaches portaled modals" — tokens are declared on <html>, so portals inherit them like anything
+ *  else. (The per-user `hex`/`soft` pair is a CATEGORICAL identity palette, deliberately outside the
+ *  semantic token layer; see ASSIGNEE_PALETTE.) */
 function Avatar({ name, userId, photoUrl, size = 28, className }) {
   const { theme } = useApp();
   const { signed, requestSign } = useAvatarSign();
@@ -5545,7 +5556,7 @@ function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelet
                     {firstOfGroup && (
                       <div className={cx('flex items-baseline gap-2 mb-1 px-0.5', mine && 'flex-row-reverse')}>
                         {!mine && (
-                          <PersonButton personId={m.senderId} className="text-note font-semibold text-secondary hover:text-white">
+                          <PersonButton personId={m.senderId} className="text-note font-semibold text-secondary hover:text-primary">
                             {nameOf(m.senderId)}
                           </PersonButton>
                         )}
@@ -5570,7 +5581,7 @@ function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelet
       </div>
       {showJump && (
         <button onClick={jump} aria-label="Jump to latest"
-          className="absolute bottom-3 right-3 z-10 w-9 h-9 rounded-full bg-surface-raised border border-line shadow-xl flex items-center justify-center text-secondary hover:text-white hover:border-line-strong">
+          className="absolute bottom-3 right-3 z-10 w-9 h-9 rounded-full bg-surface-raised border border-line shadow-xl flex items-center justify-center text-secondary hover:text-primary hover:border-line-strong">
           <ChevronDown className="w-4 h-4" />
         </button>
       )}
@@ -6041,18 +6052,6 @@ function ChatView() {
 
   return (
     <div className="cc-chat flex flex-col h-[calc(100dvh-9rem)] rounded-2xl border border-line bg-surface overflow-hidden">
-      <style>{`
-        [data-theme="light"] .cc-chat .bg-violet-500\\/20 { background: #ede9fe !important; }
-        [data-theme="light"] .cc-chat .border-violet-500\\/25 { border-color: #c4b5fd !important; }
-        [data-theme="light"] .cc-chat .bg-violet-500\\/25 { background: rgba(124,58,237,0.16) !important; }
-        [data-theme="light"] .cc-chat .border-violet-400\\/30 { border-color: rgba(124,58,237,0.4) !important; }
-        [data-theme="light"] .cc-chat .bg-violet-500\\/10 { background: #f3e8ff !important; }
-        [data-theme="light"] .cc-chat .border-violet-500\\/20 { border-color: #e9d5ff !important; }
-        [data-theme="light"] .cc-chat .text-violet-300\\/70 { color: #7c3aed !important; }
-        [data-theme="light"] .cc-chat .bg-violet-400 { background: #7c3aed !important; }
-        [data-theme="light"] .cc-chat .bg-violet-400\\/70 { background: #7c3aed !important; }
-        [data-theme="light"] .cc-chat .bg-white\\/\\[0\\.05\\] { background: rgba(0,0,0,0.06) !important; }
-      `}</style>
       <div className="px-4 py-3 border-b border-line-subtle flex items-center gap-2.5 shrink-0">
         <span className="w-7 h-7 rounded-lg bg-brand/15 border border-brand/25 flex items-center justify-center text-brand-text text-sm font-semibold shrink-0">#</span>
         <div className="min-w-0 flex-1">
@@ -6181,7 +6180,7 @@ function DirectMessagesView() {
                 {peers.map(m => {
                   return (
                     <button key={m.userId} onClick={() => onPick(m.userId)}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-fill hover:text-white transition-colors">
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-fill hover:text-primary transition-colors">
                       {/* Deliberately NOT a PersonButton: this row's job is "start a DM" and it is already
                           a <button>. A profile button inside it would be invalid DOM and fight the picker. */}
                       <Avatar name={m.displayName || m.email} userId={m.userId} photoUrl={m.avatarUrl} size={20} />
@@ -6240,14 +6239,6 @@ function DirectMessagesView() {
 
   return (
     <div className="cc-chat h-[calc(100dvh-9rem)] rounded-2xl border border-line bg-surface overflow-hidden flex">
-      <style>{`
-        [data-theme="light"] .cc-chat .bg-violet-500\\/20 { background: #ede9fe !important; }
-        [data-theme="light"] .cc-chat .border-violet-500\\/25 { border-color: #c4b5fd !important; }
-        [data-theme="light"] .cc-chat .bg-violet-500\\/25 { background: rgba(124,58,237,0.16) !important; }
-        [data-theme="light"] .cc-chat .border-violet-400\\/30 { border-color: rgba(124,58,237,0.4) !important; }
-        [data-theme="light"] .cc-chat .bg-white\\/\\[0\\.05\\] { background: rgba(0,0,0,0.06) !important; }
-        [data-theme="light"] .cc-chat .bg-violet-400\\/70 { background: #7c3aed !important; }
-      `}</style>
       {/* List: always shown on lg; on small screens shown only when no thread is open */}
       <aside className={cx('w-full lg:w-80 lg:shrink-0 lg:border-r border-line-subtle h-full', active ? 'hidden lg:flex lg:flex-col' : 'flex flex-col')}>
         {ConversationList}
@@ -6648,9 +6639,10 @@ function DmThread({ conversationId, peerId, onBack }) {
  *  Creation is the path today; joining by invitation comes in a later phase. */
 function OnboardingScreen({ onSignOut }) {
   const { pendingInvites, acceptInvitation } = useApp();
-  // Deliberately dark-only on AuthShell, like the rest of the pre-app funnel: this route renders
-  // with no app chrome, so it carries no data-theme — the app's light-mode overrides can't reach
-  // it, and it stays coherent whichever theme the app is in.
+  // Deliberately dark-only on AuthShell, like the rest of the pre-app funnel. This used to work by
+  // accident (the route renders with no app chrome, so the app's light-mode <style> was unmounted).
+  // Tokens are global, so the intent is now DECLARED: AuthShell's root carries data-surface="dark",
+  // which re-declares the dark palette for its subtree whatever <html data-theme> says.
   return (
     <AuthShell
       icon={FolderKanban}
@@ -6665,7 +6657,7 @@ function OnboardingScreen({ onSignOut }) {
               <div key={inv.id} className="flex items-center justify-between gap-2">
                 <div className="text-sm text-primary truncate">Join <span className="font-semibold">{inv.workspaceName}</span></div>
                 <button onClick={() => acceptInvitation(inv.token).catch(err => reportError(err, 'invitations.accept'))}
-                  className="shrink-0 h-8 px-3 rounded-lg bg-success hover:bg-success-hover text-white text-xs font-semibold active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-success-text">Accept</button>
+                  className="shrink-0 h-8 px-3 rounded-lg bg-success hover:bg-success-hover text-brand-fg text-xs font-semibold active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-success-text">Accept</button>
               </div>
             ))}
           </div>
@@ -6798,13 +6790,13 @@ function MembersView() {
             {['member', 'guest'].map(r => (
               <button key={r} type="button" role="radio" aria-checked={inviteRole === r} onClick={() => setInviteRole(r)}
                 className={cx('px-3 h-8 rounded-lg text-xs font-medium capitalize transition-colors',
-                  inviteRole === r ? 'bg-fill-strong text-white' : 'text-muted hover:text-secondary')}>
+                  inviteRole === r ? 'bg-fill-strong text-primary' : 'text-muted hover:text-secondary')}>
                 {r}
               </button>
             ))}
           </div>
           <button type="submit" disabled={busy || !email.trim()}
-            className={cx('h-9 px-4 rounded-xl text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors', (busy || !email.trim()) ? 'bg-brand/40 cursor-not-allowed' : 'bg-brand hover:bg-brand-hover')}>
+            className={cx('h-9 px-4 rounded-xl text-primary text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors', (busy || !email.trim()) ? 'bg-brand/40 cursor-not-allowed' : 'bg-brand hover:bg-brand-hover')}>
             <Mail className="w-3.5 h-3.5" />Create invite link
           </button>
         </form>
@@ -6916,11 +6908,11 @@ function AppShell() {
   // flashes the wrong role while memberships load (same gating discipline as workspace resolution).
   if (loading || (currentWorkspaceId && !membershipsLoaded)) {
     return (
-      <div data-surface="dark" className="min-h-screen bg-canvas text-white flex items-center justify-center">
+      <div data-surface="dark" className="min-h-screen bg-canvas text-primary flex items-center justify-center">
         
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-2xl shadow-brand-alt/30 animate-pulse">
-            <Sparkles className="w-6 h-6 text-white" />
+            <Sparkles className="w-6 h-6 text-brand-fg" />
           </div>
           <div className="text-sm text-muted">Loading your workspace…</div>
         </div>
@@ -6946,116 +6938,7 @@ function AppShell() {
   }
 
   return (
-    <div className="min-h-screen flex bg-[#070810] text-white" data-theme={theme}>
-      <style>{`
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes fadeSlideOut { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(-6px) scale(0.97); } }
-        ::-webkit-scrollbar { width: 10px; height: 10px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
-        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.12); border: 2px solid transparent; background-clip: padding-box; }
-        .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        select option { color: white; background: #0f1017; }
-        kbd { font-family: 'Outfit', sans-serif; }
-        :root:not([data-theme="light"]) input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.6); cursor: pointer; }
-        [data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.6; }
-        [data-theme="light"] { color-scheme: light; }
-        [data-theme="light"] body, [data-theme="light"] { background: #f6f5f2 !important; color: #17181c !important; }
-        [data-theme="light"] .bg-\\[\\#070810\\] { background: #f6f5f2 !important; }
-        [data-theme="light"] .bg-\\[\\#0a0b11\\] { background: #fbfaf7 !important; border-color: rgba(0,0,0,0.06) !important; }
-        [data-theme="light"] .bg-\\[\\#0a0b11\\]\\/80 { background: rgba(251,250,247,0.9) !important; }
-        [data-theme="light"] .bg-\\[\\#0a0b11\\]\\/95 { background: rgba(251,250,247,0.95) !important; }
-        [data-theme="light"] .bg-\\[\\#0f1017\\] { background: #ffffff !important; color: #17181c !important; }
-        [data-theme="light"] .text-white, [data-theme="light"] .text-white\\/95, [data-theme="light"] .text-white\\/90, [data-theme="light"] .text-white\\/85 { color: #17181c !important; }
-        [data-theme="light"] .text-white\\/70, [data-theme="light"] .text-white\\/80 { color: #3a3c44 !important; }
-        [data-theme="light"] .text-white\\/60, [data-theme="light"] .text-white\\/55, [data-theme="light"] .text-white\\/50 { color: #5a5d69 !important; }
-        [data-theme="light"] .text-white\\/45, [data-theme="light"] .text-white\\/40, [data-theme="light"] .text-white\\/35 { color: #6a6d79 !important; }
-        [data-theme="light"] .text-white\\/30, [data-theme="light"] .text-white\\/25, [data-theme="light"] .text-white\\/20 { color: #6f7280 !important; }
-        [data-theme="light"] [class*="placeholder-white"]::placeholder { color: rgba(0,0,0,0.45) !important; }
-        [data-theme="light"] .border-white\\/15, [data-theme="light"] .border-white\\/20 { border-color: rgba(0,0,0,0.14) !important; }
-        [data-theme="light"] select option { color: #17181c !important; background: #ffffff !important; }
-        /* Accent TEXT: dark-mode accents are bright (readable on dark) but wash out on light-tinted
-           surfaces — mention pills, the recurrence preview chip, badges, links, the DM "Seen" tick,
-           and error text. Darken them for light mode (the heroes are re-exempted below). */
-        [data-theme="light"] .text-violet-100, [data-theme="light"] .text-violet-200, [data-theme="light"] .text-violet-300, [data-theme="light"] .text-violet-400, [data-theme="light"] .text-violet-400\\/80, [data-theme="light"] .text-violet-300\\/70, [data-theme="light"] .text-violet-300\\/80, [data-theme="light"] .text-violet-200\\/90, [data-theme="light"] .text-violet-200\\/80, [data-theme="light"] .text-violet-100\\/90 { color: #6d28d9 !important; }
-        [data-theme="light"] .text-emerald-200, [data-theme="light"] .text-emerald-300, [data-theme="light"] .text-emerald-400, [data-theme="light"] .text-emerald-300\\/80 { color: #047857 !important; }
-        [data-theme="light"] .text-amber-100, [data-theme="light"] .text-amber-200, [data-theme="light"] .text-amber-300 { color: #b45309 !important; }
-        [data-theme="light"] .text-sky-300, [data-theme="light"] .text-sky-400 { color: #0369a1 !important; }
-        [data-theme="light"] .text-rose-200, [data-theme="light"] .text-rose-300, [data-theme="light"] .text-rose-400, [data-theme="light"] .text-rose-300\\/70, [data-theme="light"] .text-rose-300\\/80, [data-theme="light"] .text-rose-300\\/90, [data-theme="light"] .text-rose-100\\/90 { color: #be123c !important; }
-        [data-theme="light"] .hover\\:text-violet-200:hover { color: #6d28d9 !important; }
-        [data-theme="light"] .hover\\:text-rose-200:hover, [data-theme="light"] .hover\\:text-rose-300:hover, [data-theme="light"] .hover\\:text-rose-400:hover { color: #be123c !important; }
-        /* EXCEPTION: the Private + My Tasks heroes stay DARK in light mode, so their accent eyebrows
-           must stay BRIGHT (and a touch brighter, since "ASSIGNED TO ME" read weak). Higher specificity
-           than the global accent rules above, so these win inside the heroes. */
-        [data-theme="light"] .from-\\[\\#0d2a20\\] .text-emerald-200, [data-theme="light"] .from-\\[\\#0d2a20\\] .text-emerald-300, [data-theme="light"] .from-\\[\\#0d2a20\\] .text-emerald-400 { color: #a7f3d0 !important; }
-        [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-200, [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-300, [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-400 { color: #c4b5fd !important; }
-        [data-theme="light"] .border-white\\/5, [data-theme="light"] .border-white\\/10, [data-theme="light"] .border-white\\/\\[0\\.06\\], [data-theme="light"] .border-white\\/\\[0\\.08\\] { border-color: rgba(0,0,0,0.08) !important; }
-        [data-theme="light"] .bg-white\\/\\[0\\.03\\], [data-theme="light"] .bg-white\\/\\[0\\.02\\], [data-theme="light"] .bg-white\\/\\[0\\.015\\], [data-theme="light"] .bg-white\\/\\[0\\.01\\], [data-theme="light"] .bg-white\\/\\[0\\.005\\], [data-theme="light"] .bg-white\\/5 { background: rgba(0,0,0,0.025) !important; }
-        /* [0.04] lives in the STRONGER group on purpose: it's the Kanban drag-over fill, and mapping it
-           to the same value as the idle [0.015] made the drop-target highlight literally zero-delta. */
-        [data-theme="light"] .bg-white\\/\\[0\\.08\\], [data-theme="light"] .bg-white\\/\\[0\\.06\\], [data-theme="light"] .bg-white\\/\\[0\\.05\\], [data-theme="light"] .bg-white\\/\\[0\\.04\\], [data-theme="light"] .bg-white\\/10, [data-theme="light"] .bg-white\\/15 { background: rgba(0,0,0,0.06) !important; }
-        /* Dropdown active-row + mention-pill accent: a legible violet in light mode (the plain white-alpha wash was near-invisible). */
-        [data-theme="light"] .bg-violet-500\\/25, [data-theme="light"] .bg-violet-500\\/20 { background: rgba(124,58,237,0.16) !important; }
-        [data-theme="light"] .search-input { background: #ffffff !important; border-color: rgba(0,0,0,0.12) !important; color: #17181c !important; }
-        [data-theme="light"] .search-input::placeholder { color: rgba(0,0,0,0.4) !important; }
-        [data-theme="light"] .hover\\:bg-white\\/5:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.03\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.04\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.06\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.07\\]:hover, [data-theme="light"] .hover\\:bg-white\\/10:hover { background: rgba(0,0,0,0.04) !important; }
-        /* Post-merge light gaps (2026-07-18): the @mention pill's hover had no light rule (the !important
-           base swallowed it — hover did nothing); the selected-emoji ring was a washed-out pale violet;
-           and hover:text-white(/80) hovers were dead because only their base classes were remapped. */
-        [data-theme="light"] .hover\\:bg-violet-500\\/30:hover { background: rgba(124,58,237,0.3) !important; }
-        [data-theme="light"] .ring-violet-400\\/50 { --tw-ring-color: rgba(109,40,217,0.55) !important; }
-        [data-theme="light"] .hover\\:text-white\\/80:hover { color: #17181c !important; }
-        [data-theme="light"] .hover\\:text-white:hover { color: #17181c !important; }
-        /* Verified-sweep additions (2026-07-18): remaining unmapped dark-only tokens found by the
-           post-fix audit — surfaces (toast/tooltip), accent-button text, focus affordances, input
-           wells, scrollbars, drag targets, selection states, and alpha steps the base lists missed. */
-        [data-theme="light"] .bg-\\[\\#0f1017\\]\\/90 { background: rgba(255,255,255,0.92) !important; }
-        [data-theme="light"] .bg-black\\/90 { background: #17181c !important; color: #ffffff !important; border-color: rgba(255,255,255,0.15) !important; }
-        [data-theme="light"] .bg-violet-500, [data-theme="light"] .bg-violet-500 .text-white, [data-theme="light"] .bg-rose-500, [data-theme="light"] .bg-rose-500 .text-white, [data-theme="light"] .bg-emerald-500, [data-theme="light"] .bg-emerald-500 .text-white, [data-theme="light"] .from-violet-500, [data-theme="light"] .from-violet-500 .text-white, [data-theme="light"] .from-rose-500, [data-theme="light"] .from-rose-500 .text-white { color: #ffffff !important; }
-        [data-theme="light"] .focus\\:border-violet-400\\/60:focus, [data-theme="light"] .focus\\:border-violet-400\\/50:focus, [data-theme="light"] .focus\\:border-violet-400\\/40:focus { border-color: rgba(109,40,217,0.55) !important; }
-        [data-theme="light"] .focus\\:border-rose-400\\/50:focus { border-color: rgba(190,18,60,0.55) !important; }
-        [data-theme="light"] .focus\\:border-white\\/25:focus { border-color: rgba(0,0,0,0.3) !important; }
-        [data-theme="light"] .bg-black\\/30 { background: rgba(0,0,0,0.05) !important; }
-        [data-theme="light"] .focus\\:bg-black\\/40:focus { background: rgba(0,0,0,0.08) !important; }
-        [data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border: 2px solid transparent; background-clip: padding-box; }
-        [data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); border: 2px solid transparent; background-clip: padding-box; }
-        [data-theme="light"] .border-white\\/25, [data-theme="light"] .border-white\\/30 { border-color: rgba(0,0,0,0.3) !important; }
-        [data-theme="light"] .border-white\\/\\[0\\.04\\], [data-theme="light"] .border-white\\/\\[0\\.07\\] { border-color: rgba(0,0,0,0.08) !important; }
-        [data-theme="light"] .ring-white\\/70 { --tw-ring-color: rgba(0,0,0,0.45) !important; }
-        [data-theme="light"] .hover\\:text-white\\/90:hover { color: #17181c !important; }
-        [data-theme="light"] .hover\\:text-white\\/70:hover { color: #3a3c44 !important; }
-        [data-theme="light"] .focus\\:text-rose-300:focus { color: #be123c !important; }
-        [data-theme="light"] .group:hover .group-hover\\:text-violet-200 { color: #6d28d9 !important; }
-        [data-theme="light"] .hover\\:border-white\\/10:hover, [data-theme="light"] .hover\\:border-white\\/15:hover, [data-theme="light"] .hover\\:border-white\\/20:hover, [data-theme="light"] .hover\\:border-white\\/25:hover { border-color: rgba(0,0,0,0.18) !important; }
-        [data-theme="light"] .hover\\:bg-white\\/\\[0\\.05\\]:hover { background: rgba(0,0,0,0.04) !important; }
-
-        /* Action buttons — keep dark-on-light for "New" button */
-        [data-theme="light"] .bg-white { background: #17181c !important; color: #ffffff !important; }
-        [data-theme="light"] .text-black { color: #ffffff !important; }
-        [data-theme="light"] .hover\\:bg-white\\/90:hover { background: #000 !important; }
-        [data-theme="light"] kbd { background: rgba(255,255,255,0.15) !important; color: rgba(255,255,255,0.7) !important; }
-
-        /* Hero sections (Private + VA) — keep them dark for visual contrast */
-        [data-theme="light"] .from-\\[\\#1a1530\\] { --tw-gradient-from: #2a2245 !important; }
-        [data-theme="light"] .via-\\[\\#14101e\\] { --tw-gradient-via: #1f1a30 !important; }
-        [data-theme="light"] .from-\\[\\#0d2a20\\] { --tw-gradient-from: #134032 !important; }
-        [data-theme="light"] .via-\\[\\#0c1a18\\] { --tw-gradient-via: #0f2820 !important; }
-        [data-theme="light"] .to-\\[\\#0a0b11\\] { --tw-gradient-to: #1a1d28 !important; }
-
-        /* Hero text stays white (since hero bg stays dark) */
-        [data-theme="light"] .from-\\[\\#1a1530\\] *, [data-theme="light"] .from-\\[\\#0d2a20\\] * { color: inherit; }
-        [data-theme="light"] .from-\\[\\#1a1530\\] h1, [data-theme="light"] .from-\\[\\#0d2a20\\] h1 { color: #ffffff !important; }
-        [data-theme="light"] .from-\\[\\#1a1530\\] p, [data-theme="light"] .from-\\[\\#0d2a20\\] p { color: rgba(255,255,255,0.7) !important; }
-        [data-theme="light"] .from-\\[\\#1a1530\\] .bg-black\\/30, [data-theme="light"] .from-\\[\\#0d2a20\\] .bg-black\\/30 { background: rgba(0,0,0,0.3) !important; }
-        [data-theme="light"] .from-\\[\\#1a1530\\] .bg-white, [data-theme="light"] .from-\\[\\#0d2a20\\] .bg-white { background: #ffffff !important; color: #17181c !important; }
-        [data-theme="light"] .from-\\[\\#1a1530\\] .bg-white .text-black, [data-theme="light"] .from-\\[\\#0d2a20\\] .bg-white .text-black { color: #17181c !important; }
-        [data-theme="light"] .from-\\[\\#0d2a20\\] .bg-emerald-500 { background: #10b981 !important; color: #ffffff !important; }
-        [data-theme="light"] .from-\\[\\#0d2a20\\] .bg-emerald-500 .text-black { color: #ffffff !important; }
-        [data-theme="light"] .from-\\[\\#0d2a20\\] .text-white\\/50 { color: rgba(255,255,255,0.6) !important; }
-        [data-theme="light"] .from-\\[\\#1a1530\\] .text-white\\/50 { color: rgba(255,255,255,0.6) !important; }
-        [data-theme="light"] .from-\\[\\#0d2a20\\] .text-white\\/70, [data-theme="light"] .from-\\[\\#1a1530\\] .text-white\\/70 { color: rgba(255,255,255,0.85) !important; }`}</style>
+    <div className="min-h-screen flex bg-canvas text-primary" data-theme={theme}>
 
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0">

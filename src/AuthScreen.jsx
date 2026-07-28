@@ -79,7 +79,7 @@ export default function AuthScreen({ mode = 'signin', initialSignup = false }) {
   return (
     <AuthShell>
       <div className="text-center mb-5">
-        <h2 className="text-base font-semibold text-white">{heading}</h2>
+        <h2 className="text-base font-semibold text-primary">{heading}</h2>
         <p className="text-meta text-faint mt-1">{subheading}</p>
       </div>
 

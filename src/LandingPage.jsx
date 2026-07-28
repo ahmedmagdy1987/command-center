@@ -128,7 +128,7 @@ function LiveBoard() {
               <div className="relative">
                 <div className="lp-dragGlow absolute -inset-1 rounded-xl bg-brand/25" style={{ opacity: 0 }} />
                 <GhostCard w1="72%" w2="44%" color="#a78bfa" avatar="linear-gradient(135deg,#8b5cf6,#d946ef)" dot="#fbbf24" solid className="lp-dragCard relative shadow-xl shadow-lg" style={{ opacity: 0 }} />
-                <MousePointer2 className="lp-cursor absolute left-[58%] top-[46%] w-4 h-4 text-white drop-shadow-md" fill="white" style={{ opacity: 0 }} />
+                <MousePointer2 className="lp-cursor absolute left-[58%] top-[46%] w-4 h-4 text-primary drop-shadow-md" fill="white" style={{ opacity: 0 }} />
               </div>
             </div>
           </div>
@@ -213,7 +213,7 @@ export default function LandingPage() {
   useRevealOnScroll(rootRef);
 
   return (
-    <div ref={rootRef} data-surface="dark" className="lp-root min-h-screen bg-canvas text-white relative">
+    <div ref={rootRef} data-surface="dark" className="lp-root min-h-screen bg-canvas text-primary relative">
       <style>{`
 
         /* ---------- Hero entrance choreography (fill: both; static styles = final state) ---------- */
@@ -350,7 +350,7 @@ export default function LandingPage() {
             </p>
             <div className="lp-in mt-6 flex flex-wrap items-center gap-3" style={{ animationDelay: '.52s' }}>
               <Magnetic>
-                <Link to="/signup" className="h-11 px-6 rounded-xl bg-brand-gradient-cta text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
+                <Link to="/signup" className="h-11 px-6 rounded-xl bg-brand-gradient-cta text-brand-fg font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
                   Get organized free <ArrowRight className="w-4 h-4" />
                 </Link>
               </Magnetic>
@@ -396,7 +396,7 @@ export default function LandingPage() {
                   <div className="relative w-10 h-10 rounded-xl bg-brand/10 border border-brand-hover/20 flex items-center justify-center mb-3 transition-colors duration-300 group-hover:bg-brand/20 group-hover:border-brand-hover/40">
                     <f.icon className="w-5 h-5 text-brand-text transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6" />
                   </div>
-                  <h3 className="relative text-base font-semibold text-white">{f.title}</h3>
+                  <h3 className="relative text-base font-semibold text-primary">{f.title}</h3>
                   <p className="relative mt-1 text-compact text-muted leading-relaxed">{f.body}</p>
                 </div>
               </div>
@@ -413,7 +413,7 @@ export default function LandingPage() {
               <div key={s.n} data-lp-reveal style={{ '--lp-d': `${i * 110}ms` }}>
                 <div className="group h-full rounded-2xl border border-line-subtle bg-fill-subtle p-5 transition-all duration-300 hover:-translate-y-1 hover:border-line">
                   <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand to-brand-alt flex items-center justify-center text-sm font-bold mb-3 shadow-lg shadow-brand/50 transition-transform duration-300 group-hover:scale-110">{s.n}</div>
-                  <h3 className="text-base font-semibold text-white">{s.title}</h3>
+                  <h3 className="text-base font-semibold text-primary">{s.title}</h3>
                   <p className="mt-1 text-compact text-muted leading-relaxed">{s.body}</p>
                 </div>
               </div>
@@ -435,7 +435,7 @@ export default function LandingPage() {
             <p className="relative mt-2 text-muted">Create a workspace in seconds. It’s free to get started.</p>
             <div className="relative mt-6 flex justify-center gap-3">
               <Magnetic>
-                <Link to="/signup" className="h-12 px-6 rounded-xl bg-brand-gradient-cta text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
+                <Link to="/signup" className="h-12 px-6 rounded-xl bg-brand-gradient-cta text-brand-fg font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
                   Get organized free <ArrowRight className="w-4 h-4" />
                 </Link>
               </Magnetic>

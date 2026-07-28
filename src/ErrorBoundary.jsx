@@ -41,7 +41,7 @@ export default class ErrorBoundary extends React.Component {
             Try again
           </button>
           <button onClick={() => window.location.reload()}
-            className="h-9 px-4 rounded-xl bg-brand hover:bg-brand-hover text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5">
+            className="h-9 px-4 rounded-xl bg-brand hover:bg-brand-hover text-brand-fg text-xs font-semibold transition-colors inline-flex items-center gap-1.5">
             <RefreshCw className="w-3.5 h-3.5" />Reload app
           </button>
         </div>
@@ -51,7 +51,7 @@ export default class ErrorBoundary extends React.Component {
     // fullScreen: the app-level boundary — nothing else is on screen, so provide the backdrop.
     // Inline (per-view): the shell around it is still alive; just fill the content area.
     return this.props.fullScreen ? (
-      <div data-surface="dark" className="min-h-screen bg-canvas text-white flex items-center justify-center p-6">{card}</div>
+      <div data-surface="dark" className="min-h-screen bg-canvas text-primary flex items-center justify-center p-6">{card}</div>
     ) : (
       <div className="flex items-center justify-center py-16 px-4">{card}</div>
     );

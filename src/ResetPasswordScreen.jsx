@@ -81,11 +81,11 @@ export default function ResetPasswordScreen() {
           <div className="w-11 h-11 rounded-xl bg-danger/10 border border-danger/20 flex items-center justify-center mx-auto mb-3">
             <AlertCircle className="w-5 h-5 text-danger-text" />
           </div>
-          <h2 className="text-base font-semibold text-white">Reset link invalid or expired</h2>
+          <h2 className="text-base font-semibold text-primary">Reset link invalid or expired</h2>
           <p className="text-note text-faint mt-1.5 mb-5">This password-reset link is no longer valid. Request a fresh one and try again.</p>
           <Magnetic>
             <Link to="/forgot-password"
-              className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl bg-brand-gradient-cta text-white font-semibold text-sm hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
+              className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl bg-brand-gradient-cta text-brand-fg font-semibold text-sm hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
               Request a new link <ArrowRight className="w-4 h-4" />
             </Link>
           </Magnetic>
@@ -98,7 +98,7 @@ export default function ResetPasswordScreen() {
             <div className="w-11 h-11 rounded-xl bg-brand/10 border border-brand/20 flex items-center justify-center mx-auto mb-3">
               <KeyRound className="w-5 h-5 text-brand-text" />
             </div>
-            <h2 className="text-base font-semibold text-white">Set a new password</h2>
+            <h2 className="text-base font-semibold text-primary">Set a new password</h2>
             <p className="text-meta text-faint mt-1">Choose a new password for your account.</p>
           </div>
 
