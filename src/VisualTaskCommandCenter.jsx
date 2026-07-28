@@ -19,6 +19,7 @@ import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-
 import AuthShell, { AuthBanner, AuthCTA } from './AuthShell';
 import ErrorBoundary from './ErrorBoundary';
 import { reportError, logCaught } from './lib/errors';
+import { CorlyvoLogo, CorlyvoMark } from './brand/Logo';
 
 /* Route <-> view mapping. Each main view gets its own shareable URL. */
 const VIEW_TO_PATH = {
@@ -2601,14 +2602,12 @@ function Sidebar() {
   return (
     <aside className="hidden lg:flex flex-col w-64 shrink-0 border-r border-line-subtle bg-surface">
       <div className="px-5 pt-6 pb-5 border-b border-line-subtle">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand/10">
-            <Sparkles className="w-4 h-4 text-brand-fg" />
-          </div>
-          <div className="leading-tight">
-            <div className="text-[15px] font-semibold text-primary font-brand tracking-tight">Corlyvo</div>
-            <div className="text-micro text-faint uppercase tracking-widest">Visual task management</div>
-          </div>
+        {/* Lockup STACKED over the tagline. The old layout put a square tile beside a
+            text block; the lockup is ~3.9:1, so side-by-side would need ~241px inside a
+            216px content box (w-64 minus px-5) and would squash or clip. */}
+        <div className="flex flex-col gap-1.5">
+          <CorlyvoLogo height={24} className="text-primary" />
+          <div className="text-micro text-faint uppercase tracking-widest">Visual task management</div>
         </div>
       </div>
 
@@ -3602,9 +3601,7 @@ function TopBar() {
     <header className="sticky top-0 z-20 border-b border-line-subtle bg-surface/80 backdrop-blur-xl">
       <div className="flex items-center gap-2 px-4 lg:px-6 h-14">
         <div className="lg:hidden flex items-center gap-2 mr-2">
-          <div className="w-7 h-7 rounded-md bg-brand-gradient flex items-center justify-center">
-            <Sparkles className="w-3.5 h-3.5 text-brand-fg" />
-          </div>
+          <CorlyvoMark size={28} />
         </div>
 
         <WorkspaceSwitcher />
@@ -4302,9 +4299,7 @@ function FirstRunPanel() {
     <div className="relative rounded-3xl border border-line-subtle bg-gradient-to-br from-brand/[0.10] via-brand-alt/[0.05] to-transparent p-6 sm:p-8 overflow-hidden">
       <div className="absolute top-0 right-0 w-72 h-72 rounded-full bg-brand/10 blur-3xl pointer-events-none" />
       <div className="relative max-w-xl">
-        <div className="w-11 h-11 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand/15 mb-4">
-          <Sparkles className="w-5 h-5 text-brand-fg" />
-        </div>
+        <CorlyvoMark size={44} className="mb-4" />
         <h2 className="text-2xl font-semibold text-primary font-display tracking-tight">Welcome to Corlyvo</h2>
         <p className="mt-2 text-sm text-muted leading-relaxed">
           One shared place for who’s doing what — tasks, a board, and your schedule, plus team chat and
@@ -6917,9 +6912,7 @@ function AppShell() {
       <div data-surface="dark" className="min-h-screen bg-canvas text-primary flex items-center justify-center">
         
         <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-2xl shadow-brand/15 animate-pulse">
-            <Sparkles className="w-6 h-6 text-brand-fg" />
-          </div>
+          <CorlyvoMark size={48} className="animate-pulse" title="Corlyvo" />
           <div className="text-sm text-muted">Loading your workspace…</div>
         </div>
       </div>

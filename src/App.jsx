@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Sparkles } from 'lucide-react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { auth, members } from './lib/api';
 import { reportError, logCaught } from './lib/errors';
@@ -13,14 +12,13 @@ import TermsPage from './TermsPage';
 import PrivacyPage from './PrivacyPage';
 import VisualTaskCommandCenter from './VisualTaskCommandCenter';
 import { supabase } from './lib/supabase';
+import { CorlyvoMark } from './brand/Logo';
 
 function FullScreenSpinner() {
   return (
     <div data-surface="dark" className="min-h-screen bg-canvas text-primary flex items-center justify-center">
       
-      <div className="w-12 h-12 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-2xl shadow-brand/15 animate-pulse">
-        <Sparkles className="w-6 h-6 text-brand-fg" />
-      </div>
+      <CorlyvoMark size={48} className="animate-pulse" title="Corlyvo" />
     </div>
   );
 }

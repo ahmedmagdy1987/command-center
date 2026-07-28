@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Sparkles, Check, ArrowRight, Lock, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Check, ArrowRight, Lock, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import {
   PLANS, BILLING_CYCLE, monthlyEquivalent, priceFor, annualSavings, formatMoney,
 } from './lib/plans';
 import { billing } from './lib/billing';
+import { CorlyvoLogo } from './brand/Logo';
 
 /**
  * Checkout-ready screen (/checkout?plan=pro&cycle=monthly). The path from any
@@ -174,10 +175,7 @@ function Shell({ children }) {
       <div className="relative max-w-4xl mx-auto">
         <header className="flex items-center justify-between h-12 mb-6">
           <Link to="/" className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand/10">
-              <Sparkles className="w-4 h-4 text-brand-fg" />
-            </div>
-            <span className="text-[15px] font-semibold font-brand tracking-tight">Corlyvo</span>
+            <CorlyvoLogo height={28} />
           </Link>
           <Link to="/pricing" className="text-note text-muted hover:text-secondary transition-colors">All plans</Link>
         </header>
