@@ -74,9 +74,9 @@
    * surface        : sidebar, top bar, cards resting on the canvas
    * surface-raised : modals, popovers, dropdowns — things that float
    * ------------------------------------------------------------------- */
-  --color-canvas: 7 8 16;              /* #070810 */
-  --color-surface: 10 11 17;           /* #0a0b11 */
-  --color-surface-raised: 15 16 23;    /* #0f1017 */
+  --color-canvas: 12 16 32;              /* #070810 */
+  --color-surface: 19 24 43;           /* #0a0b11 */
+  --color-surface-raised: 25 31 53;    /* #0f1017 */
 
   /* ---------------------------------------------------------------------
    * TEXT — four steps, high to low emphasis.
@@ -89,10 +89,10 @@
    * also what makes the light theme expressible at all: you cannot express
    * "dark grey text" as an alpha of white.
    * ------------------------------------------------------------------- */
-  --color-text-primary: 255 255 255;   /* #FFFFFF   was text-white, /95, /90, /85 */
-  --color-text-secondary: 181 182 186; /* #B5B6BA ~ white/70 over canvas  (/80, /70) */
-  --color-text-muted: 137 138 145;     /* #898A91 ~ white/55 over canvas  (/60, /55, /50) */
-  --color-text-faint: 105 107 116;     /* #696B74 ~ white/40 over canvas  (/45 .. /20) */
+  --color-text-primary: 247 248 252;   /* #FFFFFF   was text-white, /95, /90, /85 */
+  --color-text-secondary: 167 176 197; /* #B5B6BA ~ white/70 over canvas  (/80, /70) */
+  --color-text-muted: 114 125 152;     /* #898A91 ~ white/55 over canvas  (/60, /55, /50) */
+  --color-text-faint: 84 94 120;     /* #696B74 ~ white/40 over canvas  (/45 .. /20) */
 
   /* ---------------------------------------------------------------------
    * FILLS — the translucent washes that used to be `bg-white/[0.0N]`.
@@ -119,9 +119,9 @@
    * current alpha makes the dominant case pixel-identical in BOTH themes and
    * keeps this commit a true no-op.
    * ------------------------------------------------------------------- */
-  --color-border-subtle: rgba(255, 255, 255, 0.06); /* hairlines, dividers    was /5, /[0.04]-/[0.08] */
-  --color-border: rgba(255, 255, 255, 0.10);        /* default control edge   was /10, /[0.12], /15 */
-  --color-border-strong: rgba(255, 255, 255, 0.25); /* focus, active, emphasis was /20-/30 */
+  --color-border-subtle: #1E2438; /* hairlines, dividers    was /5, /[0.04]-/[0.08] */
+  --color-border: #29314C;        /* default control edge   was /10, /[0.12], /15 */
+  --color-border-strong: #3E4870; /* focus, active, emphasis was /20-/30 */
 
   /* ---------------------------------------------------------------------
    * INVERSE — a control that deliberately opposes the theme.
@@ -134,10 +134,10 @@
    * which is exactly why it needs a name of its own.
    * ------------------------------------------------------------------- */
   --color-inverse: 255 255 255;                     /* the fill */
-  --color-inverse-fg: 23 24 28;                     /* text/icon on that fill */
+  --color-inverse-fg: 12 16 32;                     /* text/icon on that fill */
 
   /* Tooltips/toasts deliberately invert too, independent of theme. */
-  --color-tooltip: rgba(0, 0, 0, 0.90);
+  --color-tooltip: rgba(12, 16, 32, 0.94);
   --color-tooltip-fg: 255 255 255;
 
   /* ---------------------------------------------------------------------
@@ -148,8 +148,8 @@
    * needs its own token because an overlay and a form field must diverge in the
    * light theme (a 30%-black field on a white card would be a charcoal slab).
    * ------------------------------------------------------------------- */
-  --color-input: rgba(0, 0, 0, 0.30);
-  --color-input-focus: rgba(0, 0, 0, 0.40);
+  --color-input: rgba(0, 0, 0, 0.22);
+  --color-input-focus: rgba(0, 0, 0, 0.32);
 
   /* ---------------------------------------------------------------------
    * BRAND — identity only.
@@ -159,10 +159,10 @@
    * violet so this commit is a no-op; Phase 2 swaps these three lines (and
    * only these) for Corlyvo Blue.
    * ------------------------------------------------------------------- */
-  --color-brand: 139 92 246;           /* #8B5CF6  violet-500 (Phase 2 -> #5B67F1) */
-  --color-brand-hover: 167 139 250;    /* #A78BFA  violet-400 (Phase 2 -> #747BFF) */
-  --color-brand-text: 196 181 253;     /* #C4B5FD  violet-300 — brand TEXT on dark */
-  --color-brand-text-hover: 221 214 254; /* #DDD6FE violet-200 — link hover; without this,
+  --color-brand: 91 103 241;           /* #5B67F1  Corlyvo Blue */
+  --color-brand-hover: 116 123 255;    /* #747BFF */
+  --color-brand-text: 154 163 255;     /* #9AA3FF  brand TEXT on Night — the fill is too dark to read */
+  --color-brand-text-hover: 186 192 255; /* #DDD6FE violet-200 — link hover; without this,
                                           * shades 200 and 300 both collapse onto -text and
                                           * `hover:text-brand-text` is a no-op. */
   /* The foreground for ANY saturated fill — brand, danger, success, warning, info.
@@ -175,17 +175,17 @@
   /* The SECOND gradient stop. It needs its own name: folding fuchsia into
    * --color-brand would turn every `from-violet-500 to-fuchsia-500` into a solid
    * `from-brand to-brand`, silently deleting the gradient from ~15 surfaces. */
-  --color-brand-alt: 217 70 239;       /* #D946EF  fuchsia-500 (Phase 2 -> Flow Mint) */
+  --color-brand-alt: 61 214 179;       /* #3DD6B3  Flow Mint — the gradient's END stop */
   /* brand-alt carries the same three roles as every other accent. Without these two,
    * `to-brand-alt-hover` / `via-brand-alt-text` compile to NOTHING and the gradient
    * silently loses a stop — which is exactly what happened to the nav underline and the
    * landing "comet" sweep before this was caught. */
-  --color-brand-alt-hover: 232 121 249; /* #E879F9  fuchsia-400 */
-  --color-brand-alt-text: 240 171 252;  /* #F0ABFC  fuchsia-300 */
+  --color-brand-alt-hover: 95 224 196; /* #5FE0C4 */
+  --color-brand-alt-text: 127 234 211;  /* #7FEAD3 */
 
   /* Accent — reserved. Phase 2 introduces Flow Mint for sync/progress moments.
    * Held at brand until then so an accidental early usage is not a visual leak. */
-  --color-accent: 139 92 246;          /* Phase 2 -> #3DD6B3 */
+  --color-accent: 61 214 179;          /* Phase 2 -> #3DD6B3 */
 
   /* ---------------------------------------------------------------------
    * STATUS — SEMANTIC, NOT DECORATIVE. Do not repaint these with brand.
@@ -227,18 +227,18 @@
   --color-warning-surface: rgba(251, 191, 36, 0.12);
   --color-danger-surface: rgba(244, 63, 94, 0.12);
   --color-info-surface: rgba(56, 189, 248, 0.12);
-  --color-brand-surface: rgba(139, 92, 246, 0.16);
+  --color-brand-surface: rgba(91, 103, 241, 0.16);
 
   /* ---------------------------------------------------------------------
    * ELEVATION — quieter than the old fuchsia glow, but Phase 1 keeps the
    * current geometry. Phase 2 sharpens these.
    * ------------------------------------------------------------------- */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.30);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 4px 10px rgba(0, 0, 0, 0.28);
+  --shadow-lg: 0 10px 26px rgba(0, 0, 0, 0.35);
 
   /* Overlay behind modals. */
-  --color-overlay: rgba(0, 0, 0, 0.70);
+  --color-overlay: rgba(6, 8, 18, 0.72);
 
   /* ---------------------------------------------------------------------
    * BRAND GRADIENT — the identity, isolated to ONE definition.
@@ -252,16 +252,16 @@
    * RARE — logo, landing hero, upgrade/celebration. A gradient on every button is
    * what makes a product read as a hobby project.
    * ------------------------------------------------------------------- */
-  --gradient-brand: linear-gradient(135deg, #8b5cf6 0%, #d946ef 50%, #f43f5e 100%);
-  --gradient-brand-cta: linear-gradient(90deg, #8b5cf6 0%, #d946ef 100%);
+  --gradient-brand: linear-gradient(135deg, #5b67f1 0%, #747bff 45%, #3dd6b3 100%);
+  --gradient-brand-cta: linear-gradient(135deg, #5b67f1 0%, #747bff 100%);
 
   /* HERO ISLANDS — the Private and My Tasks banners, which stay dark in BOTH
    * themes. Pair each with `data-surface="inverted"` on the same element: the
    * gradient paints the island and the attribute re-scopes every token inside
    * it, which is what retires the 15 descendant `!important` rules that existed
    * only to re-whiten the heroes' children in light mode. */
-  --gradient-hero-private: linear-gradient(135deg, #1a1530 0%, #14101e 50%, #0a0b11 100%);
-  --gradient-hero-mine: linear-gradient(135deg, #0d2a20 0%, #0c1a18 50%, #0a0b11 100%);
+  --gradient-hero-private: linear-gradient(135deg, #1d2150 0%, #161a3a 55%, #0c1020 100%);
+  --gradient-hero-mine: linear-gradient(135deg, #0e3a34 0%, #0c2a2a 55%, #0c1020 100%);
 
   /* ---------------------------------------------------------------------
    * TYPOGRAPHY — wired here so Phase 3 swaps fonts in one place.
@@ -308,58 +308,59 @@
 [data-theme='light'] {
   color-scheme: light;
 
-  --color-canvas: 246 245 242;         /* #F6F5F2 */
-  --color-surface: 251 250 247;        /* #FBFAF7 */
+  --color-canvas: 246 247 251;         /* #F6F5F2 */
+  --color-surface: 255 255 255;        /* #FBFAF7 */
   --color-surface-raised: 255 255 255; /* #FFFFFF */
 
-  --color-text-primary: 23 24 28;      /* #17181C */
-  --color-text-secondary: 58 60 68;    /* #3A3C44 */
-  --color-text-muted: 90 93 105;       /* #5A5D69 */
-  --color-text-faint: 106 109 121;     /* #6A6D79 */
+  --color-text-primary: 24 32 51;      /* #17181C */
+  --color-text-secondary: 69 80 107;    /* #3A3C44 */
+  --color-text-muted: 107 117 144;       /* #5A5D69 */
+  --color-text-faint: 138 147 171;     /* #6A6D79 */
 
   --color-scrollbar: rgba(0, 0, 0, 0.15);
   --color-scrollbar-hover: rgba(0, 0, 0, 0.25);
 
-  --color-fill-subtle: rgba(0, 0, 0, 0.025);
-  --color-fill: rgba(0, 0, 0, 0.04);
-  --color-fill-strong: rgba(0, 0, 0, 0.07);
+  --color-fill-subtle: rgba(16, 24, 40, 0.025);
+  --color-fill: rgba(16, 24, 40, 0.04);
+  --color-fill-strong: rgba(16, 24, 40, 0.07);
 
-  --color-border-subtle: rgba(0, 0, 0, 0.06);
-  --color-border: rgba(0, 0, 0, 0.08);
-  --color-border-strong: rgba(0, 0, 0, 0.28);
+  --color-border-subtle: #EDF0F6;
+  --color-border: #E2E6F0;
+  --color-border-strong: #C3CAD9;
 
   /* Inverse flips with the theme — that IS the point. */
-  --color-inverse: 23 24 28;
+  --color-inverse: 24 32 51;
   --color-inverse-fg: 255 255 255;
 
   /* Tooltip stays dark in light mode (an inverted tooltip is the convention). */
-  --color-tooltip: rgba(23, 24, 28, 0.94);
+  --color-tooltip: rgba(24, 32, 51, 0.95);
   --color-tooltip-fg: 255 255 255;
 
   /* A field is a subtle recess on light, not a charcoal slab. */
-  --color-input: rgba(0, 0, 0, 0.04);
-  --color-input-focus: rgba(0, 0, 0, 0.07);
+  --color-input: rgba(16, 24, 40, 0.04);
+  --color-input-focus: rgba(16, 24, 40, 0.07);
 
   /* Brand gradient darkens so white text on it still passes contrast. */
-  --gradient-brand: linear-gradient(135deg, #6d28d9 0%, #a21caf 50%, #be123c 100%);
-  --gradient-brand-cta: linear-gradient(90deg, #6d28d9 0%, #a21caf 100%);
+  --gradient-brand: linear-gradient(135deg, #4650d6 0%, #5b67f1 45%, #0f9e80 100%);
+  --gradient-brand-cta: linear-gradient(135deg, #4650d6 0%, #5b67f1 100%);
 
   /* Heroes lift slightly on light so they read as a deliberate dark island
    * rather than a hole — the exact values the old override sheet used. */
-  --gradient-hero-private: linear-gradient(135deg, #2a2245 0%, #1f1a30 50%, #1a1d28 100%);
-  --gradient-hero-mine: linear-gradient(135deg, #134032 0%, #0f2820 50%, #1a1d28 100%);
+  --gradient-hero-private: linear-gradient(135deg, #2a2f63 0%, #212650 55%, #191f3d 100%);
+  --gradient-hero-mine: linear-gradient(135deg, #123f38 0%, #0f3330 55%, #191f3d 100%);
 
   /* Brand darkens for light surfaces — a bright violet on white fails contrast.
-   * This mirrors the old `#6d28d9` override, now expressed once. */
-  --color-brand: 109 40 217;           /* #6D28D9 */
-  --color-brand-hover: 91 33 182;      /* #5B21B6 */
-  --color-brand-text: 109 40 217;      /* converges: a light violet is illegible on white */
-  --color-brand-text-hover: 76 29 149; /* #4C1D95 — darkens on hover, the light-mode direction */
-  --color-brand-alt: 162 28 175;       /* #A21CAF */
-  --color-brand-alt-hover: 192 38 211; /* #C026D3 */
-  --color-brand-alt-text: 162 28 175;  /* converges, like every other -text on light */
+   * Corlyvo Blue #5B67F1 with white text is only ~4.0:1 — fine for large type, NOT for a
+   * 12px button label. #4650D6 takes it to 5.2:1. */
+  --color-brand: 70 80 214;            /* #4650D6  Corlyvo Blue, darkened for white surfaces */
+  --color-brand-hover: 58 68 196;      /* #5B21B6 */
+  --color-brand-text: 70 80 214;      /* converges: a light violet is illegible on white */
+  --color-brand-text-hover: 51 60 176; /* #4C1D95 — darkens on hover, the light-mode direction */
+  --color-brand-alt: 15 158 128;       /* #0F9E80  Flow Mint, darkened for white surfaces */
+  --color-brand-alt-hover: 12 130 106; /* #C026D3 */
+  --color-brand-alt-text: 15 158 128;  /* converges, like every other -text on light */
   --color-brand-fg: 255 255 255;
-  --color-accent: 109 40 217;
+  --color-accent: 15 158 128;
 
   /* Status colours darken too — the dark-theme brights wash out on white.
    * The -text role converges onto the same value the old sheet hand-wrote. */
@@ -383,13 +384,13 @@
   --color-warning-surface: rgba(180, 83, 9, 0.10);
   --color-danger-surface: rgba(190, 18, 60, 0.10);
   --color-info-surface: rgba(3, 105, 161, 0.10);
-  --color-brand-surface: rgba(109, 40, 217, 0.12);
+  --color-brand-surface: rgba(70, 80, 214, 0.10);
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.12);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-md: 0 4px 10px rgba(16, 24, 40, 0.07);
+  --shadow-lg: 0 10px 26px rgba(16, 24, 40, 0.10);
 
-  --color-overlay: rgba(23, 24, 28, 0.45);
+  --color-overlay: rgba(24, 32, 51, 0.45);
 }
 
 /* =============================================================================
@@ -403,34 +404,34 @@
  * Apply with `data-surface="inverted"`.
  * ========================================================================== */
 [data-surface='inverted'] {
-  --color-canvas: 15 16 23;
-  --color-surface: 20 22 32;
-  --color-surface-raised: 26 28 40;
+  --color-canvas: 25 31 53;
+  --color-surface: 31 38 62;
+  --color-surface-raised: 38 46 74;
 
-  --color-text-primary: 255 255 255;
-  --color-text-secondary: 200 202 210;
-  --color-text-muted: 160 163 176;
-  --color-text-faint: 128 132 146;
+  --color-text-primary: 247 248 252;
+  --color-text-secondary: 190 198 216;
+  --color-text-muted: 150 160 184;
+  --color-text-faint: 118 128 152;
 
   --color-fill-subtle: rgba(255, 255, 255, 0.03);
   --color-fill: rgba(255, 255, 255, 0.06);
   --color-fill-strong: rgba(255, 255, 255, 0.12);
 
-  --color-border-subtle: rgba(255, 255, 255, 0.07);
-  --color-border: rgba(255, 255, 255, 0.14);
+  --color-border-subtle: rgba(255, 255, 255, 0.08);
+  --color-border: rgba(255, 255, 255, 0.15);
   --color-border-strong: rgba(255, 255, 255, 0.30);
 
   /* Bright accents are correct here regardless of the outer theme — this island
    * is dark in BOTH themes, so it wants the dark-theme reading colours. Under the
-   * old sheet this was a stack of `.from-[#1a1530] .text-violet-300 { ... }`
+   * old sheet this was a stack of `.from-[#1a1530] .text-violet-300 { ... }` (pre-Corlyvo)
    * descendant overrides; one variable scope replaces all of them. */
-  --color-brand: 167 139 250;
-  --color-brand-hover: 196 181 253;
-  --color-brand-text: 196 181 253;
+  --color-brand: 154 163 255;
+  --color-brand-hover: 186 192 255;
+  --color-brand-text: 186 192 255;
   --color-brand-text-hover: 221 214 254;
-  --color-brand-alt: 217 70 239;
-  --color-brand-alt-hover: 232 121 249;
-  --color-brand-alt-text: 240 171 252;
+  --color-brand-alt: 61 214 179;
+  --color-brand-alt-hover: 95 224 196;
+  --color-brand-alt-text: 127 234 211;
   --color-success: 16 185 129;
   --color-success-hover: 52 211 153;
   --color-success-text: 167 243 208;
@@ -444,10 +445,10 @@
   --color-info-hover: 56 189 248;
   --color-info-text: 125 211 252;
 
-  --color-input: rgba(0, 0, 0, 0.30);
+  --color-input: rgba(0, 0, 0, 0.25);
   --color-input-focus: rgba(0, 0, 0, 0.40);
   --color-inverse: 255 255 255;
-  --color-inverse-fg: 23 24 28;
+  --color-inverse-fg: 12 16 32;
 }
 
 /* =============================================================================

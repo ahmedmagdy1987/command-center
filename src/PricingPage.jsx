@@ -71,7 +71,7 @@ export default function PricingPage({ session }) {
 
       {/* Background glows, clipped in their own layer so the page never scrolls sideways */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
-        <div className="absolute top-[-8rem] left-1/4 w-[32rem] h-[32rem] rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(139,92,246,.14), transparent 72%)', animation: 'ppDrift1 26s ease-in-out infinite alternate' }} />
+        <div className="absolute top-[-8rem] left-1/4 w-[32rem] h-[32rem] rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(91,103,241,.14), transparent 72%)', animation: 'ppDrift1 26s ease-in-out infinite alternate' }} />
         <div className="absolute top-1/3 -right-40 w-[30rem] h-[30rem] rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(217,70,239,.11), transparent 72%)', animation: 'ppDrift2 32s ease-in-out infinite alternate' }} />
       </div>
 
@@ -185,9 +185,9 @@ export default function PricingPage({ session }) {
         {/* CTA band */}
         <section className="relative pb-16">
           <Hairline className="absolute top-0 inset-x-0" />
-          <div data-lp-reveal className="relative overflow-hidden rounded-2xl border border-brand-hover/20 bg-[#0c0d15] p-8 lg:p-12 text-center mt-16">
+          <div data-lp-reveal className="relative overflow-hidden rounded-2xl border border-brand-hover/20 bg-surface p-8 lg:p-12 text-center mt-16">
             <div className="absolute inset-0 bg-gradient-to-br from-brand/15 via-brand-alt/[0.07] to-transparent" aria-hidden="true" />
-            <div className="absolute -top-24 left-1/2 -ml-48 w-96 h-96 rounded-full" aria-hidden="true" style={{ background: 'radial-gradient(closest-side, rgba(167,139,250,.18), transparent 70%)', animation: 'ppDrift1 18s ease-in-out infinite alternate' }} />
+            <div className="absolute -top-24 left-1/2 -ml-48 w-96 h-96 rounded-full" aria-hidden="true" style={{ background: 'radial-gradient(closest-side, rgba(124,140,255,.18), transparent 70%)', animation: 'ppDrift1 18s ease-in-out infinite alternate' }} />
             <div className="absolute top-0 inset-x-0 h-px overflow-hidden" aria-hidden="true">
               <span className="pp-comet absolute top-0 h-px w-60 bg-gradient-to-r from-transparent via-brand-alt-text/80 to-transparent" style={{ opacity: 0 }} />
             </div>
@@ -196,14 +196,14 @@ export default function PricingPage({ session }) {
             <div className="relative mt-6 flex justify-center gap-3">
               {session ? (
                 <Magnetic>
-                  <Link to="/" className="h-12 px-6 rounded-xl bg-brand-gradient-cta text-brand-fg font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
+                  <Link to="/" className="h-12 px-6 rounded-xl bg-brand hover:bg-brand-hover text-brand-fg font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand/20 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
                     Back to Command Center <ArrowRight className="w-4 h-4" />
                   </Link>
                 </Magnetic>
               ) : (
                 <>
                   <Magnetic>
-                    <Link to="/signup" className="h-12 px-6 rounded-xl bg-brand-gradient-cta text-brand-fg font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
+                    <Link to="/signup" className="h-12 px-6 rounded-xl bg-brand hover:bg-brand-hover text-brand-fg font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand/20 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
                       Get started free <ArrowRight className="w-4 h-4" />
                     </Link>
                   </Magnetic>
@@ -244,7 +244,7 @@ function PlanCard({ plan, annual, onChoose }) {
   const savings = annualSavings(plan);
   const ctaCls = cx('h-10 w-full rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-[.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text',
     plan.popular
-      ? 'bg-brand-gradient-cta text-brand-fg hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110'
+      ? 'bg-brand-gradient-cta text-brand-fg hover:shadow-lg hover:shadow-brand/20 hover:brightness-110'
       : plan.paid
         ? 'bg-inverse text-inverse-fg hover:bg-inverse/90'
         : 'border border-line bg-fill text-primary hover:bg-fill-strong');
@@ -258,11 +258,11 @@ function PlanCard({ plan, annual, onChoose }) {
       'relative h-full rounded-2xl border p-5 flex flex-col transition-all duration-300 hover:-translate-y-1',
       plan.popular && 'mt-3 md:mt-0',
       plan.popular
-        ? 'border-brand-hover/40 bg-gradient-to-b from-brand/[0.10] to-fill-subtle shadow-2xl shadow-brand/10 hover:shadow-brand/25'
-        : 'border-line-subtle bg-gradient-to-br from-fill-subtle to-transparent hover:border-brand-hover/25 hover:shadow-xl hover:shadow-brand/40',
+        ? 'border-brand-hover/40 bg-gradient-to-b from-brand/[0.10] to-fill-subtle shadow-2xl shadow-brand/10 hover:shadow-brand/15'
+        : 'border-line-subtle bg-gradient-to-br from-fill-subtle to-transparent hover:border-brand-hover/25 hover:shadow-xl hover:shadow-brand/20',
     )}>
       {plan.popular && (
-        <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 h-6 rounded-full bg-brand-gradient-cta text-brand-fg text-micro font-bold uppercase tracking-widest flex items-center shadow-lg shadow-brand-alt/30">
+        <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 h-6 rounded-full bg-brand-gradient-cta text-brand-fg text-micro font-bold uppercase tracking-widest flex items-center shadow-lg shadow-brand/15">
           Most popular
         </div>
       )}

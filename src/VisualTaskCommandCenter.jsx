@@ -57,11 +57,14 @@ const shortcutLabel = (key) => (IS_MAC ? `⌘${key}` : `Ctrl+${key}`);
 // palette — its job is to make people distinguishable from each other, not to express meaning or
 // react to the theme. Forcing it through brand/status tokens would collapse seven identities onto
 // one hue. It is consumed as inline style (hex + a 14% `soft` tint), never as a class.
-// Phase 2 may re-tune these hues to sit alongside the Corlyvo palette; that is a separate decision.
+// Retuned in Phase 2: the violet (#a78bfa) and fuchsia (#e879f9) entries WERE the old brand
+// identity, so a person keyed to one kept the retired palette alive on every avatar. They are
+// now periwinkle (brand-adjacent) and pink. The other five are neutral hues and are unchanged;
+// what matters here is that the seven stay maximally distinguishable from each other.
 const ASSIGNEE_PALETTE = [
-  { hex: '#a78bfa', soft: 'rgba(167,139,250,0.14)' },
+  { hex: '#7c8cff', soft: 'rgba(124,140,255,0.14)' },
   { hex: '#34d399', soft: 'rgba(52,211,153,0.14)' },
-  { hex: '#e879f9', soft: 'rgba(232,121,249,0.14)' },
+  { hex: '#f472b6', soft: 'rgba(244,114,182,0.14)' },
   { hex: '#38bdf8', soft: 'rgba(56,189,248,0.14)' },
   { hex: '#fb923c', soft: 'rgba(251,146,60,0.14)' },
   { hex: '#f43f5e', soft: 'rgba(244,63,94,0.14)' },
@@ -119,7 +122,7 @@ const STATUSES = {
 // renders no chip (`projects.find(...)` -> undefined). That is the intended graceful degradation.
 
 // Palette + glyphs offered when creating/editing a project.
-const PROJECT_PALETTE = ['#a78bfa','#f472b6','#38bdf8','#34d399','#fb923c','#f43f5e','#facc15','#94a3b8','#64748b','#22d3ee','#c084fc','#4ade80'];
+const PROJECT_PALETTE = ['#7c8cff','#f472b6','#38bdf8','#34d399','#fb923c','#f43f5e','#facc15','#94a3b8','#64748b','#22d3ee','#c084fc','#4ade80'];
 const PROJECT_ICONS = ['◇','◈','◎','☉','✎','↗','♡','◐','⚙','★','✦','⬢'];
 
 const EFFORTS = {
@@ -1403,7 +1406,7 @@ function ChangePasswordModal({ open, onClose }) {
                 Cancel
               </button>
               <button type="submit" disabled={loading || !current || !next || !confirm}
-                className="flex-1 h-10 rounded-lg bg-brand-gradient-cta text-brand-fg font-semibold text-sm hover:shadow-lg hover:shadow-brand-alt/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2">
+                className="flex-1 h-10 rounded-lg bg-brand hover:bg-brand-hover text-brand-fg font-semibold text-sm hover:shadow-lg hover:shadow-brand/15 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2">
                 {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Change'}
               </button>
             </div>
@@ -2026,7 +2029,7 @@ function TaskModal() {
 
           <div className="flex flex-wrap gap-2">
             <ToggleChip active={t.urgent} onClick={() => set({ urgent: !t.urgent })} icon={Zap} label="Urgent" color="#fb923c" disabled={!canEditTask} />
-            <ToggleChip active={t.important} onClick={() => set({ important: !t.important })} icon={Flag} label="Important" color="#a78bfa" disabled={!canEditTask} />
+            <ToggleChip active={t.important} onClick={() => set({ important: !t.important })} icon={Flag} label="Important" color="#7c8cff" disabled={!canEditTask} />
             <ToggleChip active={t.blocked} onClick={() => set({ blocked: !t.blocked })} icon={PauseCircle} label="Blocked" color="#f43f5e" disabled={!canEditTask} />
           </div>
 
@@ -2350,7 +2353,7 @@ function QuickAdd() {
             <button onClick={() => setPrivacy(privacy === 'private' ? 'workspace' : 'private')}
               className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
                 privacy === 'private' ? 'text-primary' : 'text-muted border-line bg-fill')}
-              style={privacy === 'private' ? { background: 'rgba(167,139,250,0.14)', borderColor: '#a78bfa55', color: '#a78bfa' } : {}}>
+              style={privacy === 'private' ? { background: 'rgba(124,140,255,0.14)', borderColor: '#7c8cff55', color: '#7c8cff' } : {}}>
               <Lock className="w-3 h-3" />{privacy === 'private' ? 'Private' : 'Shared'}
             </button>
           </div>
@@ -2599,7 +2602,7 @@ function Sidebar() {
     <aside className="hidden lg:flex flex-col w-64 shrink-0 border-r border-line-subtle bg-surface">
       <div className="px-5 pt-6 pb-5 border-b border-line-subtle">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand-alt/20">
+          <div className="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand/10">
             <Sparkles className="w-4 h-4 text-brand-fg" />
           </div>
           <div className="leading-tight">
@@ -2770,7 +2773,7 @@ function MobileTabs() {
 function notifVisual(type, light) {
   if (type === 'overdue')  return { Icon: AlertCircle, hex: '#f43f5e' };
   if (type === 'due_soon') return { Icon: Clock,       hex: '#fb923c' };
-  return { Icon: Bell, hex: light ? '#6d28d9' : '#c4b5fd' };
+  return { Icon: Bell, hex: light ? '#4650d6' : '#9aa3ff' };
 }
 
 function NotificationToast({ n, light, onOpen, onDismiss }) {
@@ -3067,7 +3070,7 @@ function NotificationBell() {
                                 <tv.Icon className="w-2 h-2" style={{ color: tv.hex }} />
                               </span>
                             )}
-                            {!n.read && <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full" style={{ background: light ? '#7c3aed' : '#a78bfa', boxShadow: `0 0 6px ${light ? 'rgba(124,58,237,0.45)' : 'rgba(167,139,250,0.7)'}` }} />}
+                            {!n.read && <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full" style={{ background: light ? '#4650d6' : '#7c8cff', boxShadow: `0 0 6px ${light ? 'rgba(70,80,214,0.45)' : 'rgba(124,140,255,0.7)'}` }} />}
                           </span>
                           ); })()}
                         <span className="min-w-0 flex-1">
@@ -3341,7 +3344,7 @@ function UpgradeModal() {
           onClick={e => e.stopPropagation()}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); dismissUpgrade(); } }}>
           <div className="flex items-center gap-2 mb-3">
-            <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-brand to-brand-alt flex items-center justify-center shrink-0 shadow-lg shadow-brand-alt/25">
+            <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-brand to-brand-alt flex items-center justify-center shrink-0 shadow-lg shadow-brand/15">
               <Sparkles className="w-4 h-4 text-brand-fg" />
             </span>
             <div className="text-micro font-semibold uppercase tracking-widest text-brand-text/80">{tier.name} feature</div>
@@ -3356,7 +3359,7 @@ function UpgradeModal() {
             <button onClick={() => go('/pricing')}
               className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">See all plans</button>
             <button onClick={() => go(`/checkout?plan=${tier.id}`)}
-              className="h-9 px-4 rounded-xl text-brand-fg text-xs font-semibold bg-brand-gradient-cta hover:shadow-lg hover:shadow-brand-alt/30 transition-all inline-flex items-center gap-1.5">
+              className="h-9 px-4 rounded-xl text-brand-fg text-xs font-semibold bg-brand-gradient-cta hover:shadow-lg hover:shadow-brand/15 transition-all inline-flex items-center gap-1.5">
               Upgrade to {tier.name}<ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -4120,14 +4123,14 @@ function DashboardView() {
     <div className="space-y-6">
       <ViewHeader title="Dashboard" subtitle="Today's ranked priorities, flagged blockers, and where your energy should go." accent={new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric'})} />
 
-      <Card title="Top 3 priorities right now" subtitle="Auto-ranked by priority, due date, urgency, and blockers." accent="#a78bfa">
+      <Card title="Top 3 priorities right now" subtitle="Auto-ranked by priority, due date, urgency, and blockers." accent="#7c8cff">
         {top3.length === 0 ? (
           <EmptyState icon={Sparkles} text="Nothing on fire. Beautiful." />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {top3.map((r, i) => (
               <div key={r.t.id} className="relative">
-                <div className="absolute -top-2 -left-2 z-10 w-7 h-7 rounded-full bg-gradient-to-br from-brand to-brand-alt text-brand-fg text-xs font-bold flex items-center justify-center shadow-lg shadow-brand-alt/30 font-display">
+                <div className="absolute -top-2 -left-2 z-10 w-7 h-7 rounded-full bg-gradient-to-br from-brand to-brand-alt text-brand-fg text-xs font-bold flex items-center justify-center shadow-lg shadow-brand/15 font-display">
                   {i + 1}
                 </div>
                 <Tooltip content={`Why: ${scoreRationale(r.t)}`} className="block w-full">
@@ -4140,7 +4143,7 @@ function DashboardView() {
       </Card>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="My tasks" value={counts.mine} color="#a78bfa" icon={<span className="w-2 h-2 rounded-full" style={{background:'#a78bfa'}} />} onClick={() => setView('mine')} />
+        <StatCard label="My tasks" value={counts.mine} color="#7c8cff" icon={<span className="w-2 h-2 rounded-full" style={{background:'#7c8cff'}} />} onClick={() => setView('mine')} />
         <StatCard label="Assigned to others" value={counts.others} color="#34d399" icon={<span className="w-2 h-2 rounded-full" style={{background:'#34d399'}} />} onClick={() => setView('kanban')} />
         <StatCard label="Unassigned" value={counts.unassigned} color={UNASSIGNED_STYLE.hex} icon={<span className="w-2 h-2 rounded-full" style={{background:UNASSIGNED_STYLE.hex}} />} onClick={() => setView('kanban')} />
         <StatCard label="Completed this week" value={counts.doneWeek} color="#34d399" icon={<CheckCircle2 className="w-3 h-3 text-success-text" />} />
@@ -4169,7 +4172,7 @@ function DashboardView() {
       </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card title="My upcoming" subtitle="Tasks assigned to you, by due date" accent="#a78bfa" action={<button onClick={() => setView('mine')} className="text-meta text-faint hover:text-secondary inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
+        <Card title="My upcoming" subtitle="Tasks assigned to you, by due date" accent="#7c8cff" action={<button onClick={() => setView('mine')} className="text-meta text-faint hover:text-secondary inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
           {myUpcoming.length === 0 ? <EmptyState icon={Calendar} text="No upcoming tasks. Nothing on your plate." /> :
             <div className="space-y-2">{myUpcoming.map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}</div>}
         </Card>
@@ -4204,13 +4207,15 @@ function DashboardView() {
         <div className="flex items-center gap-4">
           <div className="relative w-20 h-20 shrink-0">
             <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
-              <circle cx="18" cy="18" r="15" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="3" />
+              <circle cx="18" cy="18" r="15" fill="none" stroke="var(--color-fill-strong)" strokeWidth="3" />
               <circle cx="18" cy="18" r="15" fill="none" stroke="url(#g1)" strokeWidth="3" strokeLinecap="round"
                 strokeDasharray={`${(progress / 100) * 94.2478} 94.2478`} />
               <defs>
                 <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stopColor="#a78bfa" />
-                  <stop offset="100%" stopColor="#e879f9" />
+                  {/* Progress IS the sanctioned Flow Mint moment: brand blue resolving into mint
+                      as the ring completes. Not a decorative gradient — it carries the meaning. */}
+                  <stop offset="0%" stopColor="#5b67f1" />
+                  <stop offset="100%" stopColor="#3dd6b3" />
                 </linearGradient>
               </defs>
             </svg>
@@ -4297,7 +4302,7 @@ function FirstRunPanel() {
     <div className="relative rounded-3xl border border-line-subtle bg-gradient-to-br from-brand/[0.10] via-brand-alt/[0.05] to-transparent p-6 sm:p-8 overflow-hidden">
       <div className="absolute top-0 right-0 w-72 h-72 rounded-full bg-brand/10 blur-3xl pointer-events-none" />
       <div className="relative max-w-xl">
-        <div className="w-11 h-11 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand-alt/25 mb-4">
+        <div className="w-11 h-11 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand/15 mb-4">
           <Sparkles className="w-5 h-5 text-brand-fg" />
         </div>
         <h2 className="text-2xl font-semibold text-primary font-display tracking-tight">Welcome to Command Center</h2>
@@ -4459,7 +4464,7 @@ function PrivateView() {
     <div className="space-y-6">
       <div data-surface="inverted" className="relative rounded-3xl border border-line-subtle bg-hero-private p-6 overflow-hidden">
         <div className="absolute top-0 right-0 w-72 h-72 rounded-full bg-brand/10 blur-3xl" />
-        <div className="absolute bottom-0 left-20 w-64 h-64 rounded-full bg-brand-alt/5 blur-3xl" />
+        <div className="absolute bottom-0 left-20 w-64 h-64 rounded-full bg-brand/[0.06] blur-3xl" />
         <div className="relative flex items-start justify-between gap-4 flex-wrap">
           <div>
             <div className="inline-flex items-center gap-1.5 rounded-full border border-line bg-input backdrop-blur px-2.5 h-6 text-micro font-medium uppercase tracking-widest text-secondary mb-3">
@@ -4668,7 +4673,7 @@ function MatrixView() {
 
         <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 min-w-0">
           <MatrixQuad id="q1" title="Do first"  subtitle="Urgent + Important"          tasks={quadrants.q1} accent="#f43f5e" />
-          <MatrixQuad id="q2" title="Schedule"  subtitle="Important, not urgent"       tasks={quadrants.q2} accent="#a78bfa" />
+          <MatrixQuad id="q2" title="Schedule"  subtitle="Important, not urgent"       tasks={quadrants.q2} accent="#7c8cff" />
           <MatrixQuad id="q3" title="Delegate"  subtitle="Urgent, not important"       tasks={quadrants.q3} accent="#fb923c" />
           <MatrixQuad id="q4" title="Eliminate" subtitle="Consider dropping" tasks={quadrants.q4} accent="#64748b" />
         </div>
@@ -5003,7 +5008,7 @@ function AudioPlayer({ url, duration, seed, pending }) {
 
   if (failed) return <div className="mt-1 text-meta text-danger-text/70">Voice note unavailable</div>;
 
-  const playedHex = light ? '#7c3aed' : '#a78bfa';
+  const playedHex = light ? '#4650d6' : '#7c8cff';
   const unplayedHex = light ? 'rgba(15,17,23,0.24)' : 'rgba(255,255,255,0.24)';
 
   return (
@@ -5019,7 +5024,7 @@ function AudioPlayer({ url, duration, seed, pending }) {
         onError={() => setFailed(true)} />
       <button onClick={toggle} disabled={pending} aria-label={playing ? 'Pause' : 'Play'}
         className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors disabled:cursor-default"
-        style={{ background: light ? 'rgba(124,58,237,0.14)' : 'rgba(139,92,246,0.25)', border: `1px solid ${playedHex}4d`, color: playedHex }}>
+        style={{ background: light ? 'rgba(70,80,214,0.14)' : 'rgba(91,103,241,0.25)', border: `1px solid ${playedHex}4d`, color: playedHex }}>
         {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
           : playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 translate-x-px" />}
       </button>
@@ -6911,7 +6916,7 @@ function AppShell() {
       <div data-surface="dark" className="min-h-screen bg-canvas text-primary flex items-center justify-center">
         
         <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-2xl shadow-brand-alt/30 animate-pulse">
+          <div className="w-12 h-12 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-2xl shadow-brand/15 animate-pulse">
             <Sparkles className="w-6 h-6 text-brand-fg" />
           </div>
           <div className="text-sm text-muted">Loading your workspace…</div>

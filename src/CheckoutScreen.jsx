@@ -139,7 +139,7 @@ export default function CheckoutScreen({ session }) {
                     </div>
                   )}
                   <button type="submit" disabled={busy}
-                    className="w-full h-11 rounded-xl bg-brand-gradient-cta text-brand-fg font-semibold text-sm flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-brand-alt/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+                    className="w-full h-11 rounded-xl bg-brand hover:bg-brand-hover text-brand-fg font-semibold text-sm flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-brand/15 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
                     {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : (<>Register interest <ArrowRight className="w-4 h-4" /></>)}
                   </button>
                 </form>
@@ -165,7 +165,7 @@ function Shell({ children }) {
   return (
     <div data-surface="dark" className="min-h-screen bg-canvas text-primary relative overflow-hidden px-5 lg:px-8 py-6">
       <style>{`
-        .primary-cta { height: 2.75rem; padding: 0 1.25rem; border-radius: 0.75rem; display:inline-flex; align-items:center; justify-content:center; gap:0.5rem; font-size:0.875rem; font-weight:600; color:#fff; background-image:linear-gradient(to right,#8b5cf6,#d946ef); transition:all .2s; }
+        .primary-cta { height: 2.75rem; padding: 0 1.25rem; border-radius: 0.75rem; display:inline-flex; align-items:center; justify-content:center; gap:0.5rem; font-size:0.875rem; font-weight:600; color:#fff; background-image:linear-gradient(to right,#5b67f1,#747bff); transition:all .2s; }
         .primary-cta:hover { box-shadow: 0 10px 25px -5px rgba(217,70,239,0.3); }
         @keyframes float { 0%,100% { transform: translateY(0px); } 50% { transform: translateY(-20px); } }
       `}</style>
@@ -174,7 +174,7 @@ function Shell({ children }) {
       <div className="relative max-w-4xl mx-auto">
         <header className="flex items-center justify-between h-12 mb-6">
           <Link to="/" className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand-alt/20">
+            <div className="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand/10">
               <Sparkles className="w-4 h-4 text-brand-fg" />
             </div>
             <span className="text-[15px] font-semibold font-display tracking-tight">Command Center</span>

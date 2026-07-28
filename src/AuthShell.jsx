@@ -51,7 +51,7 @@ export default function AuthShell({
 
       {/* Ambient depth, clipped so the screen never scrolls sideways */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
-        <div className="absolute top-1/4 -left-40 w-[28rem] h-[28rem] rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(139,92,246,.14), transparent 72%)', animation: 'auDrift1 22s ease-in-out infinite alternate' }} />
+        <div className="absolute top-1/4 -left-40 w-[28rem] h-[28rem] rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(91,103,241,.14), transparent 72%)', animation: 'auDrift1 22s ease-in-out infinite alternate' }} />
         <div className="absolute bottom-1/4 -right-40 w-[28rem] h-[28rem] rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(217,70,239,.11), transparent 72%)', animation: 'auDrift2 28s ease-in-out infinite alternate' }} />
         <div className="absolute inset-0 opacity-[0.022]" style={{ backgroundImage: GRAIN }} />
       </div>
@@ -59,7 +59,7 @@ export default function AuthShell({
       <div className="relative w-full max-w-md">
         {/* Brand lockup */}
         <div className="au-in flex flex-col items-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-2xl shadow-brand-alt/30 mb-4">
+          <div className="w-14 h-14 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-2xl shadow-brand/15 mb-4">
             <Icon className="w-7 h-7 text-brand-fg" />
           </div>
           <h1 className="text-2xl font-semibold text-primary font-display tracking-tight">{heading}</h1>
@@ -130,7 +130,7 @@ export function AuthCTA({ children, busy = false, busyLabel = 'Working…', disa
         type={type}
         onClick={onClick}
         disabled={disabled}
-        className="w-full h-11 rounded-xl bg-brand-gradient-cta text-brand-fg font-semibold text-sm flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] disabled:opacity-50 disabled:cursor-not-allowed transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text"
+        className="w-full h-11 rounded-xl bg-brand hover:bg-brand-hover text-brand-fg font-semibold text-sm flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-brand/20 hover:brightness-110 active:scale-[.97] disabled:opacity-50 disabled:cursor-not-allowed transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text"
       >
         {busy ? (<><Loader2 className="w-4 h-4 animate-spin" /> {busyLabel}</>) : children}
       </button>

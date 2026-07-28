@@ -85,7 +85,7 @@ export default function ResetPasswordScreen() {
           <p className="text-note text-faint mt-1.5 mb-5">This password-reset link is no longer valid. Request a fresh one and try again.</p>
           <Magnetic>
             <Link to="/forgot-password"
-              className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl bg-brand-gradient-cta text-brand-fg font-semibold text-sm hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
+              className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl bg-brand hover:bg-brand-hover text-brand-fg font-semibold text-sm hover:shadow-lg hover:shadow-brand/20 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
               Request a new link <ArrowRight className="w-4 h-4" />
             </Link>
           </Magnetic>

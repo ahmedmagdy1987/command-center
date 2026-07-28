@@ -61,7 +61,7 @@ const Divider = () => <Hairline className="absolute top-0 inset-x-0" />;
 function GhostCard({ w1, w2, color, dot, avatar, progress, solid, className = '', style }) {
   return (
     <div
-      className={`h-[52px] rounded-lg border p-2.5 ${solid ? 'border-brand-hover/25 bg-[#171826]' : 'border-line-subtle bg-fill-subtle'} ${className}`}
+      className={`h-[52px] rounded-lg border p-2.5 ${solid ? 'border-brand-hover/25 bg-surface-raised' : 'border-line-subtle bg-fill-subtle'} ${className}`}
       style={style}
     >
       <div className="h-1.5 rounded-full mb-2" style={{ width: w1, background: color, opacity: 0.55 }} />
@@ -99,8 +99,8 @@ function LiveBoard() {
         </div>
         <div className="flex items-center -space-x-1.5">
           {[
-            ['linear-gradient(135deg,#8b5cf6,#d946ef)', 'lp-ping'],
-            ['linear-gradient(135deg,#38bdf8,#818cf8)', 'lp-ping lp-ping-2'],
+            ['linear-gradient(135deg,#5b67f1,#747bff)', 'lp-ping'],
+            ['linear-gradient(135deg,#3dd6b3,#5b67f1)', 'lp-ping lp-ping-2'],
             ['linear-gradient(135deg,#f59e0b,#f43f5e)', null],
           ].map(([bg, ping], i) => (
             <span key={i} className="relative w-5 h-5 rounded-full border-2 border-surface-raised" style={{ background: bg }}>
@@ -115,19 +115,19 @@ function LiveBoard() {
         {/* To do */}
         <div>
           <div className="flex items-center gap-1.5 mb-2 text-micro uppercase tracking-widest text-faint">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#a78bfa]" />Inbox
+            <span className="w-1.5 h-1.5 rounded-full bg-[#7c8cff]" />Inbox
           </div>
           <div className="relative space-y-2">
             {/* Card A — the one that gets "picked up" (its opacity hands off to the overlay) */}
-            <GhostCard w1="72%" w2="44%" color="#a78bfa" avatar="linear-gradient(135deg,#8b5cf6,#d946ef)" dot="#fbbf24" className="lp-cardA" />
-            <GhostCard w1="58%" w2="36%" color="#a78bfa" dot="#f43f5e" />
-            <GhostCard w1="66%" w2="52%" color="#a78bfa" avatar="linear-gradient(135deg,#38bdf8,#818cf8)" />
+            <GhostCard w1="72%" w2="44%" color="#7c8cff" avatar="linear-gradient(135deg,#5b67f1,#747bff)" dot="#fbbf24" className="lp-cardA" />
+            <GhostCard w1="58%" w2="36%" color="#7c8cff" dot="#f43f5e" />
+            <GhostCard w1="66%" w2="52%" color="#7c8cff" avatar="linear-gradient(135deg,#3dd6b3,#5b67f1)" />
 
             {/* Drag overlay: travels exactly one column + gap right. Invisible at rest. */}
             <div className="lp-drag absolute inset-x-0 top-0 z-10 !mt-0">
               <div className="relative">
                 <div className="lp-dragGlow absolute -inset-1 rounded-xl bg-brand/25" style={{ opacity: 0 }} />
-                <GhostCard w1="72%" w2="44%" color="#a78bfa" avatar="linear-gradient(135deg,#8b5cf6,#d946ef)" dot="#fbbf24" solid className="lp-dragCard relative shadow-xl shadow-lg" style={{ opacity: 0 }} />
+                <GhostCard w1="72%" w2="44%" color="#7c8cff" avatar="linear-gradient(135deg,#5b67f1,#747bff)" dot="#fbbf24" solid className="lp-dragCard relative shadow-xl shadow-lg" style={{ opacity: 0 }} />
                 <MousePointer2 className="lp-cursor absolute left-[58%] top-[46%] w-4 h-4 text-primary drop-shadow-md" fill="white" style={{ opacity: 0 }} />
               </div>
             </div>
@@ -143,7 +143,7 @@ function LiveBoard() {
             {/* Landing slot: dashed hint during the drag; the landed card fades in beneath the overlay */}
             <div className="relative">
               <div className="lp-dropHint absolute inset-0 rounded-lg border border-dashed border-brand-hover/40" style={{ opacity: 0 }} />
-              <GhostCard w1="72%" w2="44%" color="#38bdf8" avatar="linear-gradient(135deg,#8b5cf6,#d946ef)" dot="#fbbf24" className="lp-cardB" />
+              <GhostCard w1="72%" w2="44%" color="#38bdf8" avatar="linear-gradient(135deg,#5b67f1,#747bff)" dot="#fbbf24" className="lp-cardB" />
             </div>
             <GhostCard w1="62%" color="#38bdf8" progress />
           </div>
@@ -162,7 +162,7 @@ function LiveBoard() {
       </div>
 
       {/* Completion toast, sliding through mid-loop */}
-      <div className="lp-toast absolute bottom-3 right-3 flex items-center gap-2 rounded-xl border border-line bg-[#171826] px-3 py-2 shadow-xl shadow-lg" style={{ opacity: 0 }}>
+      <div className="lp-toast absolute bottom-3 right-3 flex items-center gap-2 rounded-xl border border-line bg-surface-raised px-3 py-2 shadow-xl shadow-lg" style={{ opacity: 0 }}>
         <span className="w-5 h-5 rounded-full bg-success/20 border border-success-hover/40 flex items-center justify-center">
           <Check className="w-3 h-3 text-success-text" strokeWidth={3} />
         </span>
@@ -294,7 +294,7 @@ export default function LandingPage() {
         /* ---------- Micro-interactions ---------- */
         .lp-cardGlow {
           position: absolute; top: 0; left: 0; width: 15rem; height: 15rem; border-radius: 9999px;
-          background: radial-gradient(closest-side, rgba(139,92,246,.14), transparent 70%);
+          background: radial-gradient(closest-side, rgba(91,103,241,.14), transparent 70%);
           transform: translate(calc(var(--gx, -999px) - 7.5rem), calc(var(--gy, -999px) - 7.5rem));
           pointer-events: none;
         }
@@ -311,7 +311,7 @@ export default function LandingPage() {
           static grain. All clipped so the page never scrolls sideways. */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
         <div data-lp-depth="18" className="absolute -top-40 left-[6%] w-[36rem] h-[36rem]">
-          <div className="w-full h-full rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(139,92,246,.17), transparent 72%)', animation: 'lpDrift1 26s ease-in-out infinite alternate' }} />
+          <div className="w-full h-full rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(91,103,241,.17), transparent 72%)', animation: 'lpDrift1 26s ease-in-out infinite alternate' }} />
         </div>
         <div data-lp-depth="-14" className="absolute top-[4rem] -right-48 w-[34rem] h-[34rem]">
           <div className="w-full h-full rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(217,70,239,.13), transparent 72%)', animation: 'lpDrift2 32s ease-in-out infinite alternate' }} />
@@ -350,7 +350,7 @@ export default function LandingPage() {
             </p>
             <div className="lp-in mt-6 flex flex-wrap items-center gap-3" style={{ animationDelay: '.52s' }}>
               <Magnetic>
-                <Link to="/signup" className="h-11 px-6 rounded-xl bg-brand-gradient-cta text-brand-fg font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
+                <Link to="/signup" className="h-11 px-6 rounded-xl bg-brand-gradient-cta text-brand-fg font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand/20 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
                   Get organized free <ArrowRight className="w-4 h-4" />
                 </Link>
               </Magnetic>
@@ -390,7 +390,7 @@ export default function LandingPage() {
               <div key={f.title} data-lp-reveal style={{ '--lp-d': `${(i % 3) * 90}ms` }}>
                 <div
                   onMouseMove={glowTrack}
-                  className="group relative h-full overflow-hidden rounded-2xl border border-line-subtle bg-gradient-to-br from-fill-subtle to-transparent p-5 transition-all duration-300 hover:-translate-y-1 hover:border-brand-hover/25 hover:shadow-xl hover:shadow-brand/40"
+                  className="group relative h-full overflow-hidden rounded-2xl border border-line-subtle bg-gradient-to-br from-fill-subtle to-transparent p-5 transition-all duration-300 hover:-translate-y-1 hover:border-brand-hover/25 hover:shadow-xl hover:shadow-brand/20"
                 >
                   <span className="lp-cardGlow opacity-0 group-hover:opacity-100 transition-opacity duration-300" aria-hidden="true" />
                   <div className="relative w-10 h-10 rounded-xl bg-brand/10 border border-brand-hover/20 flex items-center justify-center mb-3 transition-colors duration-300 group-hover:bg-brand/20 group-hover:border-brand-hover/40">
@@ -412,7 +412,7 @@ export default function LandingPage() {
             {STEPS.map((s, i) => (
               <div key={s.n} data-lp-reveal style={{ '--lp-d': `${i * 110}ms` }}>
                 <div className="group h-full rounded-2xl border border-line-subtle bg-fill-subtle p-5 transition-all duration-300 hover:-translate-y-1 hover:border-line">
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand to-brand-alt flex items-center justify-center text-sm font-bold mb-3 shadow-lg shadow-brand/50 transition-transform duration-300 group-hover:scale-110">{s.n}</div>
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand to-brand-alt flex items-center justify-center text-sm font-bold mb-3 shadow-lg shadow-brand/25 transition-transform duration-300 group-hover:scale-110">{s.n}</div>
                   <h3 className="text-base font-semibold text-primary">{s.title}</h3>
                   <p className="mt-1 text-compact text-muted leading-relaxed">{s.body}</p>
                 </div>
@@ -424,10 +424,10 @@ export default function LandingPage() {
         {/* CTA band */}
         <section className="relative py-14">
           <Divider />
-          <div data-lp-reveal className="relative overflow-hidden rounded-2xl border border-brand-hover/20 bg-[#0c0d15] p-8 lg:p-12 text-center">
+          <div data-lp-reveal className="relative overflow-hidden rounded-2xl border border-brand-hover/20 bg-surface p-8 lg:p-12 text-center">
             {/* Inner atmosphere: brand wash + a slow-drifting glow + a comet along the top hairline */}
             <div className="absolute inset-0 bg-gradient-to-br from-brand/15 via-brand-alt/[0.07] to-transparent" aria-hidden="true" />
-            <div className="absolute -top-24 left-1/2 -ml-48 w-96 h-96 rounded-full" aria-hidden="true" style={{ background: 'radial-gradient(closest-side, rgba(167,139,250,.18), transparent 70%)', animation: 'lpDrift3 18s ease-in-out infinite alternate' }} />
+            <div className="absolute -top-24 left-1/2 -ml-48 w-96 h-96 rounded-full" aria-hidden="true" style={{ background: 'radial-gradient(closest-side, rgba(124,140,255,.18), transparent 70%)', animation: 'lpDrift3 18s ease-in-out infinite alternate' }} />
             <div className="absolute top-0 inset-x-0 h-px overflow-hidden" aria-hidden="true">
               <span className="lp-comet absolute top-0 h-px w-60 bg-gradient-to-r from-transparent via-brand-alt-text/80 to-transparent" style={{ opacity: 0 }} />
             </div>
@@ -435,7 +435,7 @@ export default function LandingPage() {
             <p className="relative mt-2 text-muted">Create a workspace in seconds. It’s free to get started.</p>
             <div className="relative mt-6 flex justify-center gap-3">
               <Magnetic>
-                <Link to="/signup" className="h-12 px-6 rounded-xl bg-brand-gradient-cta text-brand-fg font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
+                <Link to="/signup" className="h-12 px-6 rounded-xl bg-brand-gradient-cta text-brand-fg font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand/20 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
                   Get organized free <ArrowRight className="w-4 h-4" />
                 </Link>
               </Magnetic>

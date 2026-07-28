@@ -82,7 +82,7 @@ export function SiteHeader({ session }) {
       />
       <div className="relative max-w-6xl mx-auto px-5 lg:px-8 h-14 flex items-center justify-between">
         <Link to="/" className="group flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
-          <div className="w-7 h-7 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand-alt/20 transition-transform duration-300 motion-reduce:transition-none group-hover:scale-110 group-hover:rotate-6">
+          <div className="w-7 h-7 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand/10 transition-transform duration-300 motion-reduce:transition-none group-hover:scale-110 group-hover:rotate-6">
             <Sparkles className="w-3.5 h-3.5 text-brand-fg" />
           </div>
           <span className="text-[15px] font-semibold font-display tracking-tight">Command Center</span>
@@ -125,7 +125,7 @@ export function SiteFooter() {
   return (
     <footer className="relative mt-8 overflow-hidden">
       <div aria-hidden="true" className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-brand-hover/25 to-transparent" />
-      <div aria-hidden="true" className="absolute -top-28 left-1/2 -ml-44 h-72 rounded-full pointer-events-none" style={{ width: '22rem', background: 'radial-gradient(closest-side, rgba(139,92,246,.09), transparent 70%)' }} />
+      <div aria-hidden="true" className="absolute -top-28 left-1/2 -ml-44 h-72 rounded-full pointer-events-none" style={{ width: '22rem', background: 'radial-gradient(closest-side, rgba(91,103,241,.09), transparent 70%)' }} />
       <div className="relative max-w-6xl mx-auto px-5 lg:px-8 pt-10 pb-8">
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-8">
           <div className="max-w-xs">
