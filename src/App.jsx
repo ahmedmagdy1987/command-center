@@ -16,7 +16,7 @@ import { supabase } from './lib/supabase';
 
 function FullScreenSpinner() {
   return (
-    <div className="min-h-screen bg-[#070810] text-white flex items-center justify-center">
+    <div data-surface="dark" className="min-h-screen bg-canvas text-white flex items-center justify-center">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300..700&display=swap');
         body { font-family: 'Outfit', sans-serif; background: #070810; }

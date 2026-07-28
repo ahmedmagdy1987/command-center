@@ -40,7 +40,7 @@ export default function PricingPage({ session }) {
   };
 
   return (
-    <div ref={rootRef} className="pp-root min-h-screen bg-[#070810] text-white relative">
+    <div ref={rootRef} data-surface="dark" className="pp-root min-h-screen bg-canvas text-white relative">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
         body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; background: #070810; }
@@ -89,10 +89,10 @@ export default function PricingPage({ session }) {
           <h1 className="pp-in text-2xl lg:text-3xl font-semibold font-display tracking-tight leading-[1.12] max-w-2xl mx-auto" style={{ animationDelay: '.12s' }}>
             {PRICING_COPY.headline}
           </h1>
-          <p className="pp-in mt-2.5 text-sm lg:text-base text-white/55 max-w-xl mx-auto leading-relaxed" style={{ animationDelay: '.22s' }}>
+          <p className="pp-in mt-2.5 text-sm lg:text-base text-muted max-w-xl mx-auto leading-relaxed" style={{ animationDelay: '.22s' }}>
             {PRICING_COPY.sub}
           </p>
-          <div className="pp-in mt-3.5 flex flex-wrap justify-center gap-x-6 gap-y-1.5 text-[12px] text-white/60" style={{ animationDelay: '.32s' }}>
+          <div className="pp-in mt-3.5 flex flex-wrap justify-center gap-x-6 gap-y-1.5 text-[12px] text-muted" style={{ animationDelay: '.32s' }}>
             {PRICING_COPY.benefits.map((b, i) => {
               const Icon = BENEFIT_ICONS[i] || Check;
               return (
@@ -106,7 +106,7 @@ export default function PricingPage({ session }) {
 
         {/* Billing-cycle toggle */}
         <div className="pp-in flex items-center justify-center gap-3 mb-5" style={{ animationDelay: '.42s' }}>
-          <div className="inline-flex items-center p-1 rounded-full border border-white/10 bg-white/[0.03]">
+          <div className="inline-flex items-center p-1 rounded-full border border-line bg-fill-subtle">
             <button onClick={() => setCycle(BILLING_CYCLE.monthly)}
               className={cycleBtn(!annual)}>Monthly</button>
             <button onClick={() => setCycle(BILLING_CYCLE.annual)}
@@ -129,26 +129,26 @@ export default function PricingPage({ session }) {
 
         {/* Secondary: Business, de-emphasized — full details live in the comparison table below */}
         {secondaryPlans.map(plan => (
-          <div key={plan.id} className="pp-in mt-5 max-w-3xl mx-auto rounded-2xl border border-white/[0.07] bg-white/[0.02] px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3" style={{ animationDelay: '.78s' }}>
+          <div key={plan.id} className="pp-in mt-5 max-w-3xl mx-auto rounded-2xl border border-line-subtle bg-fill-subtle px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3" style={{ animationDelay: '.78s' }}>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                 <span className="text-base font-semibold font-display">{plan.name}</span>
-                <span className="text-[12px] text-white/45">{plan.tagline}</span>
+                <span className="text-[12px] text-faint">{plan.tagline}</span>
               </div>
-              <div className="mt-0.5 text-[12px] text-white/55">
-                <span className="text-white/75 font-medium">{formatMoney(monthlyEquivalent(plan, annual ? BILLING_CYCLE.annual : BILLING_CYCLE.monthly))}/mo</span>
+              <div className="mt-0.5 text-[12px] text-muted">
+                <span className="text-secondary font-medium">{formatMoney(monthlyEquivalent(plan, annual ? BILLING_CYCLE.annual : BILLING_CYCLE.monthly))}/mo</span>
                 {' · '}{plan.highlights.join(' · ')}
               </div>
             </div>
             <button onClick={() => onChoose(plan)}
-              className="shrink-0 h-9 px-4 rounded-xl border border-white/[0.12] bg-white/[0.04] text-xs font-semibold text-white/85 hover:bg-white/[0.08] active:scale-[.97] transition-all inline-flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+              className="shrink-0 h-9 px-4 rounded-xl border border-line bg-fill text-xs font-semibold text-primary hover:bg-fill-strong active:scale-[.97] transition-all inline-flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
               {plan.cta}<ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
         ))}
 
         {/* Early-access honesty note */}
-        <p className="pp-in mt-6 text-center text-[12px] text-white/40 max-w-2xl mx-auto" style={{ animationDelay: '.9s' }}>
+        <p className="pp-in mt-6 text-center text-[12px] text-faint max-w-2xl mx-auto" style={{ animationDelay: '.9s' }}>
           {PRICING_COPY.earlyAccessNote}
         </p>
 
@@ -156,15 +156,15 @@ export default function PricingPage({ session }) {
         <section className="relative mt-10 py-16">
           <Hairline className="absolute top-0 inset-x-0" />
           <h2 data-lp-reveal className="text-2xl lg:text-3xl font-semibold font-display tracking-tight text-center mb-8">Compare plans</h2>
-          <div data-lp-reveal style={{ '--lp-d': '120ms' }} className="overflow-x-auto rounded-2xl border border-white/[0.06] bg-gradient-to-br from-white/[0.025] to-transparent">
+          <div data-lp-reveal style={{ '--lp-d': '120ms' }} className="overflow-x-auto rounded-2xl border border-line-subtle bg-gradient-to-br from-fill-subtle to-transparent">
             <table className="w-full min-w-[640px] text-sm">
               <thead>
-                <tr className="border-b border-white/10">
-                  <th className="text-left font-medium text-white/50 px-5 py-4 w-[40%]">Features</th>
+                <tr className="border-b border-line">
+                  <th className="text-left font-medium text-muted px-5 py-4 w-[40%]">Features</th>
                   {plans.map(p => (
                     <th key={p.id} className="px-4 py-4 text-center">
-                      <div className={cx('font-semibold font-display', p.popular ? 'text-violet-200' : 'text-white/90')}>{p.name}</div>
-                      <div className="text-[11px] font-normal text-white/40 mt-0.5">
+                      <div className={cx('font-semibold font-display', p.popular ? 'text-violet-200' : 'text-primary')}>{p.name}</div>
+                      <div className="text-[11px] font-normal text-faint mt-0.5">
                         {p.paid ? `${formatMoney(monthlyEquivalent(p, annual ? BILLING_CYCLE.annual : BILLING_CYCLE.monthly))}/mo` : 'Free'}
                       </div>
                     </th>
@@ -173,8 +173,8 @@ export default function PricingPage({ session }) {
               </thead>
               <tbody>
                 {FEATURE_TABLE.map((row, i) => (
-                  <tr key={row.label} className={cx('border-b border-white/5 last:border-b-0', i % 2 === 1 && 'bg-white/[0.012]')}>
-                    <td className="px-5 py-3 text-white/70">{row.label}</td>
+                  <tr key={row.label} className={cx('border-b border-line-subtle last:border-b-0', i % 2 === 1 && 'bg-fill-subtle')}>
+                    <td className="px-5 py-3 text-secondary">{row.label}</td>
                     {plans.map(p => (
                       <td key={p.id} className="px-4 py-3 text-center">{cellFor(row, p)}</td>
                     ))}
@@ -195,7 +195,7 @@ export default function PricingPage({ session }) {
               <span className="pp-comet absolute top-0 h-px w-60 bg-gradient-to-r from-transparent via-fuchsia-300/80 to-transparent" style={{ opacity: 0 }} />
             </div>
             <h2 className="relative text-2xl lg:text-3xl font-semibold font-display tracking-tight">Get your team in one place</h2>
-            <p className="relative mt-2 text-white/55">Start free in seconds. Bring in your people, inside or outside your company.</p>
+            <p className="relative mt-2 text-muted">Start free in seconds. Bring in your people, inside or outside your company.</p>
             <div className="relative mt-6 flex justify-center gap-3">
               {session ? (
                 <Magnetic>
@@ -210,7 +210,7 @@ export default function PricingPage({ session }) {
                       Get started free <ArrowRight className="w-4 h-4" />
                     </Link>
                   </Magnetic>
-                  <Link to="/login" className="h-12 px-6 rounded-xl border border-white/10 bg-white/[0.03] text-white/80 font-medium text-sm flex items-center hover:bg-white/[0.06] active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+                  <Link to="/login" className="h-12 px-6 rounded-xl border border-line bg-fill-subtle text-secondary font-medium text-sm flex items-center hover:bg-fill active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
                     Log in
                   </Link>
                 </>
@@ -229,16 +229,16 @@ export default function PricingPage({ session }) {
 const cx = (...xs) => xs.filter(Boolean).join(' ');
 const cycleBtn = (active) =>
   cx('inline-flex items-center h-9 px-4 rounded-full text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
-    active ? 'bg-white text-[#0a0b11]' : 'text-white/60 hover:text-white');
+    active ? 'bg-white text-[#0a0b11]' : 'text-muted hover:text-white');
 
 function cellFor(row, plan) {
   if (row.type === 'always') return <Check className="w-4 h-4 text-emerald-400 mx-auto" />;
-  if (row.type === 'limit') return <span className="text-white/80 font-medium tabular-nums">{formatLimit(plan.limits[row.key])}</span>;
-  if (row.type === 'history') return <span className="text-white/80 font-medium">{formatHistory(plan.limits[row.key])}</span>;
+  if (row.type === 'limit') return <span className="text-secondary font-medium tabular-nums">{formatLimit(plan.limits[row.key])}</span>;
+  if (row.type === 'history') return <span className="text-secondary font-medium">{formatHistory(plan.limits[row.key])}</span>;
   // feature
   return plan.features?.[row.key]
     ? <Check className="w-4 h-4 text-emerald-400 mx-auto" />
-    : <Minus className="w-4 h-4 text-white/20 mx-auto" />;
+    : <Minus className="w-4 h-4 text-faint mx-auto" />;
 }
 
 function PlanCard({ plan, annual, onChoose }) {
@@ -250,7 +250,7 @@ function PlanCard({ plan, annual, onChoose }) {
       ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white hover:shadow-lg hover:shadow-fuchsia-500/40 hover:brightness-110'
       : plan.paid
         ? 'bg-white text-[#0a0b11] hover:bg-white/90'
-        : 'border border-white/15 bg-white/[0.04] text-white/90 hover:bg-white/[0.08]');
+        : 'border border-line bg-fill text-primary hover:bg-fill-strong');
   const ctaBtn = (
     <button onClick={onChoose} className={ctaCls}>
       {plan.cta} <ArrowRight className="w-4 h-4" />
@@ -261,8 +261,8 @@ function PlanCard({ plan, annual, onChoose }) {
       'relative h-full rounded-2xl border p-5 flex flex-col transition-all duration-300 hover:-translate-y-1',
       plan.popular && 'mt-3 md:mt-0',
       plan.popular
-        ? 'border-violet-400/40 bg-gradient-to-b from-violet-500/[0.10] to-white/[0.01] shadow-2xl shadow-violet-500/10 hover:shadow-violet-500/25'
-        : 'border-white/[0.08] bg-gradient-to-br from-white/[0.03] to-transparent hover:border-violet-400/25 hover:shadow-xl hover:shadow-violet-950/40',
+        ? 'border-violet-400/40 bg-gradient-to-b from-violet-500/[0.10] to-fill-subtle shadow-2xl shadow-violet-500/10 hover:shadow-violet-500/25'
+        : 'border-line-subtle bg-gradient-to-br from-fill-subtle to-transparent hover:border-violet-400/25 hover:shadow-xl hover:shadow-violet-950/40',
     )}>
       {plan.popular && (
         <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 h-6 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-[10px] font-bold uppercase tracking-widest flex items-center shadow-lg shadow-fuchsia-500/30">
@@ -271,13 +271,13 @@ function PlanCard({ plan, annual, onChoose }) {
       )}
 
       <div className="mb-1 text-lg font-semibold font-display tracking-tight">{plan.name}</div>
-      <p className="text-[12px] text-white/45 leading-relaxed min-h-[2rem]">{plan.tagline}</p>
+      <p className="text-[12px] text-faint leading-relaxed min-h-[2rem]">{plan.tagline}</p>
 
       <div className="mt-3 mb-1 flex items-end gap-1.5">
         <span className="text-3xl lg:text-4xl font-semibold font-display tabular-nums">{formatMoney(plan.paid ? perMonth : 0)}</span>
-        <span className="text-sm text-white/45 mb-1.5">{plan.paid ? '/mo' : 'forever'}</span>
+        <span className="text-sm text-faint mb-1.5">{plan.paid ? '/mo' : 'forever'}</span>
       </div>
-      <div className="text-[11px] text-white/40 h-4">
+      <div className="text-[11px] text-faint h-4">
         {plan.paid
           ? (annual ? `${formatMoney(priceFor(plan, BILLING_CYCLE.annual))} billed yearly${savings > 0 ? ` · save ${formatMoney(savings)}` : ''}` : 'Billed monthly')
           : 'No card required'}
@@ -288,9 +288,9 @@ function PlanCard({ plan, annual, onChoose }) {
         : <div className="mt-4">{ctaBtn}</div>}
 
       <ul className="mt-4 space-y-2">
-        {plan.inherits && <li className="text-[12px] font-medium text-white/55">Everything in {plan.inherits}, plus:</li>}
+        {plan.inherits && <li className="text-[12px] font-medium text-muted">Everything in {plan.inherits}, plus:</li>}
         {plan.highlights.map(h => (
-          <li key={h} className="flex items-start gap-2 text-[13px] text-white/70">
+          <li key={h} className="flex items-start gap-2 text-[13px] text-secondary">
             <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
             <span>{h}</span>
           </li>

@@ -67,7 +67,7 @@ export default function CheckoutScreen({ session }) {
           <Centered title={`Sign in to upgrade to ${plan.name}`} body="A plan upgrades your workspace, so sign in (or create an account) to continue.">
             <div className="flex flex-col gap-2 w-full">
               <button onClick={() => navigate('/login')} className="primary-cta">Sign in <ArrowRight className="w-4 h-4" /></button>
-              <Link to="/signup" className="text-[12px] text-white/50 hover:text-white/80 transition-colors">Create an account</Link>
+              <Link to="/signup" className="text-[12px] text-muted hover:text-secondary transition-colors">Create an account</Link>
             </div>
           </Centered>
         </Card>
@@ -75,14 +75,14 @@ export default function CheckoutScreen({ session }) {
         <div className="grid lg:grid-cols-[1.1fr_1fr] gap-5 items-start">
           {/* Plan summary */}
           <Card>
-            <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-2">You’re upgrading to</div>
+            <div className="text-[10px] font-medium uppercase tracking-widest text-faint mb-2">You’re upgrading to</div>
             <div className="flex items-center justify-between gap-3 mb-1">
               <h2 className="text-2xl font-semibold font-display tracking-tight">{plan.name}</h2>
-              <Link to="/pricing" className="text-[11px] text-white/45 hover:text-white/80 transition-colors shrink-0">Change plan</Link>
+              <Link to="/pricing" className="text-[11px] text-faint hover:text-secondary transition-colors shrink-0">Change plan</Link>
             </div>
-            <p className="text-[13px] text-white/50 mb-5">{plan.tagline}</p>
+            <p className="text-[13px] text-muted mb-5">{plan.tagline}</p>
 
-            <div className="inline-flex items-center p-1 rounded-full border border-white/10 bg-white/[0.03] mb-5">
+            <div className="inline-flex items-center p-1 rounded-full border border-line bg-fill-subtle mb-5">
               <button onClick={() => setCycleAndUrl(BILLING_CYCLE.monthly)} className={cycleBtn(!annual)}>Monthly</button>
               <button onClick={() => setCycleAndUrl(BILLING_CYCLE.annual)} className={cycleBtn(annual)}>
                 Annual<span className="ml-1.5 text-[10px] font-semibold text-emerald-300">save ~2 mo</span>
@@ -91,19 +91,19 @@ export default function CheckoutScreen({ session }) {
 
             <div className="flex items-end gap-1.5 mb-1">
               <span className="text-4xl font-semibold font-display tabular-nums">{formatMoney(monthlyEquivalent(plan, cycle))}</span>
-              <span className="text-sm text-white/45 mb-1.5">/mo</span>
+              <span className="text-sm text-faint mb-1.5">/mo</span>
             </div>
-            <div className="text-[11px] text-white/40 mb-5">
+            <div className="text-[11px] text-faint mb-5">
               {annual
                 ? `${formatMoney(priceFor(plan, BILLING_CYCLE.annual))} billed yearly${annualSavings(plan) > 0 ? ` · save ${formatMoney(annualSavings(plan))}` : ''}`
                 : 'Billed monthly'}
             </div>
 
-            <div className="border-t border-white/5 pt-4">
-              {plan.inherits && <div className="text-[11px] text-white/40 mb-2">Everything in {plan.inherits}, plus:</div>}
+            <div className="border-t border-line-subtle pt-4">
+              {plan.inherits && <div className="text-[11px] text-faint mb-2">Everything in {plan.inherits}, plus:</div>}
               <ul className="space-y-2">
                 {plan.highlights.map(h => (
-                  <li key={h} className="flex items-start gap-2 text-[13px] text-white/70">
+                  <li key={h} className="flex items-start gap-2 text-[13px] text-secondary">
                     <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" /><span>{h}</span>
                   </li>
                 ))}
@@ -124,14 +124,14 @@ export default function CheckoutScreen({ session }) {
                   <h3 className="text-base font-semibold text-white">Payment</h3>
                   <span className="ml-auto text-[10px] font-semibold uppercase tracking-widest text-amber-300/90 bg-amber-500/10 border border-amber-400/20 rounded-full px-2 h-5 flex items-center">Coming soon</span>
                 </div>
-                <p className="text-[12px] text-white/50 leading-relaxed mb-4">
+                <p className="text-[12px] text-muted leading-relaxed mb-4">
                   Card payments aren’t switched on yet, so you won’t be charged. Leave your email to register interest in {plan.name} — founding members keep every feature free during early access.
                 </p>
                 <form onSubmit={submit} className="space-y-3">
                   <div>
-                    <label htmlFor="checkout-email" className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">Email</label>
+                    <label htmlFor="checkout-email" className="text-[10px] font-medium uppercase tracking-widest text-faint mb-1.5 block">Email</label>
                     <input id="checkout-email" type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="you@example.com"
-                      className="w-full bg-black/30 border border-white/10 rounded-xl px-3 h-11 text-sm text-white placeholder-white/30 outline-none focus:border-violet-400/50 focus:bg-black/40 transition-colors" />
+                      className="w-full bg-black/30 border border-line rounded-xl px-3 h-11 text-sm text-white placeholder-faint outline-none focus:border-violet-400/50 focus:bg-black/40 transition-colors" />
                   </div>
                   {error && (
                     <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300">
@@ -143,7 +143,7 @@ export default function CheckoutScreen({ session }) {
                     {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : (<>Register interest <ArrowRight className="w-4 h-4" /></>)}
                   </button>
                 </form>
-                <p className="mt-3 text-[11px] text-white/30 text-center">
+                <p className="mt-3 text-[11px] text-faint text-center">
                   Founding members keep every feature free while we’re in early access.
                 </p>
               </>
@@ -159,11 +159,11 @@ export default function CheckoutScreen({ session }) {
 const cx = (...xs) => xs.filter(Boolean).join(' ');
 const cycleBtn = (active) =>
   cx('inline-flex items-center h-8 px-3.5 rounded-full text-xs font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
-    active ? 'bg-white text-[#0a0b11]' : 'text-white/60 hover:text-white');
+    active ? 'bg-white text-[#0a0b11]' : 'text-muted hover:text-white');
 
 function Shell({ children }) {
   return (
-    <div className="min-h-screen bg-[#070810] text-white relative overflow-hidden px-5 lg:px-8 py-6">
+    <div data-surface="dark" className="min-h-screen bg-canvas text-white relative overflow-hidden px-5 lg:px-8 py-6">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
         body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; background: #070810; }
@@ -182,7 +182,7 @@ function Shell({ children }) {
             </div>
             <span className="text-[15px] font-semibold font-display tracking-tight">Command Center</span>
           </Link>
-          <Link to="/pricing" className="text-[12px] text-white/50 hover:text-white/80 transition-colors">All plans</Link>
+          <Link to="/pricing" className="text-[12px] text-muted hover:text-secondary transition-colors">All plans</Link>
         </header>
         {children}
       </div>
@@ -192,7 +192,7 @@ function Shell({ children }) {
 
 function Card({ children }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#0f1017]/80 backdrop-blur p-6 shadow-2xl">{children}</div>
+    <div className="rounded-2xl border border-line bg-surface-raised/80 backdrop-blur p-6 shadow-2xl">{children}</div>
   );
 }
 
@@ -205,7 +205,7 @@ function Centered({ title, body, children, tone }) {
         </div>
       )}
       <h2 className="text-lg font-semibold text-white mb-1">{title}</h2>
-      <p className="text-[13px] text-white/50 max-w-sm mx-auto mb-5">{body}</p>
+      <p className="text-[13px] text-muted max-w-sm mx-auto mb-5">{body}</p>
       <div className="flex justify-center">{children}</div>
     </div>
   );

@@ -71,8 +71,8 @@ export default function ResetPasswordScreen() {
     <AuthShell>
       {phase === 'verifying' && (
         <div className="flex flex-col items-center gap-3 py-6 text-center">
-          <Loader2 className="w-6 h-6 text-white/50 animate-spin" />
-          <p className="text-sm text-white/50">Verifying your reset link…</p>
+          <Loader2 className="w-6 h-6 text-muted animate-spin" />
+          <p className="text-sm text-muted">Verifying your reset link…</p>
         </div>
       )}
 
@@ -82,7 +82,7 @@ export default function ResetPasswordScreen() {
             <AlertCircle className="w-5 h-5 text-rose-300" />
           </div>
           <h2 className="text-base font-semibold text-white">Reset link invalid or expired</h2>
-          <p className="text-[12px] text-white/45 mt-1.5 mb-5">This password-reset link is no longer valid. Request a fresh one and try again.</p>
+          <p className="text-[12px] text-faint mt-1.5 mb-5">This password-reset link is no longer valid. Request a fresh one and try again.</p>
           <Magnetic>
             <Link to="/forgot-password"
               className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm hover:shadow-lg hover:shadow-fuchsia-500/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
@@ -99,18 +99,18 @@ export default function ResetPasswordScreen() {
               <KeyRound className="w-5 h-5 text-violet-300" />
             </div>
             <h2 className="text-base font-semibold text-white">Set a new password</h2>
-            <p className="text-[11px] text-white/40 mt-1">Choose a new password for your account.</p>
+            <p className="text-[11px] text-faint mt-1">Choose a new password for your account.</p>
           </div>
 
           <form onSubmit={submit} className="space-y-4">
             <div className="au-in" style={{ animationDelay: '.16s' }}>
-              <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">New password</label>
+              <label className="text-[10px] font-medium uppercase tracking-widest text-faint mb-1.5 block">New password</label>
               <AuthField icon={Lock} type="password" value={password} onChange={e => setPassword(e.target.value)} required autoFocus
                 placeholder="At least 10 characters" />
             </div>
 
             <div className="au-in" style={{ animationDelay: '.2s' }}>
-              <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">Confirm password</label>
+              <label className="text-[10px] font-medium uppercase tracking-widest text-faint mb-1.5 block">Confirm password</label>
               <AuthField icon={Lock} type="password" value={confirm} onChange={e => setConfirm(e.target.value)} required
                 placeholder="Re-enter your new password" />
             </div>

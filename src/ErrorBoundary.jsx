@@ -27,17 +27,17 @@ export default class ErrorBoundary extends React.Component {
     if (!this.state.error) return this.props.children;
 
     const card = (
-      <div className="max-w-md w-full rounded-2xl border border-white/10 bg-[#0f1017] p-6 text-center">
+      <div className="max-w-md w-full rounded-2xl border border-line bg-surface-raised p-6 text-center">
         <div className="mx-auto w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-400/30 flex items-center justify-center">
           <AlertCircle className="w-5 h-5 text-rose-300" />
         </div>
-        <div className="mt-3 text-sm font-semibold text-white/90">Something went wrong here</div>
-        <p className="mt-1.5 text-xs text-white/50 leading-relaxed">
+        <div className="mt-3 text-sm font-semibold text-primary">Something went wrong here</div>
+        <p className="mt-1.5 text-xs text-muted leading-relaxed">
           This part of the app hit an unexpected error. Your data is safe — it lives on the server, not in this tab.
         </p>
         <div className="mt-4 flex items-center justify-center gap-2">
           <button onClick={() => this.setState({ error: null })}
-            className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">
+            className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">
             Try again
           </button>
           <button onClick={() => window.location.reload()}
@@ -51,7 +51,7 @@ export default class ErrorBoundary extends React.Component {
     // fullScreen: the app-level boundary — nothing else is on screen, so provide the backdrop.
     // Inline (per-view): the shell around it is still alive; just fill the content area.
     return this.props.fullScreen ? (
-      <div className="min-h-screen bg-[#070810] text-white flex items-center justify-center p-6">{card}</div>
+      <div data-surface="dark" className="min-h-screen bg-canvas text-white flex items-center justify-center p-6">{card}</div>
     ) : (
       <div className="flex items-center justify-center py-16 px-4">{card}</div>
     );

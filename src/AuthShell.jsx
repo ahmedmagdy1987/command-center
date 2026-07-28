@@ -29,7 +29,7 @@ export default function AuthShell({
   children,
 }) {
   return (
-    <div className="au-root min-h-screen bg-[#070810] text-white flex items-center justify-center p-6 relative overflow-hidden">
+    <div data-surface="dark" className="au-root min-h-screen bg-canvas text-white flex items-center justify-center p-6 relative overflow-hidden">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
         body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; background: #070810; }
@@ -66,7 +66,7 @@ export default function AuthShell({
             <Icon className="w-7 h-7 text-white" />
           </div>
           <h1 className="text-2xl font-semibold text-white font-display tracking-tight">{heading}</h1>
-          {tagline && <p className="text-sm text-white/40 mt-1 text-center">{tagline}</p>}
+          {tagline && <p className="text-sm text-faint mt-1 text-center">{tagline}</p>}
         </div>
 
         {beforeCard && (
@@ -77,12 +77,12 @@ export default function AuthShell({
 
         {/* Card. Solid surface on purpose: backdrop-blur over the continuously-drifting aurora
             would force an uncacheable per-frame blur pass. */}
-        <div className="au-in rounded-2xl border border-white/10 bg-[#0f1017] p-6 shadow-2xl" style={{ animationDelay: '.08s' }}>
+        <div className="au-in rounded-2xl border border-line bg-surface-raised p-6 shadow-2xl" style={{ animationDelay: '.08s' }}>
           {children}
         </div>
 
         {footnote && (
-          <p className="au-in mt-6 text-center text-[11px] text-white/35" style={{ animationDelay: '.36s' }}>
+          <p className="au-in mt-6 text-center text-[11px] text-faint" style={{ animationDelay: '.36s' }}>
             {footnote}
           </p>
         )}
@@ -100,10 +100,10 @@ export default function AuthShell({
 export function AuthField({ icon: Icon, ...props }) {
   return (
     <div className="relative">
-      <Icon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40 pointer-events-none" />
+      <Icon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-faint pointer-events-none" />
       <input
         {...props}
-        className="w-full bg-black/30 border border-white/10 rounded-xl pl-10 pr-3 h-11 text-sm text-white placeholder-white/30 outline-none focus:border-violet-400/60 focus:bg-black/40 focus:ring-2 focus:ring-violet-500/20 transition-colors"
+        className="w-full bg-black/30 border border-line rounded-xl pl-10 pr-3 h-11 text-sm text-white placeholder-faint outline-none focus:border-violet-400/60 focus:bg-black/40 focus:ring-2 focus:ring-violet-500/20 transition-colors"
       />
     </div>
   );

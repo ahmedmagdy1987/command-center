@@ -1,0 +1,502 @@
+/* =============================================================================
+ * DESIGN TOKENS — the single place colour is decided.
+ * =============================================================================
+ *
+ * WHY THIS FILE EXISTS
+ * --------------------
+ * Before this, colour lived in ~2,200 hardcoded values spread across the app,
+ * and "light mode" was ~90 lines of `[data-theme="light"] .bg-\[\#0a0b11\] {
+ * ... !important }` overrides at the bottom of VisualTaskCommandCenter.jsx.
+ * That design has one fatal property: a light rule is bound to the *dark class
+ * name*, so changing a dark colour silently orphans its light counterpart and
+ * the surface goes invisible in light mode. That failure has shipped more than
+ * once (checkboxes, focus rings, hover states, the @mention pill).
+ *
+ * Here, light mode is a genuine theme: the SAME semantic class renders in both
+ * themes because the variable underneath it changes. There is nothing to keep
+ * in sync, so nothing can drift out of sync.
+ *
+ *
+ * TWO VALUE FORMATS — AND WHY (read before adding a token)
+ * --------------------------------------------------------
+ * 1. SPACE-SEPARATED RGB TRIPLES  ->  `--color-text-primary: 255 255 255;`
+ *    Consumed by tailwind.config.js as `rgb(var(--x) / <alpha-value>)`, so
+ *    Tailwind's opacity modifiers keep working: `text-secondary/70`.
+ *    Use for anything a caller may want at partial opacity: text, brand,
+ *    status colours, canvas/surface.
+ *
+ * 2. COMPLETE rgba() VALUES  ->  `--color-fill: rgba(255,255,255,0.05);`
+ *    Exposed as a plain colour. `<alpha-value>` does NOT apply.
+ *    Use for fills and borders, where the alpha IS the semantic step. These
+ *    replace the `bg-white/[0.03]` / `border-white/10` idiom, and nothing in
+ *    the app ever stacks a second opacity modifier on top of one.
+ *
+ * Mixing these up is the one way to break this file: putting a triple where an
+ * rgba() belongs yields `rgb(rgba(...) / 1)` — an invalid colour that fails
+ * silently and renders transparent.
+ *
+ *
+ * PHASE 1 SCOPE — THIS COMMIT CHANGES NO PIXELS ON PURPOSE
+ * --------------------------------------------------------
+ * Every value below reproduces what the app renders TODAY (violet/dark). This
+ * is a pure refactor: build the seam, prove it holds, then change the values in
+ * Phase 2. If a screen looks different after Phase 1, that is a BUG, not the
+ * rebrand.
+ *
+ * The two deliberate, documented micro-changes are noted at `--color-text-*`.
+ * ============================================================================= */
+
+/* The dark palette is declared for TWO selectors at once:
+ *
+ *   :root                  the default theme
+ *   [data-surface="dark"]  an explicit opt-OUT of theming, for the pre-app funnel
+ *
+ * WHY THE SECOND ONE EXISTS — this is load-bearing, do not delete it.
+ * AppProvider stamps `data-theme` on <html> and NEVER removes it. So a user who
+ * picks light mode and then signs out, opens /pricing, or hits the invite link
+ * still has `<html data-theme="light">` in place. Today the funnel survives that
+ * by accident: the light rules lived inside the app's own <style>, which is
+ * unmounted on those routes. Tokens are global, so that accident is gone and the
+ * marketing pages would half-flip to light.
+ *
+ * `data-surface="dark"` on a funnel root re-declares the dark values for that
+ * subtree. Custom properties resolve against the nearest declaring ancestor, so
+ * this wins inside the subtree regardless of what <html> says — no specificity
+ * contest, no !important. The funnel's dark-only intent is now DECLARED rather
+ * than inferred from a mounting side effect. */
+:root,
+[data-surface='dark'] {
+  /* ---------------------------------------------------------------------
+   * SURFACES — the elevation ladder. canvas < surface < surface-raised.
+   * canvas         : the app background behind everything
+   * surface        : sidebar, top bar, cards resting on the canvas
+   * surface-raised : modals, popovers, dropdowns — things that float
+   * ------------------------------------------------------------------- */
+  --color-canvas: 7 8 16;              /* #070810 */
+  --color-surface: 10 11 17;           /* #0a0b11 */
+  --color-surface-raised: 15 16 23;    /* #0f1017 */
+
+  /* ---------------------------------------------------------------------
+   * TEXT — four steps, high to low emphasis.
+   *
+   * DELIBERATE MICRO-CHANGE (1 of 2): these were `text-white/70`-style ALPHA
+   * values, so their rendered colour shifted with whatever surface sat behind
+   * them. They are now SOLID, resolved against the canvas. On canvas the
+   * result is pixel-identical; on a raised surface it differs by ~1-2/255 per
+   * channel — invisible, and strictly more consistent. Solid text tokens are
+   * also what makes the light theme expressible at all: you cannot express
+   * "dark grey text" as an alpha of white.
+   * ------------------------------------------------------------------- */
+  --color-text-primary: 255 255 255;   /* #FFFFFF   was text-white, /95, /90, /85 */
+  --color-text-secondary: 181 182 186; /* #B5B6BA ~ white/70 over canvas  (/80, /70) */
+  --color-text-muted: 137 138 145;     /* #898A91 ~ white/55 over canvas  (/60, /55, /50) */
+  --color-text-faint: 105 107 116;     /* #696B74 ~ white/40 over canvas  (/45 .. /20) */
+
+  /* ---------------------------------------------------------------------
+   * FILLS — the translucent washes that used to be `bg-white/[0.0N]`.
+   *
+   * The three steps are NOT arbitrary. `fill` must stay visibly distinct from
+   * `fill-subtle`: the Kanban drag-over highlight is `fill` and the idle
+   * column is `fill-subtle`. A previous pass collapsed them to the same value
+   * and the drop target became a zero-delta no-op. Keep the gap.
+   * ------------------------------------------------------------------- */
+  --color-fill-subtle: rgba(255, 255, 255, 0.03);   /* idle wells, striping   was /[0.005]-/[0.03] */
+  --color-fill: rgba(255, 255, 255, 0.05);          /* hover, drag-over, /5   was /[0.04]-/[0.07] */
+  --color-fill-strong: rgba(255, 255, 255, 0.10);   /* pressed, selected      was /[0.08]-/25 */
+
+  /* ---------------------------------------------------------------------
+   * BORDERS — three steps, matching the fill ladder.
+   *
+   * `--color-border` is 0.10, not a rounder 0.12, on purpose: `border-white/10`
+   * is 120 of the ~190 borders in the app, so pinning the default to its exact
+   * current alpha makes the dominant case pixel-identical in BOTH themes and
+   * keeps this commit a true no-op.
+   * ------------------------------------------------------------------- */
+  --color-border-subtle: rgba(255, 255, 255, 0.06); /* hairlines, dividers    was /5, /[0.04]-/[0.08] */
+  --color-border: rgba(255, 255, 255, 0.10);        /* default control edge   was /10, /[0.12], /15 */
+  --color-border-strong: rgba(255, 255, 255, 0.25); /* focus, active, emphasis was /20-/30 */
+
+  /* ---------------------------------------------------------------------
+   * INVERSE — a control that deliberately opposes the theme.
+   *
+   * This is the primary "New task" button: white-on-dark in the dark theme,
+   * dark-on-white in the light theme. It is NOT a surface, and mapping it onto
+   * one would turn the app's most prominent CTA into an invisible flat panel.
+   * The old sheet expressed this as `[data-theme=light] .bg-white { background:
+   * #17181c !important }` — a rule that hijacked EVERY `bg-white` in the app,
+   * which is exactly why it needs a name of its own.
+   * ------------------------------------------------------------------- */
+  --color-inverse: 255 255 255;                     /* the fill */
+  --color-inverse-fg: 23 24 28;                     /* text/icon on that fill */
+
+  /* Tooltips/toasts deliberately invert too, independent of theme. */
+  --color-tooltip: rgba(0, 0, 0, 0.90);
+  --color-tooltip-fg: 255 255 255;
+
+  /* ---------------------------------------------------------------------
+   * INPUT WELLS — recessed, not raised.
+   *
+   * These were `bg-black/30`, which reads as "an overlay" and is NOT: it is the
+   * field background on every text input, search box and select in the app. It
+   * needs its own token because an overlay and a form field must diverge in the
+   * light theme (a 30%-black field on a white card would be a charcoal slab).
+   * ------------------------------------------------------------------- */
+  --color-input: rgba(0, 0, 0, 0.30);
+  --color-input-focus: rgba(0, 0, 0, 0.40);
+
+  /* ---------------------------------------------------------------------
+   * BRAND — identity only.
+   *
+   * NOT the colour of every button. Functional status colours below stay
+   * semantic and must never be replaced by brand. Phase 1 holds the current
+   * violet so this commit is a no-op; Phase 2 swaps these three lines (and
+   * only these) for Corlyvo Blue.
+   * ------------------------------------------------------------------- */
+  --color-brand: 139 92 246;           /* #8B5CF6  violet-500 (Phase 2 -> #5B67F1) */
+  --color-brand-hover: 167 139 250;    /* #A78BFA  violet-400 (Phase 2 -> #747BFF) */
+  --color-brand-text: 196 181 253;     /* #C4B5FD  violet-300 — brand TEXT on dark */
+  --color-brand-fg: 255 255 255;       /* text/icon ON a brand-filled surface */
+
+  /* Accent — reserved. Phase 2 introduces Flow Mint for sync/progress moments.
+   * Held at brand until then so an accidental early usage is not a visual leak. */
+  --color-accent: 139 92 246;          /* Phase 2 -> #3DD6B3 */
+
+  /* ---------------------------------------------------------------------
+   * STATUS — SEMANTIC, NOT DECORATIVE. Do not repaint these with brand.
+   * danger = overdue/error/destructive · success = done/synced
+   * warning = high priority/attention  · info = neutral informational
+   * ------------------------------------------------------------------- */
+  /* Each status colour has THREE roles, and collapsing them loses real
+   * information — this is not over-engineering, it is what the old palette was
+   * already doing by hand with numbered shades:
+   *
+   *   --color-X        the FILL      (was shade 500) — solid buttons, dots, bars
+   *   --color-X-hover  the EMPHASIS  (was shade 400) — hover, borders, rings
+   *   --color-X-text   the TEXT      (was shade 200/300) — legible ON a dark
+   *                    surface, where the 500 fill would fail contrast
+   *
+   * In the LIGHT theme all three converge toward one darker value, because on a
+   * white surface the lightened text shade is the one that fails. That
+   * convergence is exactly what the old override sheet hand-wrote per class. */
+  --color-success: 16 185 129;         /* #10B981  emerald-500 */
+  --color-success-hover: 52 211 153;   /* #34D399  emerald-400 */
+  --color-success-text: 52 211 153;    /* #34D399  the on-dark reading colour */
+
+  --color-warning: 245 158 11;         /* #F59E0B  amber-500 */
+  --color-warning-hover: 251 191 36;   /* #FBBF24  amber-400 */
+  --color-warning-text: 251 191 36;    /* #FBBF24 */
+
+  --color-danger: 244 63 94;           /* #F43F5E  rose-500 */
+  --color-danger-hover: 251 113 133;   /* #FB7185  rose-400 */
+  --color-danger-text: 253 164 175;    /* #FDA4AF  rose-300 */
+
+  --color-info: 14 165 233;            /* #0EA5E9  sky-500 */
+  --color-info-hover: 56 189 248;      /* #38BDF8  sky-400 */
+  --color-info-text: 125 211 252;      /* #7DD3FC  sky-300 */
+
+  /* Tinted status backgrounds — the `bg-rose-500/10` idiom, tokenised so the
+   * light theme can use a genuinely different (opaque, pale) tint rather than
+   * a low-alpha bright colour, which greys out on a white surface. */
+  --color-success-surface: rgba(52, 211, 153, 0.12);
+  --color-warning-surface: rgba(251, 191, 36, 0.12);
+  --color-danger-surface: rgba(244, 63, 94, 0.12);
+  --color-info-surface: rgba(56, 189, 248, 0.12);
+  --color-brand-surface: rgba(139, 92, 246, 0.16);
+
+  /* ---------------------------------------------------------------------
+   * ELEVATION — quieter than the old fuchsia glow, but Phase 1 keeps the
+   * current geometry. Phase 2 sharpens these.
+   * ------------------------------------------------------------------- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.45);
+
+  /* Overlay behind modals. */
+  --color-overlay: rgba(0, 0, 0, 0.70);
+
+  /* ---------------------------------------------------------------------
+   * BRAND GRADIENT — the identity, isolated to ONE definition.
+   *
+   * Two shapes existed in the wild and are now named:
+   *   --gradient-brand      the logo mark      (was violet-500 -> fuchsia-500 -> rose-500, 9 sites)
+   *   --gradient-brand-cta  the primary button (was violet-500 -> fuchsia-500, 7 sites)
+   *
+   * Phase 2 replaces these two lines with Corlyvo Blue -> Flow Mint and the
+   * violet/fuchsia/rose identity is gone app-wide in one edit. Keep gradient use
+   * RARE — logo, landing hero, upgrade/celebration. A gradient on every button is
+   * what makes a product read as a hobby project.
+   * ------------------------------------------------------------------- */
+  --gradient-brand: linear-gradient(135deg, #8b5cf6 0%, #d946ef 50%, #f43f5e 100%);
+  --gradient-brand-cta: linear-gradient(135deg, #8b5cf6 0%, #d946ef 100%);
+
+  /* ---------------------------------------------------------------------
+   * TYPOGRAPHY — wired here so Phase 3 swaps fonts in one place.
+   * ------------------------------------------------------------------- */
+  --font-sans: 'Outfit', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: 'Fraunces', ui-serif, Georgia, serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+
+  /* ---------------------------------------------------------------------
+   * TYPE SCALE — the sub-14px range, which was 228 ad-hoc `text-[Npx]` values.
+   *
+   * These four names cover the dense end of the UI where Tailwind's built-in
+   * scale has nothing between `text-xs` (12px) and nothing at all below it.
+   * They are ADDITIVE: Tailwind's own `text-xs`/`text-sm`/`text-base` are left
+   * untouched, because redefining `text-xs` to 11px would silently resize every
+   * existing call site that already uses it.
+   *
+   *   micro   10px  uppercase eyebrows, badge counts, keyboard hints
+   *   meta    11px  timestamps, author lines, secondary metadata
+   *   note    12px  dense secondary copy
+   *   compact 13px  dense body copy
+   *
+   * The mapping from the old values is 1:1 by size, so this carries no judgment
+   * about intent — refine the assignments later if a size wants to move.
+   * ------------------------------------------------------------------- */
+  --text-micro: 0.625rem;   /* 10px */
+  --text-meta: 0.6875rem;   /* 11px */
+  --text-note: 0.75rem;     /* 12px */
+  --text-compact: 0.8125rem;/* 13px */
+}
+
+/* =============================================================================
+ * LIGHT THEME
+ * =============================================================================
+ * A real theme, not an inversion. Every variable above is redefined here, so
+ * a semantic class needs NO light-mode counterpart — which is precisely the
+ * class of bug (invisible-in-light checkbox / focus ring / selected row) this
+ * replaces.
+ *
+ * Fills and borders flip from white-alpha to BLACK-alpha. That flip is the
+ * whole reason `bg-white/[0.03]` could never work in light mode: 3% white on a
+ * white card is nothing at all.
+ * ========================================================================== */
+[data-theme='light'] {
+  color-scheme: light;
+
+  --color-canvas: 246 245 242;         /* #F6F5F2 */
+  --color-surface: 251 250 247;        /* #FBFAF7 */
+  --color-surface-raised: 255 255 255; /* #FFFFFF */
+
+  --color-text-primary: 23 24 28;      /* #17181C */
+  --color-text-secondary: 58 60 68;    /* #3A3C44 */
+  --color-text-muted: 90 93 105;       /* #5A5D69 */
+  --color-text-faint: 106 109 121;     /* #6A6D79 */
+
+  --color-fill-subtle: rgba(0, 0, 0, 0.025);
+  --color-fill: rgba(0, 0, 0, 0.04);
+  --color-fill-strong: rgba(0, 0, 0, 0.07);
+
+  --color-border-subtle: rgba(0, 0, 0, 0.06);
+  --color-border: rgba(0, 0, 0, 0.08);
+  --color-border-strong: rgba(0, 0, 0, 0.28);
+
+  /* Inverse flips with the theme — that IS the point. */
+  --color-inverse: 23 24 28;
+  --color-inverse-fg: 255 255 255;
+
+  /* Tooltip stays dark in light mode (an inverted tooltip is the convention). */
+  --color-tooltip: rgba(23, 24, 28, 0.94);
+  --color-tooltip-fg: 255 255 255;
+
+  /* A field is a subtle recess on light, not a charcoal slab. */
+  --color-input: rgba(0, 0, 0, 0.04);
+  --color-input-focus: rgba(0, 0, 0, 0.07);
+
+  /* Brand gradient darkens so white text on it still passes contrast. */
+  --gradient-brand: linear-gradient(135deg, #6d28d9 0%, #a21caf 50%, #be123c 100%);
+  --gradient-brand-cta: linear-gradient(135deg, #6d28d9 0%, #a21caf 100%);
+
+  /* Brand darkens for light surfaces — a bright violet on white fails contrast.
+   * This mirrors the old `#6d28d9` override, now expressed once. */
+  --color-brand: 109 40 217;           /* #6D28D9 */
+  --color-brand-hover: 91 33 182;      /* #5B21B6 */
+  --color-brand-text: 109 40 217;      /* converges: a light violet is illegible on white */
+  --color-brand-fg: 255 255 255;
+  --color-accent: 109 40 217;
+
+  /* Status colours darken too — the dark-theme brights wash out on white.
+   * The -text role converges onto the same value the old sheet hand-wrote. */
+  --color-success: 5 150 105;          /* #059669  fills stay saturated */
+  --color-success-hover: 4 120 87;     /* #047857 */
+  --color-success-text: 4 120 87;      /* #047857 */
+
+  --color-warning: 217 119 6;          /* #D97706 */
+  --color-warning-hover: 180 83 9;     /* #B45309 */
+  --color-warning-text: 180 83 9;      /* #B45309 */
+
+  --color-danger: 225 29 72;           /* #E11D48 */
+  --color-danger-hover: 190 18 60;     /* #BE123C */
+  --color-danger-text: 190 18 60;      /* #BE123C */
+
+  --color-info: 2 132 199;             /* #0284C7 */
+  --color-info-hover: 3 105 161;       /* #0369A1 */
+  --color-info-text: 3 105 161;        /* #0369A1 */
+
+  --color-success-surface: rgba(4, 120, 87, 0.10);
+  --color-warning-surface: rgba(180, 83, 9, 0.10);
+  --color-danger-surface: rgba(190, 18, 60, 0.10);
+  --color-info-surface: rgba(3, 105, 161, 0.10);
+  --color-brand-surface: rgba(109, 40, 217, 0.12);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.12);
+
+  --color-overlay: rgba(23, 24, 28, 0.45);
+}
+
+/* =============================================================================
+ * INVERTED ISLANDS
+ * =============================================================================
+ * The Private and My Tasks heroes stay dark in BOTH themes by design. Under the
+ * old sheet that required a pile of descendant `!important` rules re-lightening
+ * every child ("hero text stays white"). Here it is one scope: re-declare the
+ * variables inside the island and every semantic class within it just works.
+ *
+ * Apply with `data-surface="inverted"`.
+ * ========================================================================== */
+[data-surface='inverted'] {
+  --color-canvas: 15 16 23;
+  --color-surface: 20 22 32;
+  --color-surface-raised: 26 28 40;
+
+  --color-text-primary: 255 255 255;
+  --color-text-secondary: 200 202 210;
+  --color-text-muted: 160 163 176;
+  --color-text-faint: 128 132 146;
+
+  --color-fill-subtle: rgba(255, 255, 255, 0.03);
+  --color-fill: rgba(255, 255, 255, 0.06);
+  --color-fill-strong: rgba(255, 255, 255, 0.12);
+
+  --color-border-subtle: rgba(255, 255, 255, 0.07);
+  --color-border: rgba(255, 255, 255, 0.14);
+  --color-border-strong: rgba(255, 255, 255, 0.30);
+
+  /* Bright accents are correct here regardless of the outer theme — this island
+   * is dark in BOTH themes, so it wants the dark-theme reading colours. Under the
+   * old sheet this was a stack of `.from-[#1a1530] .text-violet-300 { ... }`
+   * descendant overrides; one variable scope replaces all of them. */
+  --color-brand: 167 139 250;
+  --color-brand-hover: 196 181 253;
+  --color-brand-text: 196 181 253;
+  --color-success: 16 185 129;
+  --color-success-hover: 52 211 153;
+  --color-success-text: 167 243 208;
+  --color-warning: 245 158 11;
+  --color-warning-hover: 251 191 36;
+  --color-warning-text: 253 230 138;
+  --color-danger: 244 63 94;
+  --color-danger-hover: 251 113 133;
+  --color-danger-text: 253 164 175;
+  --color-info: 14 165 233;
+  --color-info-hover: 56 189 248;
+  --color-info-text: 125 211 252;
+
+  --color-input: rgba(0, 0, 0, 0.30);
+  --color-input-focus: rgba(0, 0, 0, 0.40);
+  --color-inverse: 255 255 255;
+  --color-inverse-fg: 23 24 28;
+}
+
+/* =============================================================================
+ * GLOBAL SURFACE WIRING
+ * ========================================================================== */
+html,
+body {
+  background: rgb(var(--color-canvas));
+  color: rgb(var(--color-text-primary));
+}
+
+body {
+  font-family: var(--font-sans);
+  font-feature-settings: 'ss01', 'cv11';
+}
+
+.font-display {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  font-weight: 500;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Scrollbars — themed by variable instead of a duplicated light-mode block. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-fill);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-fill-strong);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Native controls follow the theme. `accent-color` fixes the checkbox/radio
+ * class of light-mode bug at the source rather than per-component. */
+:root {
+  accent-color: rgb(var(--color-brand));
+}
+select option {
+  color: rgb(var(--color-text-primary));
+  background: rgb(var(--color-surface-raised));
+}
+kbd {
+  font-family: var(--font-sans);
+}
+
+/* The date-picker indicator is a browser-drawn glyph that cannot be coloured —
+ * it can only be inverted. Invert on dark, leave alone on light. */
+:root:not([data-theme='light']) input[type='date']::-webkit-calendar-picker-indicator {
+  filter: invert(0.6);
+  cursor: pointer;
+}
+[data-theme='light'] input[type='date']::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+/* Keyboard focus — one visible ring everywhere, in both themes. Previously
+ * focus styling was per-component and several controls had none in light mode. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid rgb(var(--color-brand));
+  outline-offset: 2px;
+}
+
+/* Text selection. */
+::selection {
+  background: rgb(var(--color-brand) / 0.32);
+  color: rgb(var(--color-text-primary));
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeSlideOut {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(-6px) scale(0.97); }
+}

@@ -54,7 +54,7 @@ function NavTextLink({ to, className = '', children }) {
   return (
     <Link
       to={to}
-      className={`relative h-9 px-3.5 rounded-lg text-sm font-medium text-white/70 hover:text-white items-center transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 after:content-[''] after:absolute after:left-3.5 after:right-3.5 after:bottom-1.5 after:h-px after:bg-gradient-to-r after:from-violet-400 after:to-fuchsia-400 after:origin-left after:scale-x-0 hover:after:scale-x-100 after:transition-transform after:duration-300 motion-reduce:after:transition-none ${className}`}
+      className={`relative h-9 px-3.5 rounded-lg text-sm font-medium text-secondary hover:text-white items-center transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 after:content-[''] after:absolute after:left-3.5 after:right-3.5 after:bottom-1.5 after:h-px after:bg-gradient-to-r after:from-violet-400 after:to-fuchsia-400 after:origin-left after:scale-x-0 hover:after:scale-x-100 after:transition-transform after:duration-300 motion-reduce:after:transition-none ${className}`}
     >
       {children}
     </Link>
@@ -79,7 +79,7 @@ export function SiteHeader({ session }) {
       {/* Crossfaded bar: border + blur + shadow live here and fade in on scroll */}
       <div
         aria-hidden="true"
-        className={`absolute inset-0 border-b border-white/[0.06] bg-[#070810]/85 backdrop-blur-md shadow-lg shadow-black/20 transition-opacity duration-300 motion-reduce:transition-none ${scrolled ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute inset-0 border-b border-line-subtle bg-canvas/85 backdrop-blur-md shadow-lg shadow-black/20 transition-opacity duration-300 motion-reduce:transition-none ${scrolled ? 'opacity-100' : 'opacity-0'}`}
       />
       <div className="relative max-w-6xl mx-auto px-5 lg:px-8 h-14 flex items-center justify-between">
         <Link to="/" className="group flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
@@ -107,13 +107,13 @@ export function SiteHeader({ session }) {
 function FooterCol({ title, links }) {
   return (
     <div>
-      <div className="text-[10px] font-medium uppercase tracking-widest text-white/50 mb-2">{title}</div>
+      <div className="text-[10px] font-medium uppercase tracking-widest text-muted mb-2">{title}</div>
       <ul className="space-y-1 text-[13px]">
         {links.map(([label, to]) => (
           <li key={label}>
             {to.startsWith('mailto:')
-              ? <a href={to} className="inline-block py-1.5 text-white/55 hover:text-white transition-colors">{label}</a>
-              : <Link to={to} className="inline-block py-1.5 text-white/55 hover:text-white transition-colors">{label}</Link>}
+              ? <a href={to} className="inline-block py-1.5 text-muted hover:text-white transition-colors">{label}</a>
+              : <Link to={to} className="inline-block py-1.5 text-muted hover:text-white transition-colors">{label}</Link>}
           </li>
         ))}
       </ul>
@@ -134,9 +134,9 @@ export function SiteFooter() {
               <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center">
                 <Sparkles className="w-3 h-3 text-white" />
               </div>
-              <span className="text-white/80 font-semibold font-display tracking-tight">Command Center</span>
+              <span className="text-secondary font-semibold font-display tracking-tight">Command Center</span>
             </div>
-            <p className="mt-3 text-[12px] text-white/40 leading-relaxed">
+            <p className="mt-3 text-[12px] text-faint leading-relaxed">
               One visual workspace for your team’s tasks, owners, and due dates — live for everyone.
             </p>
           </div>
@@ -145,7 +145,7 @@ export function SiteFooter() {
             <FooterCol title="Company" links={[['Terms', '/terms'], ['Privacy', '/privacy'], ['Contact', 'mailto:support@opscommandcenter.com']]} />
           </div>
         </div>
-        <div className="mt-9 pt-5 border-t border-white/[0.06] text-[12px] text-white/50">
+        <div className="mt-9 pt-5 border-t border-line-subtle text-[12px] text-muted">
           © {year} Command Center. All rights reserved.
         </div>
       </div>

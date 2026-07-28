@@ -80,12 +80,12 @@ export default function AuthScreen({ mode = 'signin', initialSignup = false }) {
     <AuthShell>
       <div className="text-center mb-5">
         <h2 className="text-base font-semibold text-white">{heading}</h2>
-        <p className="text-[11px] text-white/40 mt-1">{subheading}</p>
+        <p className="text-[11px] text-faint mt-1">{subheading}</p>
       </div>
 
       <form onSubmit={submit} className="space-y-4">
         <div className="au-in" style={{ animationDelay: '.16s' }}>
-          <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">Email</label>
+          <label className="text-[10px] font-medium uppercase tracking-widest text-faint mb-1.5 block">Email</label>
           <AuthField icon={Mail} type="email" value={email} onChange={e => setEmail(e.target.value)} required autoFocus
             placeholder="you@example.com" />
         </div>
@@ -93,7 +93,7 @@ export default function AuthScreen({ mode = 'signin', initialSignup = false }) {
         {view !== 'reset' && (
           <div className="au-in" style={{ animationDelay: '.2s' }}>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 block">Password</label>
+              <label className="text-[10px] font-medium uppercase tracking-widest text-faint block">Password</label>
               {view === 'signin' && (
                 <button type="button" onClick={() => navigate('/forgot-password')}
                   className="text-[10px] font-medium text-violet-300/70 hover:text-violet-200 transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
@@ -120,13 +120,13 @@ export default function AuthScreen({ mode = 'signin', initialSignup = false }) {
       {view === 'reset' && (
         <div className="au-in" style={{ animationDelay: '.32s' }}>
           <button onClick={() => navigate('/login')}
-            className="mt-4 w-full text-center text-[11px] text-white/40 hover:text-white/70 transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+            className="mt-4 w-full text-center text-[11px] text-faint hover:text-secondary transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
             ← Back to sign in
           </button>
         </div>
       )}
       {SIGNUP_ENABLED && view === 'signin' && (
-        <p className="au-in mt-4 text-center text-[11px] text-white/40" style={{ animationDelay: '.32s' }}>
+        <p className="au-in mt-4 text-center text-[11px] text-faint" style={{ animationDelay: '.32s' }}>
           Don’t have an account?{' '}
           <button onClick={() => setSignupOpen(true)}
             className="text-violet-300/80 hover:text-violet-200 font-medium rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
@@ -137,7 +137,7 @@ export default function AuthScreen({ mode = 'signin', initialSignup = false }) {
       {SIGNUP_ENABLED && view === 'signup' && (
         <div className="au-in" style={{ animationDelay: '.32s' }}>
           <button onClick={() => setSignupOpen(false)}
-            className="mt-4 w-full text-center text-[11px] text-white/40 hover:text-white/70 transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+            className="mt-4 w-full text-center text-[11px] text-faint hover:text-secondary transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
             ← Back to sign in
           </button>
         </div>

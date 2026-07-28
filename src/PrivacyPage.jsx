@@ -19,7 +19,7 @@ const SECTIONS = [
 
 export default function PrivacyPage({ session }) {
   return (
-    <div className="min-h-screen bg-[#070810] text-white flex flex-col">
+    <div data-surface="dark" className="min-h-screen bg-canvas text-white flex flex-col">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
         body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; background: #070810; }
@@ -28,12 +28,12 @@ export default function PrivacyPage({ session }) {
       <SiteHeader session={session} />
       <main className="flex-1 w-full max-w-3xl mx-auto px-5 lg:px-8 py-12">
         <h1 className="text-3xl lg:text-4xl font-semibold font-display tracking-tight">Privacy Policy</h1>
-        <p className="mt-2 text-sm text-white/40">Last updated: June 2026</p>
+        <p className="mt-2 text-sm text-faint">Last updated: June 2026</p>
         <div className="mt-8 space-y-7">
           {SECTIONS.map(s => (
             <section key={s.h}>
-              <h2 className="text-base font-semibold text-white/90">{s.h}</h2>
-              <p className="mt-1.5 text-sm text-white/55 leading-relaxed">{s.b}</p>
+              <h2 className="text-base font-semibold text-primary">{s.h}</h2>
+              <p className="mt-1.5 text-sm text-muted leading-relaxed">{s.b}</p>
             </section>
           ))}
         </div>

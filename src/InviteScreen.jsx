@@ -86,7 +86,7 @@ export default function InviteScreen({ session }) {
         <>
           <div className="text-center mb-5">
             <h2 className="text-base font-semibold text-white">{signupMode ? 'Create your account' : 'Sign in to continue'}</h2>
-            <p className="text-[11px] text-white/40 mt-1">Use the email your invitation was sent to.</p>
+            <p className="text-[11px] text-faint mt-1">Use the email your invitation was sent to.</p>
           </div>
           <form onSubmit={submitAuth} className="space-y-4">
             <div className="au-in" style={{ animationDelay: '.16s' }}>
@@ -108,13 +108,13 @@ export default function InviteScreen({ session }) {
           </form>
           <div className="au-in" style={{ animationDelay: '.32s' }}>
             <button onClick={() => { setSignupMode(m => !m); setAuthErr(null); setAuthInfo(null); }}
-              className="mt-4 w-full text-center text-[11px] text-white/40 hover:text-white/70 transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+              className="mt-4 w-full text-center text-[11px] text-faint hover:text-secondary transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
               {signupMode ? '← I already have an account' : "I don't have an account yet. Create one"}
             </button>
           </div>
         </>
       ) : preview === undefined ? (
-        <div className="py-6 flex items-center justify-center text-sm text-white/50 gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Checking your invitation…</div>
+        <div className="py-6 flex items-center justify-center text-sm text-muted gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Checking your invitation…</div>
       ) : preview === null ? (
         <Message tone="error" title="Invitation not found"
           body={previewErr || "This invitation link is invalid. Ask whoever invited you to send a fresh link."} />
@@ -130,7 +130,7 @@ export default function InviteScreen({ session }) {
           body={`This invitation is for ${preview.email}, but you're signed in as ${myEmail}. Sign out and sign in with the invited email to accept.`}
           action={
             <button onClick={signOut}
-              className="w-full h-11 rounded-xl border border-white/10 bg-white/5 text-sm font-medium text-white/80 hover:bg-white/10 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+              className="w-full h-11 rounded-xl border border-line bg-fill text-sm font-medium text-secondary hover:bg-fill-strong active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
               Sign out
             </button>
           } />
@@ -138,7 +138,7 @@ export default function InviteScreen({ session }) {
         // Valid + email matches -> accept
         <div className="text-center">
           <h2 className="text-base font-semibold text-white mb-1">Join {preview.workspace_name}</h2>
-          <p className="text-[12px] text-white/45 mb-5">You'll be added to this workspace, signed in as {myEmail}.</p>
+          <p className="text-[12px] text-faint mb-5">You'll be added to this workspace, signed in as {myEmail}.</p>
           {acceptErr && <div className="mb-4"><AuthBanner tone="error">{acceptErr}</AuthBanner></div>}
           <AuthCTA type="button" onClick={accept} busy={accepting} busyLabel="Accepting…" disabled={accepting}>
             Accept invitation
@@ -155,7 +155,7 @@ function Message({ tone, title, body, action }) {
   return (
     <div className="text-center">
       <h2 className={`text-base font-semibold ${color} mb-1`}>{title}</h2>
-      <p className="text-[12px] text-white/50 mb-5">{body}</p>
+      <p className="text-[12px] text-muted mb-5">{body}</p>
       {action}
     </div>
   );
