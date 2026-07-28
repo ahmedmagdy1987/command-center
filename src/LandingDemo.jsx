@@ -41,7 +41,7 @@ const TABS = [
   { id: 'kanban', label: 'Kanban', icon: KanbanSquare },
   { id: 'matrix', label: 'Priority Matrix', icon: Grid3x3 },
   { id: 'schedule', label: 'Schedule', icon: CalendarDays },
-  { id: 'chat', label: 'Chat', icon: MessageSquare },
+  { id: 'chat', label: 'Messages', icon: MessageSquare },
 ];
 
 function AvatarDot({ person, size = 18, ring = false }) {
@@ -89,20 +89,25 @@ function DemoCard({ title, person, priority, due, done, lock, className = '', st
   );
 }
 
-const ColHead = ({ tint, children, count }) => (
+/* No count badge on purpose: a static number contradicts the animated board for most
+ * of the travel loop (the card is mid-flight), and under reduced motion the landed
+ * slot is hidden entirely — a wrong count reads as a bug in the product being demoed. */
+const ColHead = ({ tint, children }) => (
   <div className="flex items-center gap-1.5 mb-2 text-micro uppercase tracking-widest text-faint">
     <span className="w-1.5 h-1.5 rounded-full" style={{ background: tint }} />{children}
-    <span className="ml-auto tabular-nums normal-case tracking-normal">{count}</span>
   </div>
 );
 
 /* ---------------------------------- Kanban ---------------------------------- */
 function KanbanPanel() {
   return (
-    <div className="overflow-x-auto no-scrollbar -mx-1 px-1">
+    // tabIndex + region: a horizontal scroller is keyboard-unreachable without it,
+    // which hides the Done column from keyboard users on narrow viewports.
+    <div tabIndex={0} role="region" aria-label="Kanban board preview, scrolls horizontally"
+      className="overflow-x-auto no-scrollbar -mx-1 px-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
       <div className="grid grid-cols-3 gap-3 min-w-[560px]">
         <div>
-          <ColHead tint="#7c8cff" count={2}>Inbox</ColHead>
+          <ColHead tint="#7c8cff">Inbox</ColHead>
           <div className="relative space-y-2">
             {/* The travelling card: the static copy fades as the overlay clone slides one
                 column right — same sleight of hand as the hero board. */}
@@ -114,12 +119,12 @@ function KanbanPanel() {
           </div>
         </div>
         <div>
-          <ColHead tint="#38bdf8" count={3}>Must Do</ColHead>
+          <ColHead tint="#38bdf8">Must Do</ColHead>
           <div className="space-y-2">
             {/* Landing slot. NO inline opacity on the landed card: its rest state must be
                 VISIBLE so a prefers-reduced-motion visitor (all animations killed) sees a
                 complete board, not a blank slot — same pattern as the hero LiveBoard. */}
-            <div className="relative">
+            <div className="relative ld-landB-wrap">
               <div className="ld-hint absolute inset-0 rounded-lg border border-dashed border-brand-hover/40" style={{ opacity: 0 }} />
               <DemoCard className="ld-landB" title="Collect launch-page feedback" person={PEOPLE.priya} priority="high" due="Fri" />
             </div>
@@ -128,7 +133,7 @@ function KanbanPanel() {
           </div>
         </div>
         <div>
-          <ColHead tint="#34d399" count={2}>Done</ColHead>
+          <ColHead tint="#34d399">Done</ColHead>
           <div className="space-y-2">
             <DemoCard title="Ship pricing page copy" person={PEOPLE.maya} priority="medium" done />
             <DemoCard title="Invoice review — September" person={PEOPLE.priya} priority="low" done />
@@ -156,13 +161,13 @@ function MatrixPanel() {
         <Quad title="Do first" tint={PRIORITY.critical}>
           <DemoCard className="ld-pulse" title="Fix onboarding empty state" person={PEOPLE.jonas} priority="critical" due="Today" />
         </Quad>
-        <Quad title="Schedule" tint={PRIORITY.low}>
+        <Quad title="Schedule" tint="#7c8cff">
           <DemoCard title="Draft October newsletter" person={PEOPLE.maya} priority="medium" due="Tue" />
         </Quad>
-        <Quad title="Delegate" tint={PRIORITY.high}>
+        <Quad title="Delegate" tint="#fb923c">
           <DemoCard title="Collect launch-page feedback" person={PEOPLE.priya} priority="high" due="Fri" />
         </Quad>
-        <Quad title="Later" tint="#94a3b8">
+        <Quad title="Eliminate" tint="#64748b">
           <DemoCard title="Research CRM integrations" person={PEOPLE.sam} priority="low" />
         </Quad>
       </div>
@@ -180,7 +185,8 @@ function SchedulePanel() {
     { d: 'Fri', n: 10, items: [{ t: 'Launch feedback', p: 'high', who: PEOPLE.priya }] },
   ];
   return (
-    <div className="overflow-x-auto no-scrollbar -mx-1 px-1">
+    <div tabIndex={0} role="region" aria-label="Week schedule preview, scrolls horizontally"
+      className="overflow-x-auto no-scrollbar -mx-1 px-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
       <div className="grid grid-cols-5 gap-2 min-w-[540px]">
         {days.map((day) => (
           <div key={day.d} className={`rounded-xl border p-2 min-h-[150px] ${day.today ? 'border-brand-hover/40 bg-brand/10' : 'border-line-subtle bg-fill-subtle'}`}>
@@ -224,41 +230,52 @@ function Bubble({ who, children, delay, mine }) {
 
 function ChatPanel() {
   return (
-    <div className="max-w-md mx-auto space-y-3">
-      <Bubble who={PEOPLE.maya} delay="0s">Priya, can you take the launch-page feedback round?</Bubble>
-      <Bubble who={PEOPLE.priya} delay=".5s" mine>
-        On it — I only see my own tasks here, which honestly keeps it simple.
-      </Bubble>
-      {/* Voice note — the product's real chat feature, mocked. */}
-      <div className="ld-msg flex items-end gap-2" style={{ '--ld-d': '1s' }}>
-        <AvatarDot person={PEOPLE.jonas} />
-        <div className="rounded-2xl rounded-bl-md px-3 py-2 border bg-fill border-line-subtle flex items-center gap-2">
-          <span className="w-6 h-6 rounded-full bg-brand/20 border border-brand-hover/30 flex items-center justify-center shrink-0">
-            <Play className="w-3 h-3 text-brand-text translate-x-px" fill="currentColor" aria-hidden="true" />
-          </span>
-          <span className="flex items-center gap-[2px]" aria-hidden="true">
-            {[5, 9, 13, 8, 11, 6, 12, 9, 5, 10, 7, 4].map((h, i) => (
-              <span key={i} className="w-[3px] rounded-full bg-brand-text/60" style={{ height: h }} />
+    <div className="max-w-md mx-auto">
+      {/* A 1:1 DIRECT MESSAGE, deliberately. In the product, guests are excluded from
+          team chat entirely — their surfaces are their own tasks + DMs — and DMs are
+          strictly two-person. Showing Priya in a group channel would promise a thing
+          the product refuses to do. Viewer = Maya, so her messages sit right. */}
+      <div className="flex items-center gap-2 pb-2 mb-3 border-b border-line-subtle">
+        <AvatarDot person={PEOPLE.priya} ring />
+        <span className="text-note font-semibold text-primary">Priya</span>
+        <GuestBadge />
+        <span className="ml-auto text-micro text-faint">Direct message</span>
+      </div>
+      <div className="space-y-3">
+        <Bubble who={PEOPLE.maya} delay="0s" mine>Priya, can you take the launch-page feedback round?</Bubble>
+        <Bubble who={PEOPLE.priya} delay=".5s">
+          On it — I only see my own tasks here, which honestly keeps it simple.
+        </Bubble>
+        {/* Voice note — the product's real DM feature, mocked. Sent by Maya (mine). */}
+        <div className="ld-msg flex items-end gap-2 flex-row-reverse" style={{ '--ld-d': '1s' }}>
+          <AvatarDot person={PEOPLE.maya} />
+          <div className="rounded-2xl rounded-br-md px-3 py-2 border bg-brand/15 border-brand-hover/25 flex items-center gap-2">
+            <span className="w-6 h-6 rounded-full bg-brand/20 border border-brand-hover/30 flex items-center justify-center shrink-0">
+              <Play className="w-3 h-3 text-brand-text translate-x-px" fill="currentColor" aria-hidden="true" />
+            </span>
+            <span className="flex items-center gap-[2px]" aria-hidden="true">
+              {[5, 9, 13, 8, 11, 6, 12, 9, 5, 10, 7, 4].map((h, i) => (
+                <span key={i} className="w-[3px] rounded-full bg-brand-text/60" style={{ height: h }} />
+              ))}
+            </span>
+            <span className="text-micro text-faint tabular-nums">0:09</span>
+            <Mic className="w-3 h-3 text-faint" aria-hidden="true" />
+          </div>
+        </div>
+        {/* DM read receipt: visible text, so it reads the same to screen readers. */}
+        <div className="ld-msg flex items-center justify-end gap-1 pr-1" style={{ '--ld-d': '1.3s' }}>
+          <Check className="w-3 h-3 text-brand-text" aria-hidden="true" />
+          <span className="text-[9px] text-faint">Seen by Priya</span>
+        </div>
+        {/* Priya typing a reply */}
+        <div className="ld-msg flex items-center gap-2" style={{ '--ld-d': '1.6s' }}>
+          <AvatarDot person={PEOPLE.priya} ring />
+          <span className="rounded-2xl rounded-bl-md px-3 py-2.5 border bg-fill border-line-subtle inline-flex items-center gap-1">
+            {[0, 1, 2].map((i) => (
+              <span key={i} className="ld-dot w-1.5 h-1.5 rounded-full bg-faint" style={{ animationDelay: `${i * 0.18}s` }} />
             ))}
           </span>
-          <span className="text-micro text-faint tabular-nums">0:09</span>
-          <Mic className="w-3 h-3 text-faint" aria-hidden="true" />
         </div>
-      </div>
-      {/* Typing + read receipts */}
-      <div className="ld-msg flex items-center gap-2" style={{ '--ld-d': '1.4s' }}>
-        <AvatarDot person={PEOPLE.sam} />
-        <span className="rounded-2xl rounded-bl-md px-3 py-2.5 border bg-fill border-line-subtle inline-flex items-center gap-1">
-          {[0, 1, 2].map((i) => (
-            <span key={i} className="ld-dot w-1.5 h-1.5 rounded-full bg-faint" style={{ animationDelay: `${i * 0.18}s` }} />
-          ))}
-        </span>
-      </div>
-      <div className="ld-msg flex items-center justify-end gap-1 pr-1" style={{ '--ld-d': '1.7s' }}>
-        <span className="text-[9px] text-faint">Seen by</span>
-        <span className="flex -space-x-1">
-          {[PEOPLE.maya, PEOPLE.jonas, PEOPLE.sam].map((p) => <AvatarDot key={p.name} person={p} size={13} />)}
-        </span>
       </div>
     </div>
   );
@@ -270,7 +287,7 @@ const BLURB = {
   kanban: 'Drag work through your pipeline — everyone sees it move, instantly.',
   matrix: 'Urgent vs. important, on a 2×2 — priorities argue for themselves.',
   schedule: 'The week at a glance, with due-date reminders built in.',
-  chat: 'Team chat, direct messages, and voice notes — no separate chat app.',
+  chat: 'Team chat for your crew, plus 1:1 direct messages that work with guests too.',
 };
 
 export default function LandingDemo() {
@@ -292,7 +309,9 @@ export default function LandingDemo() {
   return (
     <div className="rounded-2xl border border-line bg-surface-raised shadow-2xl overflow-hidden">
       {/* Window chrome */}
-      <div className="flex items-center gap-2 px-4 h-11 border-b border-line-subtle bg-fill-subtle">
+      {/* flex-wrap + py: on a 360px phone the four tabs wrap to a second row instead
+          of vanishing into an invisible (no-scrollbar) horizontal scroller. */}
+      <div className="flex items-center flex-wrap gap-2 px-4 py-2 border-b border-line-subtle bg-fill-subtle">
         <span className="flex items-center gap-1.5" aria-hidden="true">
           <span className="w-2.5 h-2.5 rounded-full bg-danger-hover/70" />
           <span className="w-2.5 h-2.5 rounded-full bg-warning-hover/70" />
@@ -300,7 +319,7 @@ export default function LandingDemo() {
         </span>
         {/* Tab strip */}
         <div role="tablist" aria-label="Product views" onKeyDown={onKeyDown}
-          className="ml-2 flex items-center gap-1 overflow-x-auto no-scrollbar">
+          className="ml-2 flex items-center flex-wrap gap-1">
           {TABS.map((t) => {
             const active = t.id === tab;
             return (
@@ -330,7 +349,7 @@ export default function LandingDemo() {
         role="tabpanel"
         id="ld-panel"
         aria-labelledby={`ld-tab-${tab}`}
-        className="p-4 lg:p-5 min-h-[300px] sm:min-h-[330px]"
+        className="p-4 lg:p-5 min-h-[360px]"
       >
         <div key={tab} className="ld-enter">
           <Panel />

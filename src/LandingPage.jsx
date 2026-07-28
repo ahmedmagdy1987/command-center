@@ -429,8 +429,11 @@ export default function LandingPage() {
           100%    { transform: translate(0,0); }
         }
         @keyframes ldGoCard { 0%,18% { opacity: 0; } 24%,36% { opacity: 1; } 42%,100% { opacity: 0; } }
-        @keyframes ldGoA { 0%,20% { opacity: 1; } 26%,90% { opacity: 0; } 97%,100% { opacity: 1; } }
-        @keyframes ldLandB { 0%,40% { opacity: 0; } 46%,95% { opacity: 1; } 100% { opacity: 0; } }
+        /* The return crossfade is deliberately TIGHT (94->98 vs 98->100): the demo cards
+           carry readable identical titles, so a slow overlap reads as the same task
+           sitting in two columns — i.e. as a bug in the product being demoed. */
+        @keyframes ldGoA { 0%,20% { opacity: 1; } 26%,94% { opacity: 0; } 98%,100% { opacity: 1; } }
+        @keyframes ldLandB { 0%,40% { opacity: 0; } 46%,94% { opacity: 1; } 98%,100% { opacity: 0; } }
         @keyframes ldHint { 0%,24% { opacity: 0; } 29%,36% { opacity: .9; } 41%,100% { opacity: 0; } }
         .ld-go       { animation: ldGo 11s cubic-bezier(.45,.05,.35,1) infinite; }
         .ld-go > div { animation: ldGoCard 11s ease infinite; }
@@ -469,6 +472,10 @@ export default function LandingPage() {
         /* ---------- Reduced motion: kill ALL decoration; static styles are the complete page ---------- */
         @media (prefers-reduced-motion: reduce) {
           .lp-root *, .lp-root { animation: none !important; transition: none !important; }
+          /* With animations dead, both copies of the travelling kanban card would render
+             at rest — the same named task in Inbox AND Must Do. Hide the landed slot so
+             the frozen board shows the task exactly once. */
+          .lp-root .ld-landB-wrap { display: none; }
         }
       `}</style>
 
@@ -549,10 +556,15 @@ export default function LandingPage() {
             <h2 className="text-2xl lg:text-3xl font-semibold font-brand tracking-tight">Try it right here — no account needed</h2>
             <p className="mt-2 text-faint">
               Click through the product’s actual views. Watch for <span className="text-brand-alt-text">Priya</span>, the
-              outside collaborator: she’s on the board, in the matrix, and in chat — seeing only her own work.
+              outside collaborator: she’s on the board, in the matrix, and in your direct messages — while seeing
+              only her own work.
             </p>
           </div>
-          <div data-lp-reveal className="mt-8" style={{ '--lp-d': '120ms' }}>
+          {/* NO scroll-reveal on the demo itself: [data-lp-reveal] starts at opacity 0,
+              and an invisible tablist is still keyboard-focusable — a Tab press would
+              land focus inside a widget the user cannot see. The heading reveals; the
+              interactive widget is simply there. */}
+          <div className="mt-8">
             <LandingDemo />
           </div>
           <div data-lp-reveal className="mt-6 text-center" style={{ '--lp-d': '200ms' }}>
@@ -628,15 +640,17 @@ export default function LandingPage() {
                   </div>
                   <p className="mt-1 text-compact text-muted">{plan.tagline}</p>
                   <ul className="mt-4 space-y-2 flex-1">
-                    {plan.highlights.slice(0, 4).map((h) => (
+                    {/* slice(0, 5), not 4: the Free plan's 5th highlight is team chat & DMs — the
+                        differentiator this page leads with; hiding it undersold Free. */}
+                    {plan.highlights.slice(0, 5).map((h) => (
                       <li key={h} className="flex items-start gap-2 text-compact text-secondary">
                         <Check className="w-3.5 h-3.5 text-success-text mt-0.5 shrink-0" />{h}
                       </li>
                     ))}
                   </ul>
-                  {plan.popular ? (
+                  {plan.paid ? (
                     <Link to="/pricing" className="mt-5 h-10 rounded-xl bg-brand hover:bg-brand-hover text-brand-fg text-sm font-semibold flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
-                      See everything in Pro
+                      See everything in {plan.name}
                     </Link>
                   ) : (
                     <Link to="/signup" className="mt-5 h-10 rounded-xl border border-line bg-fill text-sm font-semibold text-primary hover:bg-fill-strong flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
