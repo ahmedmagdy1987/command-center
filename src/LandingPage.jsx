@@ -61,14 +61,14 @@ const Divider = () => <Hairline className="absolute top-0 inset-x-0" />;
 function GhostCard({ w1, w2, color, dot, avatar, progress, solid, className = '', style }) {
   return (
     <div
-      className={`h-[52px] rounded-lg border p-2.5 ${solid ? 'border-violet-400/25 bg-[#171826]' : 'border-line-subtle bg-fill-subtle'} ${className}`}
+      className={`h-[52px] rounded-lg border p-2.5 ${solid ? 'border-brand-hover/25 bg-[#171826]' : 'border-line-subtle bg-fill-subtle'} ${className}`}
       style={style}
     >
       <div className="h-1.5 rounded-full mb-2" style={{ width: w1, background: color, opacity: 0.55 }} />
       {progress ? (
         <div className="h-1 rounded-full bg-fill-strong overflow-hidden relative">
-          <span className="absolute inset-y-0 left-0 w-[55%] rounded-full bg-violet-400/50 overflow-hidden">
-            <span className="lp-sheen absolute inset-y-0 w-2/5 bg-gradient-to-r from-transparent via-white/40 to-transparent" style={{ opacity: 0 }} />
+          <span className="absolute inset-y-0 left-0 w-[55%] rounded-full bg-brand-hover/50 overflow-hidden">
+            <span className="lp-sheen absolute inset-y-0 w-2/5 bg-gradient-to-r from-transparent via-fill-strong to-transparent" style={{ opacity: 0 }} />
           </span>
         </div>
       ) : (
@@ -93,9 +93,9 @@ function LiveBoard() {
       {/* Window chrome + presence cluster */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-rose-400/70" />
-          <span className="w-2.5 h-2.5 rounded-full bg-amber-400/70" />
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400/70" />
+          <span className="w-2.5 h-2.5 rounded-full bg-danger-hover/70" />
+          <span className="w-2.5 h-2.5 rounded-full bg-warning-hover/70" />
+          <span className="w-2.5 h-2.5 rounded-full bg-success-hover/70" />
         </div>
         <div className="flex items-center -space-x-1.5">
           {[
@@ -104,8 +104,8 @@ function LiveBoard() {
             ['linear-gradient(135deg,#f59e0b,#f43f5e)', null],
           ].map(([bg, ping], i) => (
             <span key={i} className="relative w-5 h-5 rounded-full border-2 border-surface-raised" style={{ background: bg }}>
-              {ping && <span className={`${ping} absolute -bottom-px -right-px w-2 h-2 rounded-full bg-emerald-400`} style={{ opacity: 0 }} />}
-              {ping && <span className="absolute -bottom-px -right-px w-2 h-2 rounded-full bg-emerald-400 border border-surface-raised" />}
+              {ping && <span className={`${ping} absolute -bottom-px -right-px w-2 h-2 rounded-full bg-success-hover`} style={{ opacity: 0 }} />}
+              {ping && <span className="absolute -bottom-px -right-px w-2 h-2 rounded-full bg-success-hover border border-surface-raised" />}
             </span>
           ))}
         </div>
@@ -114,7 +114,7 @@ function LiveBoard() {
       <div className="grid grid-cols-3 gap-3">
         {/* To do */}
         <div>
-          <div className="flex items-center gap-1.5 mb-2 text-[10px] uppercase tracking-widest text-faint">
+          <div className="flex items-center gap-1.5 mb-2 text-micro uppercase tracking-widest text-faint">
             <span className="w-1.5 h-1.5 rounded-full bg-[#a78bfa]" />Inbox
           </div>
           <div className="relative space-y-2">
@@ -126,8 +126,8 @@ function LiveBoard() {
             {/* Drag overlay: travels exactly one column + gap right. Invisible at rest. */}
             <div className="lp-drag absolute inset-x-0 top-0 z-10 !mt-0">
               <div className="relative">
-                <div className="lp-dragGlow absolute -inset-1 rounded-xl bg-violet-500/25" style={{ opacity: 0 }} />
-                <GhostCard w1="72%" w2="44%" color="#a78bfa" avatar="linear-gradient(135deg,#8b5cf6,#d946ef)" dot="#fbbf24" solid className="lp-dragCard relative shadow-xl shadow-black/40" style={{ opacity: 0 }} />
+                <div className="lp-dragGlow absolute -inset-1 rounded-xl bg-brand/25" style={{ opacity: 0 }} />
+                <GhostCard w1="72%" w2="44%" color="#a78bfa" avatar="linear-gradient(135deg,#8b5cf6,#d946ef)" dot="#fbbf24" solid className="lp-dragCard relative shadow-xl shadow-lg" style={{ opacity: 0 }} />
                 <MousePointer2 className="lp-cursor absolute left-[58%] top-[46%] w-4 h-4 text-white drop-shadow-md" fill="white" style={{ opacity: 0 }} />
               </div>
             </div>
@@ -136,13 +136,13 @@ function LiveBoard() {
 
         {/* Doing */}
         <div>
-          <div className="flex items-center gap-1.5 mb-2 text-[10px] uppercase tracking-widest text-faint">
+          <div className="flex items-center gap-1.5 mb-2 text-micro uppercase tracking-widest text-faint">
             <span className="w-1.5 h-1.5 rounded-full bg-[#38bdf8]" />Must Do
           </div>
           <div className="relative space-y-2">
             {/* Landing slot: dashed hint during the drag; the landed card fades in beneath the overlay */}
             <div className="relative">
-              <div className="lp-dropHint absolute inset-0 rounded-lg border border-dashed border-violet-400/40" style={{ opacity: 0 }} />
+              <div className="lp-dropHint absolute inset-0 rounded-lg border border-dashed border-brand-hover/40" style={{ opacity: 0 }} />
               <GhostCard w1="72%" w2="44%" color="#38bdf8" avatar="linear-gradient(135deg,#8b5cf6,#d946ef)" dot="#fbbf24" className="lp-cardB" />
             </div>
             <GhostCard w1="62%" color="#38bdf8" progress />
@@ -151,7 +151,7 @@ function LiveBoard() {
 
         {/* Done */}
         <div>
-          <div className="flex items-center gap-1.5 mb-2 text-[10px] uppercase tracking-widest text-faint">
+          <div className="flex items-center gap-1.5 mb-2 text-micro uppercase tracking-widest text-faint">
             <span className="w-1.5 h-1.5 rounded-full bg-[#34d399]" />Done
           </div>
           <div className="space-y-2">
@@ -162,9 +162,9 @@ function LiveBoard() {
       </div>
 
       {/* Completion toast, sliding through mid-loop */}
-      <div className="lp-toast absolute bottom-3 right-3 flex items-center gap-2 rounded-xl border border-line bg-[#171826] px-3 py-2 shadow-xl shadow-black/40" style={{ opacity: 0 }}>
-        <span className="w-5 h-5 rounded-full bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center">
-          <Check className="w-3 h-3 text-emerald-400" strokeWidth={3} />
+      <div className="lp-toast absolute bottom-3 right-3 flex items-center gap-2 rounded-xl border border-line bg-[#171826] px-3 py-2 shadow-xl shadow-lg" style={{ opacity: 0 }}>
+        <span className="w-5 h-5 rounded-full bg-success/20 border border-success-hover/40 flex items-center justify-center">
+          <Check className="w-3 h-3 text-success-text" strokeWidth={3} />
         </span>
         <span className="space-y-1">
           <span className="block h-1.5 w-20 rounded-full bg-fill-strong" />
@@ -215,9 +215,6 @@ export default function LandingPage() {
   return (
     <div ref={rootRef} data-surface="dark" className="lp-root min-h-screen bg-canvas text-white relative">
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
-        body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; background: #070810; }
-        .font-display { font-family: 'Fraunces', ui-serif, serif; font-optical-sizing: auto; font-weight: 500; }
 
         /* ---------- Hero entrance choreography (fill: both; static styles = final state) ---------- */
         @keyframes lpFadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
@@ -340,12 +337,12 @@ export default function LandingPage() {
         {/* Hero (compact: fits above the fold on a typical laptop) */}
         <section className="pt-8 lg:pt-12 pb-10 grid lg:grid-cols-2 gap-8 lg:gap-10 items-center">
           <div>
-            <div className="lp-in inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-widest text-violet-300/80 bg-violet-500/10 border border-violet-400/20 rounded-full px-3 h-7 mb-4" style={{ animationDelay: '.05s' }}>
+            <div className="lp-in inline-flex items-center gap-1.5 text-meta font-medium uppercase tracking-widest text-brand-text/80 bg-brand/10 border border-brand-hover/20 rounded-full px-3 h-7 mb-4" style={{ animationDelay: '.05s' }}>
               Visual task management for teams
             </div>
             <h1 className="text-3xl lg:text-4xl xl:text-5xl font-semibold font-display tracking-tight leading-[1.05]">
               <span className="lp-line"><span className="lp-line-inner" style={{ animationDelay: '.12s' }}>Stop losing track of</span></span>
-              <span className="lp-line"><span className="lp-line-inner bg-gradient-to-r from-violet-300 via-fuchsia-300 to-rose-300 bg-clip-text text-transparent" style={{ animationDelay: '.24s' }}>who’s doing what.</span></span>
+              <span className="lp-line"><span className="lp-line-inner bg-gradient-to-r from-brand-text via-brand-alt-text to-danger-text bg-clip-text text-transparent" style={{ animationDelay: '.24s' }}>who’s doing what.</span></span>
             </h1>
             <p className="lp-in mt-4 text-sm lg:text-base text-muted max-w-xl leading-relaxed" style={{ animationDelay: '.4s' }}>
               Pull every task, owner, and due date into one visual workspace. Track it on a kanban board,
@@ -353,18 +350,18 @@ export default function LandingPage() {
             </p>
             <div className="lp-in mt-6 flex flex-wrap items-center gap-3" style={{ animationDelay: '.52s' }}>
               <Magnetic>
-                <Link to="/signup" className="h-11 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+                <Link to="/signup" className="h-11 px-6 rounded-xl bg-brand-gradient-cta text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
                   Get organized free <ArrowRight className="w-4 h-4" />
                 </Link>
               </Magnetic>
-              <Link to="/login" className="h-11 px-6 rounded-xl border border-line bg-fill-subtle text-secondary font-medium text-sm flex items-center hover:bg-fill active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+              <Link to="/login" className="h-11 px-6 rounded-xl border border-line bg-fill-subtle text-secondary font-medium text-sm flex items-center hover:bg-fill active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
                 Log in
               </Link>
             </div>
-            <div className="lp-in mt-5 flex flex-wrap gap-x-5 gap-y-1.5 text-[12px] text-faint" style={{ animationDelay: '.66s' }}>
-              <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-emerald-400" /> Real-time sync</span>
-              <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-emerald-400" /> Private &amp; shared tasks</span>
-              <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-emerald-400" /> Team chat &amp; direct messages</span>
+            <div className="lp-in mt-5 flex flex-wrap gap-x-5 gap-y-1.5 text-note text-faint" style={{ animationDelay: '.66s' }}>
+              <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-success-text" /> Real-time sync</span>
+              <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-success-text" /> Private &amp; shared tasks</span>
+              <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-success-text" /> Team chat &amp; direct messages</span>
             </div>
           </div>
 
@@ -393,14 +390,14 @@ export default function LandingPage() {
               <div key={f.title} data-lp-reveal style={{ '--lp-d': `${(i % 3) * 90}ms` }}>
                 <div
                   onMouseMove={glowTrack}
-                  className="group relative h-full overflow-hidden rounded-2xl border border-line-subtle bg-gradient-to-br from-fill-subtle to-transparent p-5 transition-all duration-300 hover:-translate-y-1 hover:border-violet-400/25 hover:shadow-xl hover:shadow-violet-950/40"
+                  className="group relative h-full overflow-hidden rounded-2xl border border-line-subtle bg-gradient-to-br from-fill-subtle to-transparent p-5 transition-all duration-300 hover:-translate-y-1 hover:border-brand-hover/25 hover:shadow-xl hover:shadow-brand/40"
                 >
                   <span className="lp-cardGlow opacity-0 group-hover:opacity-100 transition-opacity duration-300" aria-hidden="true" />
-                  <div className="relative w-10 h-10 rounded-xl bg-violet-500/10 border border-violet-400/20 flex items-center justify-center mb-3 transition-colors duration-300 group-hover:bg-violet-500/20 group-hover:border-violet-400/40">
-                    <f.icon className="w-5 h-5 text-violet-300 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6" />
+                  <div className="relative w-10 h-10 rounded-xl bg-brand/10 border border-brand-hover/20 flex items-center justify-center mb-3 transition-colors duration-300 group-hover:bg-brand/20 group-hover:border-brand-hover/40">
+                    <f.icon className="w-5 h-5 text-brand-text transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6" />
                   </div>
                   <h3 className="relative text-base font-semibold text-white">{f.title}</h3>
-                  <p className="relative mt-1 text-[13px] text-muted leading-relaxed">{f.body}</p>
+                  <p className="relative mt-1 text-compact text-muted leading-relaxed">{f.body}</p>
                 </div>
               </div>
             ))}
@@ -415,9 +412,9 @@ export default function LandingPage() {
             {STEPS.map((s, i) => (
               <div key={s.n} data-lp-reveal style={{ '--lp-d': `${i * 110}ms` }}>
                 <div className="group h-full rounded-2xl border border-line-subtle bg-fill-subtle p-5 transition-all duration-300 hover:-translate-y-1 hover:border-line">
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-sm font-bold mb-3 shadow-lg shadow-violet-950/50 transition-transform duration-300 group-hover:scale-110">{s.n}</div>
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand to-brand-alt flex items-center justify-center text-sm font-bold mb-3 shadow-lg shadow-brand/50 transition-transform duration-300 group-hover:scale-110">{s.n}</div>
                   <h3 className="text-base font-semibold text-white">{s.title}</h3>
-                  <p className="mt-1 text-[13px] text-muted leading-relaxed">{s.body}</p>
+                  <p className="mt-1 text-compact text-muted leading-relaxed">{s.body}</p>
                 </div>
               </div>
             ))}
@@ -427,18 +424,18 @@ export default function LandingPage() {
         {/* CTA band */}
         <section className="relative py-14">
           <Divider />
-          <div data-lp-reveal className="relative overflow-hidden rounded-2xl border border-violet-400/20 bg-[#0c0d15] p-8 lg:p-12 text-center">
+          <div data-lp-reveal className="relative overflow-hidden rounded-2xl border border-brand-hover/20 bg-[#0c0d15] p-8 lg:p-12 text-center">
             {/* Inner atmosphere: brand wash + a slow-drifting glow + a comet along the top hairline */}
-            <div className="absolute inset-0 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/[0.07] to-transparent" aria-hidden="true" />
+            <div className="absolute inset-0 bg-gradient-to-br from-brand/15 via-brand-alt/[0.07] to-transparent" aria-hidden="true" />
             <div className="absolute -top-24 left-1/2 -ml-48 w-96 h-96 rounded-full" aria-hidden="true" style={{ background: 'radial-gradient(closest-side, rgba(167,139,250,.18), transparent 70%)', animation: 'lpDrift3 18s ease-in-out infinite alternate' }} />
             <div className="absolute top-0 inset-x-0 h-px overflow-hidden" aria-hidden="true">
-              <span className="lp-comet absolute top-0 h-px w-60 bg-gradient-to-r from-transparent via-fuchsia-300/80 to-transparent" style={{ opacity: 0 }} />
+              <span className="lp-comet absolute top-0 h-px w-60 bg-gradient-to-r from-transparent via-brand-alt-text/80 to-transparent" style={{ opacity: 0 }} />
             </div>
             <h2 className="relative text-2xl lg:text-3xl font-semibold font-display tracking-tight">Ready to organize your team’s work?</h2>
             <p className="relative mt-2 text-muted">Create a workspace in seconds. It’s free to get started.</p>
             <div className="relative mt-6 flex justify-center gap-3">
               <Magnetic>
-                <Link to="/signup" className="h-12 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+                <Link to="/signup" className="h-12 px-6 rounded-xl bg-brand-gradient-cta text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
                   Get organized free <ArrowRight className="w-4 h-4" />
                 </Link>
               </Magnetic>

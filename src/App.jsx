@@ -17,11 +17,8 @@ import { supabase } from './lib/supabase';
 function FullScreenSpinner() {
   return (
     <div data-surface="dark" className="min-h-screen bg-canvas text-white flex items-center justify-center">
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300..700&display=swap');
-        body { font-family: 'Outfit', sans-serif; background: #070810; }
-      `}</style>
-      <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-2xl shadow-fuchsia-500/30 animate-pulse">
+      
+      <div className="w-12 h-12 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-2xl shadow-brand-alt/30 animate-pulse">
         <Sparkles className="w-6 h-6 text-white" />
       </div>
     </div>

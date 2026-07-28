@@ -28,8 +28,8 @@ export default class ErrorBoundary extends React.Component {
 
     const card = (
       <div className="max-w-md w-full rounded-2xl border border-line bg-surface-raised p-6 text-center">
-        <div className="mx-auto w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-400/30 flex items-center justify-center">
-          <AlertCircle className="w-5 h-5 text-rose-300" />
+        <div className="mx-auto w-10 h-10 rounded-xl bg-danger/15 border border-danger-hover/30 flex items-center justify-center">
+          <AlertCircle className="w-5 h-5 text-danger-text" />
         </div>
         <div className="mt-3 text-sm font-semibold text-primary">Something went wrong here</div>
         <p className="mt-1.5 text-xs text-muted leading-relaxed">
@@ -41,7 +41,7 @@ export default class ErrorBoundary extends React.Component {
             Try again
           </button>
           <button onClick={() => window.location.reload()}
-            className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5">
+            className="h-9 px-4 rounded-xl bg-brand hover:bg-brand-hover text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5">
             <RefreshCw className="w-3.5 h-3.5" />Reload app
           </button>
         </div>

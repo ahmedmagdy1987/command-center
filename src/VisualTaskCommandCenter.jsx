@@ -117,7 +117,6 @@ const STATUSES = {
 const PROJECT_PALETTE = ['#a78bfa','#f472b6','#38bdf8','#34d399','#fb923c','#f43f5e','#facc15','#94a3b8','#64748b','#22d3ee','#c084fc','#4ade80'];
 const PROJECT_ICONS = ['◇','◈','◎','☉','✎','↗','♡','◐','⚙','★','✦','⬢'];
 
-
 const EFFORTS = {
   quick:  { id: 'quick',  label: 'Quick',  mins: 15, hex: '#34d399' },
   medium: { id: 'medium', label: 'Medium', mins: 45, hex: '#facc15' },
@@ -1151,13 +1150,13 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
           {appToasts.map(tt => (
             <div key={tt.id} style={{ animation: 'slideUp .2s ease' }}
               className={cx('pointer-events-auto w-full flex items-start gap-2 rounded-xl border px-3.5 py-2.5 text-xs shadow-2xl backdrop-blur',
-                tt.tone === 'error' ? 'border-rose-500/25 bg-rose-500/10 text-rose-200' : 'border-line bg-surface-raised/90 text-secondary')}>
+                tt.tone === 'error' ? 'border-danger/25 bg-danger/10 text-danger-text' : 'border-line bg-surface-raised/90 text-secondary')}>
               {tt.tone === 'error' ? <AlertCircle className="w-4 h-4 shrink-0 mt-px" /> : <Info className="w-4 h-4 shrink-0 mt-px" />}
               <span className="flex-1 break-words">{tt.message}</span>
               {tt.action && (
                 <button
                   onClick={() => { setAppToasts(p => p.filter(x => x.id !== tt.id)); tt.action.onClick?.(); }}
-                  className="shrink-0 font-semibold underline underline-offset-2 text-violet-300 hover:text-violet-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70 rounded px-0.5">
+                  className="shrink-0 font-semibold underline underline-offset-2 text-brand-text hover:text-brand-text focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-hover/70 rounded px-0.5">
                   {tt.action.label}
                 </button>
               )}
@@ -1237,7 +1236,7 @@ function AssigneeChip({ assigneeId, showLabel = true, size = 'sm' }) {
   const { resolveAssignee, theme } = useApp();
   const a = resolveAssignee(assigneeId);
   const light = theme === 'light';
-  const dims = size === 'sm' ? 'h-5 text-[10px]' : 'h-6 text-xs';
+  const dims = size === 'sm' ? 'h-5 text-micro' : 'h-6 text-xs';
   const face = size === 'sm' ? 14 : 18;
   return (
     <span className={cx('inline-flex items-center gap-1 rounded-full font-medium tracking-wide pl-0.5', dims, showLabel ? (size === 'sm' ? 'pr-2' : 'pr-2.5') : 'pr-0.5')}
@@ -1258,14 +1257,14 @@ function AssigneeChip({ assigneeId, showLabel = true, size = 'sm' }) {
 function Badge({ children, tone = 'neutral', icon: Icon }) {
   const tones = {
     neutral: 'bg-fill text-muted border-line',
-    overdue: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
-    today:   'bg-amber-500/15 text-amber-300 border-amber-500/30',
-    soon:    'bg-sky-500/15 text-sky-300 border-sky-500/30',
+    overdue: 'bg-danger/15 text-danger-text border-danger/30',
+    today:   'bg-warning/15 text-warning-text border-warning/30',
+    soon:    'bg-info/15 text-info-text border-info/30',
     later:   'bg-fill text-muted border-line',
-    block:   'bg-rose-500/15 text-rose-300 border-rose-500/30',
-    success: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+    block:   'bg-danger/15 text-danger-text border-danger/30',
+    success: 'bg-success/15 text-success-text border-success/30',
   };
-  return <span className={cx('inline-flex items-center gap-1 rounded-md border px-1.5 h-5 text-[10px] font-medium', tones[tone])}>
+  return <span className={cx('inline-flex items-center gap-1 rounded-md border px-1.5 h-5 text-micro font-medium', tones[tone])}>
     {Icon && <Icon className="w-3 h-3" />}{children}
   </span>;
 }
@@ -1287,7 +1286,7 @@ function Tooltip({ children, content, className = 'inline-flex' }) {
   return (
     <span className={cx('relative group', className)}>
       {children}
-      <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-9 whitespace-nowrap text-[10px] font-medium px-2 py-1 rounded-md bg-black/90 border border-line text-primary opacity-0 group-hover:opacity-100 transition-opacity z-50">
+      <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-9 whitespace-nowrap text-micro font-medium px-2 py-1 rounded-md bg-tooltip border border-line text-primary opacity-0 group-hover:opacity-100 transition-opacity z-50">
         {content}
       </span>
     </span>
@@ -1353,7 +1352,7 @@ function ChangePasswordModal({ open, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-[fadeIn_.15s_ease]" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-overlay backdrop-blur-sm flex items-center justify-center p-4 animate-[fadeIn_.15s_ease]" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-line bg-surface-raised shadow-2xl p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-white font-display">Change password</h3>
@@ -1362,32 +1361,32 @@ function ChangePasswordModal({ open, onClose }) {
 
         {success ? (
           <div className="py-8 text-center">
-            <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center mx-auto mb-3">
-              <Check className="w-6 h-6 text-emerald-400" strokeWidth={3} />
+            <div className="w-12 h-12 rounded-full bg-success/20 border border-success/30 flex items-center justify-center mx-auto mb-3">
+              <Check className="w-6 h-6 text-success-text" strokeWidth={3} />
             </div>
             <div className="text-sm text-primary font-medium">Password changed successfully</div>
           </div>
         ) : (
           <form onSubmit={submit} className="space-y-3">
             <div>
-              <label className="text-[10px] font-medium uppercase tracking-widest text-faint mb-1.5 block">Current password</label>
+              <label className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5 block">Current password</label>
               <input type="password" value={current} onChange={e => setCurrent(e.target.value)} required autoFocus
-                className="w-full bg-black/30 border border-line rounded-lg px-3 h-10 text-sm text-white outline-none focus:border-violet-400/50" />
+                className="w-full bg-input border border-line rounded-lg px-3 h-10 text-sm text-white outline-none focus:border-brand-hover/50" />
             </div>
             <div>
-              <label className="text-[10px] font-medium uppercase tracking-widest text-faint mb-1.5 block">New password</label>
+              <label className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5 block">New password</label>
               <input type="password" value={next} onChange={e => setNext(e.target.value)} required minLength={10}
                 placeholder="At least 10 characters"
-                className="w-full bg-black/30 border border-line rounded-lg px-3 h-10 text-sm text-white placeholder-faint outline-none focus:border-violet-400/50" />
+                className="w-full bg-input border border-line rounded-lg px-3 h-10 text-sm text-white placeholder-faint outline-none focus:border-brand-hover/50" />
             </div>
             <div>
-              <label className="text-[10px] font-medium uppercase tracking-widest text-faint mb-1.5 block">Confirm new password</label>
+              <label className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5 block">Confirm new password</label>
               <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} required
-                className="w-full bg-black/30 border border-line rounded-lg px-3 h-10 text-sm text-white outline-none focus:border-violet-400/50" />
+                className="w-full bg-input border border-line rounded-lg px-3 h-10 text-sm text-white outline-none focus:border-brand-hover/50" />
             </div>
 
             {error && (
-              <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300">
+              <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-danger/10 border border-danger/20 text-xs text-danger-text">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-px" />
                 <span>{error}</span>
               </div>
@@ -1399,7 +1398,7 @@ function ChangePasswordModal({ open, onClose }) {
                 Cancel
               </button>
               <button type="submit" disabled={loading || !current || !next || !confirm}
-                className="flex-1 h-10 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm hover:shadow-lg hover:shadow-fuchsia-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2">
+                className="flex-1 h-10 rounded-lg bg-brand-gradient-cta text-white font-semibold text-sm hover:shadow-lg hover:shadow-brand-alt/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2">
                 {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Change'}
               </button>
             </div>
@@ -1443,7 +1442,7 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showAssign
         'group relative rounded-xl border cursor-pointer transition-all duration-200',
         'border-line-subtle bg-gradient-to-br from-fill to-fill-subtle',
         'hover:border-line hover:from-fill hover:to-fill-subtle',
-        'hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/30',
+        'hover:-translate-y-0.5 hover:shadow-xl hover:shadow-md',
         done && 'opacity-50',
         exiting && 'animate-[fadeSlideOut_.18s_ease_forwards] pointer-events-none',
         compact ? 'p-3' : 'p-4',
@@ -1467,7 +1466,7 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showAssign
           </button>
           <PriorityDot priority={task.priority} />
           {isPrivate && <span title="Private: visible only to the creator and assignee"><Lock className="w-3 h-3 text-faint shrink-0" /></span>}
-          {task.blocked && <PauseCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
+          {task.blocked && <PauseCircle className="w-3.5 h-3.5 text-danger-text shrink-0" />}
         </div>
         {showAssignee && <AssigneeChip assigneeId={task.assigneeId} showLabel={!compact} size="sm" />}
       </div>
@@ -1485,13 +1484,13 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showAssign
           <div className="h-1 bg-fill rounded-full overflow-hidden">
             <div className="h-full rounded-full transition-all" style={{ width: `${(doneCount/totalSub)*100}%`, background: `linear-gradient(90deg, ${priority.hex}, ${assignee.hex})` }} />
           </div>
-          <div className="text-[10px] text-faint mt-1 font-medium tracking-wide">{doneCount}/{totalSub} subtasks</div>
+          <div className="text-micro text-faint mt-1 font-medium tracking-wide">{doneCount}/{totalSub} subtasks</div>
         </div>
       )}
 
       <div className="flex flex-wrap items-center gap-1.5">
         {project && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted">
+          <span className="inline-flex items-center gap-1 text-micro font-medium text-muted">
             <span style={{ color: project.color }}>{project.icon}</span>
             <span>{project.name}</span>
           </span>
@@ -1502,11 +1501,11 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showAssign
         )}
         {task.blocked && <Badge tone="block">Blocked</Badge>}
         {task.tags.slice(0, compact ? 0 : 2).map(t => (
-          <span key={t} className="text-[10px] text-faint">#{t}</span>
+          <span key={t} className="text-micro text-faint">#{t}</span>
         ))}
         {!compact && task.createdBy && (
           /* A face, but NOT a PersonButton: the whole card is already a click target for opening the task. */
-          <span className="text-[10px] text-faint inline-flex items-center gap-1">
+          <span className="text-micro text-faint inline-flex items-center gap-1">
             · by
             <Avatar name={resolveAssignee(task.createdBy).known ? creatorLabel(task.createdBy) : ''} userId={task.createdBy} photoUrl={resolveAssignee(task.createdBy).avatarUrl} size={12} />
             {creatorLabel(task.createdBy)}
@@ -1539,7 +1538,7 @@ function MentionText({ text, mentions }) {
   return s.split(re).map((p, i) => idByAt.has(p)
     ? <button key={i} type="button" title="View profile"
         onClick={e => { e.stopPropagation(); e.preventDefault(); openProfile(idByAt.get(p)); }}
-        className="rounded px-1 -mx-0.5 bg-violet-500/20 text-violet-200 font-medium hover:bg-violet-500/30 transition-colors">{p}</button>
+        className="rounded px-1 -mx-0.5 bg-brand/20 text-brand-text font-medium hover:bg-brand/30 transition-colors">{p}</button>
     : p);
 }
 
@@ -1604,10 +1603,10 @@ function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onE
       {menu && pos && filtered.length > 0 && createPortal(
         <div className="fixed z-[80] max-h-52 overflow-y-auto rounded-xl border border-line bg-surface-raised shadow-2xl py-1"
           style={{ left: pos.left, bottom: pos.bottom, width: pos.width }}>
-          <div className="px-3 pt-1 pb-1.5 text-[10px] font-medium uppercase tracking-widest text-faint">Mention someone</div>
+          <div className="px-3 pt-1 pb-1.5 text-micro font-medium uppercase tracking-widest text-faint">Mention someone</div>
           {filtered.map((m, i) => (
             <button key={m.userId} type="button" onMouseDown={(ev) => { ev.preventDefault(); pick(m); }} onMouseEnter={() => setActive(i)}
-              className={cx('w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left', i === active ? 'bg-violet-500/25 text-white' : 'text-primary')}>
+              className={cx('w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left', i === active ? 'bg-brand/25 text-white' : 'text-primary')}>
               <Avatar name={m.displayName || m.email} userId={m.userId} photoUrl={m.avatarUrl} size={20} />
               <span className="truncate">{m.displayName || m.email}</span>
             </button>
@@ -1709,15 +1708,15 @@ function TaskComments({ taskId }) {
     <div className="pt-5 border-t border-line-subtle">
       <div className="flex items-center gap-2 mb-3">
         <MessageSquare className="w-4 h-4 text-muted" />
-        <div className="text-[10px] font-medium uppercase tracking-widest text-faint">Discussion</div>
-        {items.length > 0 && <div className="text-[10px] text-faint">{items.length}</div>}
+        <div className="text-micro font-medium uppercase tracking-widest text-faint">Discussion</div>
+        {items.length > 0 && <div className="text-micro text-faint">{items.length}</div>}
       </div>
 
       <div ref={scrollRef} className="max-h-72 overflow-y-auto no-scrollbar space-y-3 pr-1">
         {loading ? (
-          <div className="py-4 text-center text-[11px] text-faint">Loading…</div>
+          <div className="py-4 text-center text-meta text-faint">Loading…</div>
         ) : items.length === 0 ? (
-          <div className="py-6 text-center text-[11px] text-faint">No comments yet. Start the discussion.</div>
+          <div className="py-6 text-center text-meta text-faint">No comments yet. Start the discussion.</div>
         ) : items.map(c => {
           const mine = c.authorId === userId;
           const edited = c.updatedAt && c.createdAt && c.updatedAt !== c.createdAt;
@@ -1732,11 +1731,11 @@ function TaskComments({ taskId }) {
                     {mine ? 'You' : nameOf(c.authorId)}
                   </span>
                 </PersonButton>
-                <span className="text-[10px] text-faint shrink-0">{timeAgo(c.createdAt)}{edited ? ' · edited' : ''}</span>
+                <span className="text-micro text-faint shrink-0">{timeAgo(c.createdAt)}{edited ? ' · edited' : ''}</span>
                 {mine && editId !== c.id && (
                   <span className="ml-auto flex items-center gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100 transition-opacity">
-                    <button onClick={() => { setEditId(c.id); setEditText(c.body); }} className="text-[10px] text-faint hover:text-secondary">Edit</button>
-                    <button onClick={() => remove(c.id)} className="text-[10px] text-faint hover:text-rose-300">Delete</button>
+                    <button onClick={() => { setEditId(c.id); setEditText(c.body); }} className="text-micro text-faint hover:text-secondary">Edit</button>
+                    <button onClick={() => remove(c.id)} className="text-micro text-faint hover:text-danger-text">Delete</button>
                   </span>
                 )}
               </div>
@@ -1744,10 +1743,10 @@ function TaskComments({ taskId }) {
                 <div className="space-y-1.5">
                   <textarea value={editText} onChange={e => setEditText(e.target.value)} rows={2}
                     onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(c.id); } else if (e.key === 'Escape') setEditId(null); }}
-                    className="w-full bg-fill border border-line rounded-lg px-3 py-2 text-xs text-primary outline-none focus:border-violet-400/50 resize-none" />
+                    className="w-full bg-fill border border-line rounded-lg px-3 py-2 text-xs text-primary outline-none focus:border-brand-hover/50 resize-none" />
                   <div className="flex items-center gap-3">
-                    <button onClick={() => saveEdit(c.id)} className="text-[10px] font-semibold text-violet-300 hover:text-violet-200">Save</button>
-                    <button onClick={() => setEditId(null)} className="text-[10px] text-faint hover:text-secondary">Cancel</button>
+                    <button onClick={() => saveEdit(c.id)} className="text-micro font-semibold text-brand-text hover:text-brand-text">Save</button>
+                    <button onClick={() => setEditId(null)} className="text-micro text-faint hover:text-secondary">Cancel</button>
                   </div>
                 </div>
               ) : (
@@ -1761,9 +1760,9 @@ function TaskComments({ taskId }) {
       <div className="flex items-end gap-2 mt-3">
         <MentionTextarea value={text} onChange={setText} onMentionsChange={setMentions} members={members} meId={userId} onEnter={send} rows={2}
           placeholder="Write a comment…  (@ to mention, Enter to send)"
-          className="bg-fill border border-line rounded-lg px-3 py-2 text-xs text-primary placeholder-faint outline-none focus:border-violet-400/50 resize-none" />
+          className="bg-fill border border-line rounded-lg px-3 py-2 text-xs text-primary placeholder-faint outline-none focus:border-brand-hover/50 resize-none" />
         <button onClick={send} disabled={!text.trim()}
-          className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity shrink-0">
+          className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-inverse text-inverse-fg hover:bg-inverse/90 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity shrink-0">
           <Send className="w-3.5 h-3.5" />Send
         </button>
       </div>
@@ -1878,8 +1877,8 @@ function Attachments({ taskId, canEdit }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <div className="text-[10px] font-medium uppercase tracking-widest text-faint flex items-center gap-1.5"><Paperclip className="w-3 h-3" />Attachments</div>
-        {count > 0 && <div className="text-[10px] text-faint font-medium tabular-nums">{count}/{attachmentsApi.MAX_PER_TASK}</div>}
+        <div className="text-micro font-medium uppercase tracking-widest text-faint flex items-center gap-1.5"><Paperclip className="w-3 h-3" />Attachments</div>
+        {count > 0 && <div className="text-micro text-faint font-medium tabular-nums">{count}/{attachmentsApi.MAX_PER_TASK}</div>}
       </div>
 
       {canEdit && (
@@ -1891,13 +1890,13 @@ function Attachments({ taskId, canEdit }) {
           onDragOver={e => { e.preventDefault(); setDragActive(true); }}
           onDragLeave={() => setDragActive(false)}
           onDrop={onDrop}
-          className={cx('mb-2 rounded-lg border border-dashed px-3 py-3 text-center cursor-pointer transition-colors outline-none focus-visible:border-violet-400/60 focus-visible:bg-violet-400/5',
-            dragActive ? 'border-violet-400/60 bg-violet-400/5' : 'border-line bg-fill-subtle hover:bg-fill')}
+          className={cx('mb-2 rounded-lg border border-dashed px-3 py-3 text-center cursor-pointer transition-colors outline-none focus-visible:border-brand-hover/60 focus-visible:bg-brand-hover/5',
+            dragActive ? 'border-brand-hover/60 bg-brand-hover/5' : 'border-line bg-fill-subtle hover:bg-fill')}
         >
           <div className="flex items-center justify-center gap-2 text-xs text-muted">
             {uploading ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Uploading…</> : <><Upload className="w-3.5 h-3.5" />Drop files or click to upload</>}
           </div>
-          <div className="mt-0.5 text-[10px] text-faint">Images, PDF, docs · up to 25 MB each</div>
+          <div className="mt-0.5 text-micro text-faint">Images, PDF, docs · up to 25 MB each</div>
           <input ref={fileRef} type="file" multiple className="hidden"
             accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv,application/zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
             onChange={onPick} />
@@ -1905,14 +1904,14 @@ function Attachments({ taskId, canEdit }) {
       )}
 
       {error && (
-        <div className="mb-2 flex items-start gap-1.5 text-[11px] text-rose-300/90">
+        <div className="mb-2 flex items-start gap-1.5 text-meta text-danger-text/90">
           <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-px" /><span className="flex-1 break-words">{error}</span>
           <button onClick={() => setError('')} aria-label="Dismiss" className="text-faint hover:text-secondary shrink-0"><X className="w-3.5 h-3.5" /></button>
         </div>
       )}
 
       {items === null ? (
-        <div className="inline-flex items-center gap-2 text-[11px] text-faint"><Loader2 className="w-3 h-3 animate-spin" />Loading…</div>
+        <div className="inline-flex items-center gap-2 text-meta text-faint"><Loader2 className="w-3 h-3 animate-spin" />Loading…</div>
       ) : count === 0 ? (
         !canEdit && <div className="text-xs text-faint italic">No attachments.</div>
       ) : (
@@ -1922,7 +1921,7 @@ function Attachments({ taskId, canEdit }) {
               <AttachmentThumb attachment={a} />
               <div className="min-w-0 flex-1">
                 <div className="text-sm text-primary truncate">{a.filename}</div>
-                <div className="text-[10px] text-faint truncate">
+                <div className="text-micro text-faint truncate">
                   {a.sizeBytes != null && `${attachHumanSize(a.sizeBytes)} · `}{creatorLabel(a.uploadedBy)} · {new Date(a.createdAt).toLocaleDateString()}
                 </div>
               </div>
@@ -1930,7 +1929,7 @@ function Attachments({ taskId, canEdit }) {
                 className="shrink-0 text-faint hover:text-secondary transition-colors p-1"><Download className="w-4 h-4" /></button>
               {canDelete(a) && (
                 <button onClick={() => setConfirmDel(a)} aria-label={`Delete ${a.filename}`}
-                  className="shrink-0 text-faint hover:text-rose-300 focus:text-rose-300 transition-all p-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"><Trash2 className="w-4 h-4" /></button>
+                  className="shrink-0 text-faint hover:text-danger-text focus:text-danger-text transition-all p-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"><Trash2 className="w-4 h-4" /></button>
               )}
             </div>
           ))}
@@ -1969,7 +1968,7 @@ function TaskModal() {
   const doneSub = t.subtasks.filter(s => s.done).length;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center p-0 sm:p-6 animate-[fadeIn_.15s_ease]" onClick={closeEditing}>
+    <div className="fixed inset-0 z-50 bg-overlay backdrop-blur-sm flex items-start sm:items-center justify-center p-0 sm:p-6 animate-[fadeIn_.15s_ease]" onClick={closeEditing}>
       <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Edit task" className="w-full sm:max-w-2xl max-h-screen sm:max-h-[85vh] overflow-hidden rounded-t-2xl sm:rounded-2xl border border-line bg-surface-raised shadow-2xl flex flex-col">
         <div className="px-6 pt-5 pb-3 border-b border-line-subtle" style={{ background: `linear-gradient(180deg, ${priority.bg}, transparent)` }}>
           <div className="flex items-center gap-2 mb-3">
@@ -1990,7 +1989,7 @@ function TaskModal() {
             placeholder="Task title"
           />
           {t.createdBy && (() => { const cr = resolveAssignee(t.createdBy); return (
-            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-faint">
+            <div className="mt-1.5 flex items-center gap-1.5 text-meta text-faint">
               <span>Added by</span>
               <PersonButton personId={t.createdBy} className="gap-1.5 min-w-0" title={`View ${creatorLabel(t.createdBy)}'s profile`}>
                 <Avatar name={cr.known ? creatorLabel(t.createdBy) : ''} userId={t.createdBy} photoUrl={cr.avatarUrl} size={16} />
@@ -2028,13 +2027,13 @@ function TaskModal() {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <div className="text-[10px] font-medium uppercase tracking-widest text-faint mb-1.5">Due date</div>
+              <div className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5">Due date</div>
               <input type="date" value={t.dueDate ? t.dueDate.slice(0,10) : ''} onChange={e => set({ dueDate: e.target.value ? new Date(e.target.value + 'T12:00:00').toISOString() : null })}
                 disabled={!canEditTask}
                 className="w-full bg-fill border border-line rounded-lg px-3 py-2 text-sm text-primary outline-none focus:border-line-strong disabled:opacity-60 disabled:cursor-default" />
             </div>
             <div>
-              <div className="text-[10px] font-medium uppercase tracking-widest text-faint mb-1.5">Scheduled for</div>
+              <div className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5">Scheduled for</div>
               <input type="date" value={t.scheduledDate ? t.scheduledDate.slice(0,10) : ''} onChange={e => set({ scheduledDate: e.target.value ? new Date(e.target.value + 'T12:00:00').toISOString() : null })}
                 disabled={!canEditTask}
                 className="w-full bg-fill border border-line rounded-lg px-3 py-2 text-sm text-primary outline-none focus:border-line-strong disabled:opacity-60 disabled:cursor-default" />
@@ -2042,7 +2041,7 @@ function TaskModal() {
           </div>
 
           <div>
-            <div className="text-[10px] font-medium uppercase tracking-widest text-faint mb-1.5">Notes</div>
+            <div className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5">Notes</div>
             <textarea value={t.description} onChange={e => set({ description: e.target.value })} rows={4}
               readOnly={!canEditTask}
               maxLength={20000}
@@ -2052,18 +2051,18 @@ function TaskModal() {
 
           {t.blocked && (
             <div>
-              <div className="text-[10px] font-medium uppercase tracking-widest text-rose-300/70 mb-1.5">Blocked because</div>
+              <div className="text-micro font-medium uppercase tracking-widest text-danger-text/70 mb-1.5">Blocked because</div>
               <input value={t.blockedReason} onChange={e => set({ blockedReason: e.target.value })} placeholder="Waiting on…"
                 readOnly={!canEditTask}
                 maxLength={1000}
-                className="w-full bg-rose-500/5 border border-rose-500/20 rounded-lg px-3 py-2 text-sm text-primary outline-none focus:border-rose-500/40 read-only:cursor-default" />
+                className="w-full bg-danger/5 border border-danger/20 rounded-lg px-3 py-2 text-sm text-primary outline-none focus:border-danger/40 read-only:cursor-default" />
             </div>
           )}
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <div className="text-[10px] font-medium uppercase tracking-widest text-faint">Checklist</div>
-              {t.subtasks.length > 0 && <div className="text-[10px] text-faint font-medium tabular-nums">{doneSub}/{t.subtasks.length} done</div>}
+              <div className="text-micro font-medium uppercase tracking-widest text-faint">Checklist</div>
+              {t.subtasks.length > 0 && <div className="text-micro text-faint font-medium tabular-nums">{doneSub}/{t.subtasks.length} done</div>}
             </div>
             {t.subtasks.length > 0 && (
               <div className="h-1 bg-fill rounded-full overflow-hidden mb-2.5">
@@ -2086,7 +2085,7 @@ function TaskModal() {
                       <button onClick={() => moveSubtask(t.id, s.id, 1)} disabled={i === t.subtasks.length - 1} aria-label="Move item down"
                         className="text-faint hover:text-secondary disabled:opacity-20 disabled:cursor-default transition-colors"><ChevronDown className="w-3.5 h-3.5" /></button>
                       <button onClick={() => removeSubtask(t.id, s.id)} aria-label="Delete item"
-                        className="ml-0.5 text-faint hover:text-rose-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
+                        className="ml-0.5 text-faint hover:text-danger-text transition-colors"><X className="w-3.5 h-3.5" /></button>
                     </div>
                   )}
                 </div>
@@ -2095,7 +2094,7 @@ function TaskModal() {
                 <div className="flex gap-2 pt-1">
                   <input value={newSub} onChange={e => setNewSub(e.target.value)} onKeyDown={e => e.key === 'Enter' && submitSub()}
                     placeholder="Add checklist item…" maxLength={500}
-                    className="flex-1 bg-fill border border-line rounded-lg px-3 py-1.5 text-sm text-primary outline-none focus:border-violet-400/50" />
+                    className="flex-1 bg-fill border border-line rounded-lg px-3 py-1.5 text-sm text-primary outline-none focus:border-brand-hover/50" />
                   <button onClick={submitSub} className="px-3 rounded-lg border border-line bg-fill hover:bg-fill-strong text-secondary text-sm">Add</button>
                 </div>
               ) : t.subtasks.length === 0 && (
@@ -2106,7 +2105,7 @@ function TaskModal() {
 
           <Attachments taskId={t.id} canEdit={canEditTask} />
 
-          <div className="pt-4 border-t border-line-subtle text-[11px] text-faint flex flex-wrap gap-x-4 gap-y-1">
+          <div className="pt-4 border-t border-line-subtle text-meta text-faint flex flex-wrap gap-x-4 gap-y-1">
             <span>Created {new Date(t.createdAt).toLocaleDateString()}</span>
             <span>Updated {new Date(t.updatedAt).toLocaleDateString()}</span>
             {t.completedAt && <span>Completed {new Date(t.completedAt).toLocaleDateString()}</span>}
@@ -2219,11 +2218,11 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field', di
             <div className="p-1.5 border-b border-line-subtle">
               <input autoFocus value={query} onChange={e => { setQuery(e.target.value); setActive(0); }} onKeyDown={onSearchKey}
                 placeholder="Search people…"
-                className="w-full bg-fill border border-line rounded-lg px-2.5 h-8 text-xs text-primary placeholder-faint outline-none focus:border-violet-400/50" />
+                className="w-full bg-fill border border-line rounded-lg px-2.5 h-8 text-xs text-primary placeholder-faint outline-none focus:border-brand-hover/50" />
             </div>
             <div ref={listRef} className="max-h-60 overflow-y-auto py-1">
               {filtered.length === 0 ? (
-                <div className="px-3 py-3 text-center text-[11px] text-faint">No one found</div>
+                <div className="px-3 py-3 text-center text-meta text-faint">No one found</div>
               ) : filtered.map((o, i) => {
                 const av = avatarFor(o[0], o[1]);
                 const isSel = o[0] === value;
@@ -2231,7 +2230,7 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field', di
                   <button key={String(o[0]) || 'unassigned'} type="button" role="option" aria-selected={isSel}
                     onMouseEnter={() => setActive(i)} onClick={() => choose(o)}
                     className={cx('w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-left transition-colors',
-                      i === active ? 'bg-violet-500/25 text-white' : 'text-primary hover:bg-fill')}>
+                      i === active ? 'bg-brand/25 text-white' : 'text-primary hover:bg-fill')}>
                     {av.all ? (
                       <span className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 bg-fill-strong text-muted"><Users className="w-3 h-3" /></span>
                     ) : (
@@ -2244,7 +2243,7 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field', di
                       {variant !== 'filter' && av.statusEmoji && <span className="mr-1">{av.statusEmoji}</span>}
                       {o[1]}
                     </span>
-                    {isSel && <Check className="w-3.5 h-3.5 text-violet-300 shrink-0" />}
+                    {isSel && <Check className="w-3.5 h-3.5 text-brand-text shrink-0" />}
                   </button>
                 );
               })}
@@ -2326,15 +2325,15 @@ function QuickAdd() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-24 px-4 animate-[fadeIn_.15s_ease]" onClick={() => setQuickAddOpen(false)}>
+    <div className="fixed inset-0 z-50 bg-overlay backdrop-blur-sm flex items-start justify-center pt-24 px-4 animate-[fadeIn_.15s_ease]" onClick={() => setQuickAddOpen(false)}>
       <div onClick={e => e.stopPropagation()} className="w-full max-w-xl rounded-2xl border border-line bg-surface-raised shadow-2xl overflow-hidden">
         <div className="p-4 border-b border-line-subtle flex items-center gap-3">
-          <Sparkles className="w-4 h-4 text-violet-400" />
+          <Sparkles className="w-4 h-4 text-brand-text" />
           <input ref={inputRef} value={title} onChange={e => setTitle(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') submit(); }}
             placeholder="What needs to get done?" maxLength={500}
             className="flex-1 bg-transparent text-lg text-white outline-none placeholder-faint font-display" />
-          <kbd className="text-[10px] text-faint bg-fill border border-line rounded px-1.5 py-0.5">Enter</kbd>
+          <kbd className="text-micro text-faint bg-fill border border-line rounded px-1.5 py-0.5">Enter</kbd>
         </div>
         <div className="p-4 space-y-3">
           <div className="flex flex-wrap gap-2">
@@ -2342,7 +2341,7 @@ function QuickAdd() {
               options={[['', 'Unassigned'], ...(meId ? [[meId, 'Me']] : []), ...members.filter(m => m.userId !== meId).map(m => [m.userId, m.displayName || m.email])]}
               onChange={v => setAssigneeId(v || null)} />
             <div className="w-px h-6 bg-fill-strong self-center mx-1" />
-            <span className="self-center text-[11px] font-medium text-faint">Visibility</span>
+            <span className="self-center text-meta font-medium text-faint">Visibility</span>
             <button onClick={() => setPrivacy(privacy === 'private' ? 'workspace' : 'private')}
               className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
                 privacy === 'private' ? 'text-white' : 'text-muted border-line bg-fill')}
@@ -2367,11 +2366,11 @@ function QuickAdd() {
             </select>
             <div className="flex-1" />
             <button onClick={submit} disabled={!title.trim()}
-              className="inline-flex items-center gap-1.5 rounded-full px-4 h-8 text-xs font-semibold bg-white text-black hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity">
+              className="inline-flex items-center gap-1.5 rounded-full px-4 h-8 text-xs font-semibold bg-inverse text-inverse-fg hover:bg-inverse/90 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity">
               <Plus className="w-3.5 h-3.5" />Add task
             </button>
           </div>
-          <div className="text-[11px] text-muted">Tip: press <kbd className="px-1 py-0.5 bg-fill border border-line rounded text-secondary">{shortcutLabel('N')}</kbd> or <kbd className="px-1 py-0.5 bg-fill border border-line rounded text-secondary">N</kbd> anywhere to capture.</div>
+          <div className="text-meta text-muted">Tip: press <kbd className="px-1 py-0.5 bg-fill border border-line rounded text-secondary">{shortcutLabel('N')}</kbd> or <kbd className="px-1 py-0.5 bg-fill border border-line rounded text-secondary">N</kbd> anywhere to capture.</div>
         </div>
       </div>
     </div>
@@ -2488,19 +2487,19 @@ function CommandPalette() {
   if (!paletteOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-24 px-4 animate-[fadeIn_.15s_ease]" onClick={() => setPaletteOpen(false)}>
+    <div className="fixed inset-0 z-50 bg-overlay backdrop-blur-sm flex items-start justify-center pt-24 px-4 animate-[fadeIn_.15s_ease]" onClick={() => setPaletteOpen(false)}>
       <div onClick={e => e.stopPropagation()} className="w-full max-w-xl rounded-2xl border border-line bg-surface-raised shadow-2xl overflow-hidden">
         <div className="p-4 border-b border-line-subtle flex items-center gap-3">
           <Command className="w-4 h-4 text-faint" />
           <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)} onKeyDown={handleKey}
             placeholder="Search tasks, messages, or run a command…"
             className="flex-1 bg-transparent text-base text-white outline-none placeholder-faint" />
-          <kbd className="text-[10px] text-faint bg-fill border border-line rounded px-1.5 py-0.5">Esc</kbd>
+          <kbd className="text-micro text-faint bg-fill border border-line rounded px-1.5 py-0.5">Esc</kbd>
         </div>
         <div className="max-h-96 overflow-y-auto py-2">
           {results.cmds.length > 0 && (
             <div className="px-2">
-              <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-faint">Commands</div>
+              <div className="px-3 py-1.5 text-micro font-medium uppercase tracking-widest text-faint">Commands</div>
               {results.cmds.map((c, i) => {
                 const active = i === idx;
                 return (
@@ -2515,7 +2514,7 @@ function CommandPalette() {
           )}
           {results.tasks.length > 0 && (
             <div className="px-2 pt-2">
-              <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-faint">Tasks</div>
+              <div className="px-3 py-1.5 text-micro font-medium uppercase tracking-widest text-faint">Tasks</div>
               {results.tasks.map((t, i) => {
                 const ii = results.cmds.length + i;
                 const active = ii === idx;
@@ -2533,7 +2532,7 @@ function CommandPalette() {
           )}
           {results.msgs.length > 0 && (
             <div className="px-2 pt-2">
-              <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-faint">Messages</div>
+              <div className="px-3 py-1.5 text-micro font-medium uppercase tracking-widest text-faint">Messages</div>
               {results.msgs.map((m, i) => {
                 const ii = results.cmds.length + results.tasks.length + i;
                 const active = ii === idx;
@@ -2547,7 +2546,7 @@ function CommandPalette() {
                     {/* The face says who; the DM/Team glyph stays as the small kind marker. */}
                     <Avatar name={sender.known ? who : ''} userId={m.senderId} photoUrl={sender.avatarUrl} size={20} />
                     <span className="flex-1 min-w-0 truncate">{m.body}</span>
-                    <span className="text-[10px] text-faint shrink-0 inline-flex items-center gap-1">
+                    <span className="text-micro text-faint shrink-0 inline-flex items-center gap-1">
                       <Icon className="w-3 h-3" />{who} · {m.kind === 'dm' ? 'DM' : 'Team'}
                     </span>
                   </button>
@@ -2586,7 +2585,7 @@ function Sidebar() {
       {React.createElement(icon, { className: 'w-4 h-4' })}
       <span className="flex-1 text-left font-medium">{label}</span>
       {badge != null && badge > 0 && (
-        <span className="text-[10px] font-semibold text-muted bg-fill border border-line rounded-md px-1.5 h-5 flex items-center">{badge}</span>
+        <span className="text-micro font-semibold text-muted bg-fill border border-line rounded-md px-1.5 h-5 flex items-center">{badge}</span>
       )}
     </button>
   );
@@ -2595,12 +2594,12 @@ function Sidebar() {
     <aside className="hidden lg:flex flex-col w-64 shrink-0 border-r border-line-subtle bg-surface">
       <div className="px-5 pt-6 pb-5 border-b border-line-subtle">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/20">
+          <div className="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand-alt/20">
             <Sparkles className="w-4 h-4 text-white" />
           </div>
           <div className="leading-tight">
             <div className="text-[15px] font-semibold text-white font-display tracking-tight">Command Center</div>
-            <div className="text-[10px] text-faint uppercase tracking-widest">Visual task management</div>
+            <div className="text-micro text-faint uppercase tracking-widest">Visual task management</div>
           </div>
         </div>
       </div>
@@ -2615,7 +2614,7 @@ function Sidebar() {
           </>
         ) : (
           <>
-            <div className="px-3 pb-2 text-[10px] font-medium uppercase tracking-widest text-faint">Team</div>
+            <div className="px-3 pb-2 text-micro font-medium uppercase tracking-widest text-faint">Team</div>
             {item('dashboard', LayoutDashboard, 'Dashboard')}
             {item('kanban', KanbanSquare, 'Kanban', counts.all)}
             {item('matrix', Grid3x3, 'Priority Matrix')}
@@ -2625,7 +2624,7 @@ function Sidebar() {
             {item('dms', MessagesSquare, 'Direct messages', dmUnread)}
             {canManageMembers && item('members', Users, 'Members')}
 
-            <div className="px-3 pt-5 pb-2 text-[10px] font-medium uppercase tracking-widest text-faint">My views</div>
+            <div className="px-3 pt-5 pb-2 text-micro font-medium uppercase tracking-widest text-faint">My views</div>
             {item('mine', UserCog, 'My Tasks', counts.mine)}
             {item('private', Lock, 'Private tasks', counts.private)}
           </>
@@ -2634,13 +2633,13 @@ function Sidebar() {
 
       <div className="p-3 border-t border-line-subtle">
         <div className="rounded-xl border border-line-subtle bg-fill-subtle p-3">
-          <div className="text-[10px] uppercase tracking-widest text-faint mb-1.5">Overview</div>
+          <div className="text-micro uppercase tracking-widest text-faint mb-1.5">Overview</div>
           <div className="flex items-baseline gap-2">
             <div className="text-2xl font-semibold text-white font-display">{counts.all}</div>
-            <div className="text-[11px] text-faint">open tasks</div>
+            <div className="text-meta text-faint">open tasks</div>
           </div>
           {counts.overdue > 0 && (
-            <div className="mt-2 text-[11px] text-rose-300 flex items-center gap-1">
+            <div className="mt-2 text-meta text-danger-text flex items-center gap-1">
               <Flame className="w-3 h-3" />{counts.overdue} overdue
             </div>
           )}
@@ -2653,11 +2652,11 @@ function Sidebar() {
             className="mt-2 w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-left border border-transparent hover:bg-fill">
             <Avatar name={me.name} userId={meId} photoUrl={me.avatarUrl} size={30} />
             <div className="min-w-0 leading-tight">
-              <div className="text-[12px] font-medium text-primary truncate flex items-center gap-1">
+              <div className="text-note font-medium text-primary truncate flex items-center gap-1">
                 {me.statusEmoji && <span aria-hidden="true">{me.statusEmoji}</span>}
                 <span className="truncate">{me.name}</span>
               </div>
-              <div className="text-[10px] text-faint truncate">{me.statusText || 'View your profile'}</div>
+              <div className="text-micro text-faint truncate">{me.statusText || 'View your profile'}</div>
             </div>
           </button>
         )}
@@ -2703,10 +2702,10 @@ function MobileTabs() {
     <>
       {moreOpen && createPortal(
         <div className="lg:hidden fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label="More destinations">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setMoreOpen(false)} />
+          <div className="absolute inset-0 bg-overlay backdrop-blur-sm" onClick={() => setMoreOpen(false)} />
           <div className="absolute bottom-0 left-0 right-0 rounded-t-2xl border-t border-line bg-surface-raised pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-2xl" style={{ animation: 'slideUp .18s ease' }}>
             <div className="mx-auto mb-1 h-1 w-9 rounded-full bg-fill-strong" />
-            <div className="px-4 py-2 text-[10px] font-medium uppercase tracking-widest text-faint">More</div>
+            <div className="px-4 py-2 text-micro font-medium uppercase tracking-widest text-faint">More</div>
             <div className="px-2 pb-1">
               {more.map(it => (
                 <button key={it.id} onClick={() => go(it.id)}
@@ -2715,7 +2714,7 @@ function MobileTabs() {
                   <it.icon className="w-4 h-4 shrink-0" />
                   <span className="flex-1 text-sm font-medium">{it.label}</span>
                   {it.badge > 0 && (
-                    <span className="min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-rose-50 text-[9px] font-bold leading-none flex items-center justify-center">{it.badge > 9 ? '9+' : it.badge}</span>
+                    <span className="min-w-[16px] h-4 px-1 rounded-full bg-danger text-danger-text text-[9px] font-bold leading-none flex items-center justify-center">{it.badge > 9 ? '9+' : it.badge}</span>
                   )}
                 </button>
               ))}
@@ -2733,7 +2732,7 @@ function MobileTabs() {
                 view === it.id ? 'text-white' : 'text-faint')}>
               <it.icon className="w-5 h-5" />
               {it.badge > 0 && (
-                <span className="absolute top-1.5 left-1/2 translate-x-2 min-w-[14px] h-3.5 px-1 rounded-full bg-rose-500 text-rose-50 text-[8px] font-bold leading-none flex items-center justify-center">{it.badge > 9 ? '9+' : it.badge}</span>
+                <span className="absolute top-1.5 left-1/2 translate-x-2 min-w-[14px] h-3.5 px-1 rounded-full bg-danger text-danger-text text-[8px] font-bold leading-none flex items-center justify-center">{it.badge > 9 ? '9+' : it.badge}</span>
               )}
               <span className="text-[9px] font-medium tracking-wide">{it.label}</span>
             </button>
@@ -2743,7 +2742,7 @@ function MobileTabs() {
               className={cx('relative flex-1 min-w-0 py-2.5 flex flex-col items-center justify-center gap-0.5 transition-colors',
                 moreActive || moreOpen ? 'text-white' : 'text-faint')}>
               <MoreHorizontal className="w-5 h-5" />
-              {moreBadge > 0 && <span className="absolute top-1.5 left-1/2 translate-x-2 w-2 h-2 rounded-full bg-rose-500" />}
+              {moreBadge > 0 && <span className="absolute top-1.5 left-1/2 translate-x-2 w-2 h-2 rounded-full bg-danger" />}
               <span className="text-[9px] font-medium tracking-wide">More</span>
             </button>
           )}
@@ -2802,7 +2801,7 @@ function NotificationToast({ n, light, onOpen, onDismiss }) {
         )}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-[11px] font-semibold text-primary">{n.title || 'New notification'}</span>
+        <span className="block text-meta font-semibold text-primary">{n.title || 'New notification'}</span>
         <span className="block text-xs text-muted leading-snug">{n.message}</span>
       </span>
     </button>
@@ -3001,7 +3000,7 @@ function NotificationBell() {
       <div className="relative">
         <IconButton icon={Bell} label="Notifications" active={open} onClick={() => setOpen(o => !o)} />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-rose-50 text-[9px] font-bold leading-none flex items-center justify-center pointer-events-none shadow-[0_0_8px_rgba(244,63,94,0.5)]">
+          <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-danger text-danger-text text-[9px] font-bold leading-none flex items-center justify-center pointer-events-none shadow-[0_0_8px_rgba(244,63,94,0.5)]">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
@@ -3012,18 +3011,18 @@ function NotificationBell() {
               <div className="flex items-center justify-between px-3 py-2.5 border-b border-line-subtle">
                 <div className="text-xs font-semibold text-primary">
                   Notifications
-                  {unreadCount > 0 && <span className="ml-1.5 text-[10px] font-medium text-faint">{unreadCount} new</span>}
+                  {unreadCount > 0 && <span className="ml-1.5 text-micro font-medium text-faint">{unreadCount} new</span>}
                 </div>
                 <div className="flex items-center gap-3">
                   {unreadCount > 0 && (
                     <button onClick={markAll}
-                      className="inline-flex items-center gap-1 text-[10px] font-medium text-muted hover:text-primary transition-colors">
+                      className="inline-flex items-center gap-1 text-micro font-medium text-muted hover:text-primary transition-colors">
                       <Check className="w-3 h-3" />Mark all read
                     </button>
                   )}
                   {items.length > 0 && (
                     <button onClick={() => setConfirmClear(true)}
-                      className="inline-flex items-center gap-1 text-[10px] font-medium text-faint hover:text-rose-300 transition-colors">
+                      className="inline-flex items-center gap-1 text-micro font-medium text-faint hover:text-danger-text transition-colors">
                       <Trash2 className="w-3 h-3" />Clear all
                     </button>
                   )}
@@ -3031,11 +3030,11 @@ function NotificationBell() {
               </div>
               <div className="max-h-[70vh] overflow-y-auto no-scrollbar">
                 {loading ? (
-                  <div className="px-3 py-6 text-center text-[11px] text-faint">Loading…</div>
+                  <div className="px-3 py-6 text-center text-meta text-faint">Loading…</div>
                 ) : items.length === 0 ? (
                   <div className="px-3 py-8 text-center">
                     <Bell className="w-5 h-5 text-faint mx-auto mb-2" />
-                    <div className="text-[11px] text-faint">You're all caught up</div>
+                    <div className="text-meta text-faint">You're all caught up</div>
                   </div>
                 ) : (
                   items.map(n => (
@@ -3068,11 +3067,11 @@ function NotificationBell() {
                           ); })()}
                         <span className="min-w-0 flex-1">
                           <span className={cx('block text-xs leading-snug', n.read ? 'text-muted' : 'text-primary')}>{n.message}</span>
-                          <span className="block mt-0.5 text-[10px] text-faint">{timeAgo(n.createdAt)}</span>
+                          <span className="block mt-0.5 text-micro text-faint">{timeAgo(n.createdAt)}</span>
                         </span>
                       </button>
                       <button onClick={() => deleteNotif(n.id)} aria-label="Delete notification"
-                        className="shrink-0 px-2.5 flex items-center text-faint hover:text-rose-300 focus:text-rose-300 transition-all opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100">
+                        className="shrink-0 px-2.5 flex items-center text-faint hover:text-danger-text focus:text-danger-text transition-all opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100">
                         <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -3137,7 +3136,7 @@ function CreateWorkspaceForm({ onCreated, submitLabel = 'Create workspace', auto
       <div className="au-in" style={{ animationDelay: '.2s' }}>
         <input value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus={autoFocus}
           placeholder="e.g. Acme Marketing"
-          className="w-full bg-black/30 border border-line rounded-xl px-3 h-11 text-sm text-white placeholder-faint outline-none focus:border-violet-400/60 focus:bg-black/40 focus:ring-2 focus:ring-violet-500/20 transition-colors" />
+          className="w-full bg-input border border-line rounded-xl px-3 h-11 text-sm text-white placeholder-faint outline-none focus:border-brand-hover/60 focus:bg-input-focus focus:ring-2 focus:ring-brand/20 transition-colors" />
       </div>
       {error && <AuthBanner tone="error">{error}</AuthBanner>}
       <div className="au-in" style={{ animationDelay: '.26s' }}>
@@ -3161,7 +3160,7 @@ function ConfirmModal({ open, title, message, confirmLabel = 'Delete', confirmDi
   if (!open) return null;
   return createPortal(
     <>
-      <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[60] bg-overlay backdrop-blur-sm" onClick={onClose} />
       <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
         <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title}
           className="pointer-events-auto w-full max-w-sm rounded-2xl border border-line bg-surface-raised shadow-2xl p-5 outline-none"
@@ -3175,8 +3174,8 @@ function ConfirmModal({ open, title, message, confirmLabel = 'Delete', confirmDi
               className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">Cancel</button>
             <button ref={btnRef} onClick={onConfirm} disabled={confirmDisabled}
               className={cx('h-9 px-4 rounded-xl text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
-                confirmDisabled ? 'bg-rose-500/40 text-muted cursor-not-allowed'
-                  : tone === 'danger' ? 'bg-rose-500 hover:bg-rose-400' : 'bg-violet-500 hover:bg-violet-400')}>
+                confirmDisabled ? 'bg-danger/40 text-muted cursor-not-allowed'
+                  : tone === 'danger' ? 'bg-danger hover:bg-danger-hover' : 'bg-brand hover:bg-brand-hover')}>
               <Icon className="w-3.5 h-3.5" />{confirmLabel}
             </button>
           </div>
@@ -3232,7 +3231,7 @@ function ProjectDeleteModal({ open, project, projects, taskCount, isOwner, onCan
 
   return createPortal(
     <>
-      <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={handleCancel} />
+      <div className="fixed inset-0 z-[60] bg-overlay backdrop-blur-sm" onClick={handleCancel} />
       <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
         <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Delete ${project.name}`}
           className="pointer-events-auto w-full max-w-md rounded-2xl border border-line bg-surface-raised shadow-2xl p-5 outline-none"
@@ -3242,7 +3241,7 @@ function ProjectDeleteModal({ open, project, projects, taskCount, isOwner, onCan
           <h2 className="text-base font-semibold text-white mb-1 break-words">Delete “{project.name}”?</h2>
 
           {checking && <p className="text-xs text-muted mb-4">Checking for tasks…</p>}
-          {errored && <p className="text-xs text-rose-300 mb-4">Couldn't check this project's tasks. Please try again.</p>}
+          {errored && <p className="text-xs text-danger-text mb-4">Couldn't check this project's tasks. Please try again.</p>}
           {!checking && !errored && count === 0 && (
             <p className="text-xs text-muted mb-4">This project has no tasks. It will be permanently deleted.</p>
           )}
@@ -3252,7 +3251,7 @@ function ProjectDeleteModal({ open, project, projects, taskCount, isOwner, onCan
               <p className="text-xs text-muted">“{project.name}” has {count} task{count === 1 ? '' : 's'}. Choose what happens to them:</p>
               <label className={cx('flex items-start gap-2.5 p-2.5 rounded-xl border transition-colors',
                 noDestination ? 'border-line opacity-50 cursor-not-allowed'
-                  : cx('cursor-pointer', mode === 'unassign' ? 'border-violet-400/50 bg-violet-500/10' : 'border-line hover:bg-fill'))}>
+                  : cx('cursor-pointer', mode === 'unassign' ? 'border-brand-hover/50 bg-brand/10' : 'border-line hover:bg-fill'))}>
                 <input type="radio" name="pdmode" checked={mode === 'unassign'} disabled={noDestination}
                   onChange={() => setMode('unassign')} className="mt-0.5" />
                 <span className="text-xs text-secondary min-w-0 flex-1">
@@ -3262,14 +3261,14 @@ function ProjectDeleteModal({ open, project, projects, taskCount, isOwner, onCan
                     : <> — move them to another project, then delete “{project.name}”.</>}
                   {!noDestination && (
                     <span className="mt-2 flex items-center gap-2">
-                      <span className="text-[11px] text-muted shrink-0">Move to</span>
+                      <span className="text-meta text-muted shrink-0">Move to</span>
                       {/* A real picker over the workspace's REAL projects. Rendering it inside the label
                           is fine — a <select> is not a nested button — but stopPropagation keeps a click
                           on the dropdown from also toggling the radio underneath it. */}
                       <select value={destId} onChange={e => { setDest(e.target.value); setMode('unassign'); }}
                         onClick={e => e.stopPropagation()}
                         aria-label="Destination project for the kept tasks"
-                        className="flex-1 min-w-0 h-8 px-2 rounded-lg bg-fill border border-line text-xs text-white outline-none focus:border-violet-400/50">
+                        className="flex-1 min-w-0 h-8 px-2 rounded-lg bg-fill border border-line text-xs text-white outline-none focus:border-brand-hover/50">
                         {candidates.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                       </select>
                     </span>
@@ -3278,16 +3277,16 @@ function ProjectDeleteModal({ open, project, projects, taskCount, isOwner, onCan
               </label>
               {isOwner && (
                 <label className={cx('flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-colors',
-                  mode === 'cascade' ? 'border-rose-400/50 bg-rose-500/10' : 'border-line hover:bg-fill')}>
+                  mode === 'cascade' ? 'border-danger-hover/50 bg-danger/10' : 'border-line hover:bg-fill')}>
                   <input type="radio" name="pdmode" checked={mode === 'cascade'} onChange={() => setMode('cascade')} className="mt-0.5" />
-                  <span className="text-xs text-secondary"><span className="font-medium text-rose-200">Delete the tasks too</span> — permanently removes the project and its {count} task{count === 1 ? '' : 's'}. Can't be undone.</span>
+                  <span className="text-xs text-secondary"><span className="font-medium text-danger-text">Delete the tasks too</span> — permanently removes the project and its {count} task{count === 1 ? '' : 's'}. Can't be undone.</span>
                 </label>
               )}
               {mode === 'cascade' && (
                 <div className="pt-1">
-                  <p className="text-[11px] text-muted mb-1.5">Type <span className="text-secondary font-medium">{project.name}</span> to confirm:</p>
+                  <p className="text-meta text-muted mb-1.5">Type <span className="text-secondary font-medium">{project.name}</span> to confirm:</p>
                   <input autoFocus value={confirmText} onChange={e => setConfirmText(e.target.value)}
-                    className="w-full h-9 px-3 rounded-xl bg-fill border border-line text-xs text-white outline-none focus:border-rose-400/50"
+                    className="w-full h-9 px-3 rounded-xl bg-fill border border-line text-xs text-white outline-none focus:border-danger-hover/50"
                     placeholder={project.name} aria-label="Type the project name to confirm deletion" />
                 </div>
               )}
@@ -3300,7 +3299,7 @@ function ProjectDeleteModal({ open, project, projects, taskCount, isOwner, onCan
             <button onClick={doConfirm} disabled={!canConfirm}
               className={cx('h-9 px-4 rounded-xl text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
                 !canConfirm ? 'bg-fill-strong text-faint cursor-not-allowed'
-                  : mode === 'cascade' ? 'bg-rose-500 hover:bg-rose-400' : 'bg-violet-500 hover:bg-violet-400')}>
+                  : mode === 'cascade' ? 'bg-danger hover:bg-danger-hover' : 'bg-brand hover:bg-brand-hover')}>
               <Trash2 className="w-3.5 h-3.5" />
               {/* Name the DESTINATION in the button, so the irreversible action states where the tasks
                   are actually going rather than leaving it to the radio label above. */}
@@ -3330,29 +3329,29 @@ function UpgradeModal() {
   const go = (path) => { dismissUpgrade(); navigate(path); };
   return createPortal(
     <>
-      <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={dismissUpgrade} />
+      <div className="fixed inset-0 z-[60] bg-overlay backdrop-blur-sm" onClick={dismissUpgrade} />
       <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
         <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-line bg-surface-raised shadow-2xl p-5"
           style={{ animation: 'slideUp .2s ease' }}
           onClick={e => e.stopPropagation()}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); dismissUpgrade(); } }}>
           <div className="flex items-center gap-2 mb-3">
-            <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0 shadow-lg shadow-fuchsia-500/25">
+            <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-brand to-brand-alt flex items-center justify-center shrink-0 shadow-lg shadow-brand-alt/25">
               <Sparkles className="w-4 h-4 text-white" />
             </span>
-            <div className="text-[10px] font-semibold uppercase tracking-widest text-violet-300/80">{tier.name} feature</div>
+            <div className="text-micro font-semibold uppercase tracking-widest text-brand-text/80">{tier.name} feature</div>
             <button onClick={dismissUpgrade} aria-label="Close" className="ml-auto text-faint hover:text-secondary transition-colors"><X className="w-4 h-4" /></button>
           </div>
           <h2 className="text-base font-semibold text-white mb-1">{meta.isLimit ? meta.label : `Unlock ${meta.label}`}</h2>
           {meta.blurb && <p className="text-xs text-muted mb-4 leading-relaxed">{meta.blurb}</p>}
-          <div className="rounded-xl border border-line bg-fill-subtle px-3 py-2.5 mb-4 text-[12px] text-muted">
+          <div className="rounded-xl border border-line bg-fill-subtle px-3 py-2.5 mb-4 text-note text-muted">
             Included on <span className="font-semibold text-primary">{tier.name}</span> and up.
           </div>
           <div className="flex items-center justify-end gap-2">
             <button onClick={() => go('/pricing')}
               className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">See all plans</button>
             <button onClick={() => go(`/checkout?plan=${tier.id}`)}
-              className="h-9 px-4 rounded-xl text-white text-xs font-semibold bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:shadow-lg hover:shadow-fuchsia-500/30 transition-all inline-flex items-center gap-1.5">
+              className="h-9 px-4 rounded-xl text-white text-xs font-semibold bg-brand-gradient-cta hover:shadow-lg hover:shadow-brand-alt/30 transition-all inline-flex items-center gap-1.5">
               Upgrade to {tier.name}<ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -3375,10 +3374,10 @@ function PlanPreviewBanner() {
   };
   return (
     <div className="fixed bottom-20 lg:bottom-3 inset-x-0 lg:inset-x-auto lg:right-3 z-[55] flex justify-center lg:justify-end px-3 pointer-events-none">
-      <div className="pointer-events-auto inline-flex items-center gap-2 px-3 h-9 rounded-full border border-amber-400/30 bg-amber-500/15 backdrop-blur text-[11px] text-amber-100 shadow-lg">
-        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+      <div className="pointer-events-auto inline-flex items-center gap-2 px-3 h-9 rounded-full border border-warning-hover/30 bg-warning/15 backdrop-blur text-meta text-warning-text shadow-lg">
+        <span className="w-1.5 h-1.5 rounded-full bg-warning-hover shrink-0" />
         Previewing the <span className="font-semibold">{entitlements.plan.name}</span> plan
-        <button onClick={exit} className="ml-1 font-semibold text-amber-200 hover:text-white underline underline-offset-2 transition-colors">Exit</button>
+        <button onClick={exit} className="ml-1 font-semibold text-warning-text hover:text-white underline underline-offset-2 transition-colors">Exit</button>
       </div>
     </div>
   );
@@ -3434,7 +3433,7 @@ function ProjectModal({ open, onClose, project }) {
 
   return (
     <>
-      <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[60] bg-overlay backdrop-blur-sm" onClick={onClose} />
       <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
         <form onSubmit={submit}
           className="pointer-events-auto w-full max-w-sm rounded-2xl border border-line bg-surface-raised shadow-2xl p-5"
@@ -3446,29 +3445,29 @@ function ProjectModal({ open, onClose, project }) {
             <button type="button" onClick={onClose} className="text-faint hover:text-secondary transition-colors"><X className="w-4 h-4" /></button>
           </div>
 
-          <label className="block text-[11px] font-medium text-muted mb-1">Name</label>
+          <label className="block text-meta font-medium text-muted mb-1">Name</label>
           <input autoFocus value={name} onChange={e => setName(e.target.value)} maxLength={80} placeholder="e.g. Marketing"
             className="w-full h-9 px-3 rounded-xl bg-fill border border-line text-sm text-primary outline-none focus:border-line-strong transition-colors mb-4" />
 
           <div className="flex items-start gap-3 mb-3">
             <div className="flex-1">
-              <label className="block text-[11px] font-medium text-muted mb-1.5">Color</label>
+              <label className="block text-meta font-medium text-muted mb-1.5">Color</label>
               <div className="flex flex-wrap gap-1.5">
                 {PROJECT_PALETTE.map(c => (
                   <button key={c} type="button" onClick={() => setColor(c)} aria-label={`Use color ${c}`}
-                    className={cx('w-6 h-6 rounded-lg transition-transform', color === c ? 'ring-2 ring-white/70 scale-110' : 'hover:scale-105')}
+                    className={cx('w-6 h-6 rounded-lg transition-transform', color === c ? 'ring-2 ring-primary/70 scale-110' : 'hover:scale-105')}
                     style={{ background: c }} />
                 ))}
               </div>
             </div>
             <div>
-              <label className="block text-[11px] font-medium text-muted mb-1.5">Preview</label>
+              <label className="block text-meta font-medium text-muted mb-1.5">Preview</label>
               <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold"
                 style={{ background: color + '22', color, border: `1px solid ${color}44` }}>{icon || '◇'}</div>
             </div>
           </div>
 
-          <label className="block text-[11px] font-medium text-muted mb-1.5">Icon</label>
+          <label className="block text-meta font-medium text-muted mb-1.5">Icon</label>
           <div className="flex flex-wrap gap-1.5 mb-4">
             {PROJECT_ICONS.map(ic => (
               <button key={ic} type="button" onClick={() => setIcon(ic)}
@@ -3477,12 +3476,12 @@ function ProjectModal({ open, onClose, project }) {
             ))}
           </div>
 
-          {err && <p className="text-[11px] text-rose-300 mb-3">{err}</p>}
+          {err && <p className="text-meta text-danger-text mb-3">{err}</p>}
           <div className="flex items-center justify-end gap-2">
             <button type="button" onClick={onClose}
               className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">Cancel</button>
             <button type="submit" disabled={busy}
-              className={cx('h-9 px-4 rounded-xl text-xs font-semibold text-white transition-colors', busy ? 'bg-violet-500/40 cursor-not-allowed' : 'bg-violet-500 hover:bg-violet-400')}>
+              className={cx('h-9 px-4 rounded-xl text-xs font-semibold text-white transition-colors', busy ? 'bg-brand/40 cursor-not-allowed' : 'bg-brand hover:bg-brand-hover')}>
               {editing ? 'Save changes' : 'Create project'}
             </button>
           </div>
@@ -3497,7 +3496,7 @@ function CreateWorkspaceModal({ open, onClose }) {
   if (!open) return null;
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-50 bg-overlay backdrop-blur-sm" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-6 pointer-events-none">
         <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-line bg-surface-raised shadow-2xl p-5"
           style={{ animation: 'slideUp .2s ease' }} onClick={e => e.stopPropagation()}>
@@ -3522,7 +3521,7 @@ function WorkspaceSwitcher() {
   const [createOpen, setCreateOpen] = useState(false);
   const current = workspaces.find(w => w.id === currentWorkspaceId);
   if (!current) return null;
-  const badgeCls = 'w-4 h-4 rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-[8px] font-bold text-white shrink-0';
+  const badgeCls = 'w-4 h-4 rounded-md bg-gradient-to-br from-brand to-brand-alt flex items-center justify-center text-[8px] font-bold text-white shrink-0';
   const initial = (name) => (name || 'W').slice(0, 1).toUpperCase();
   return (
     <div className="relative shrink-0">
@@ -3536,23 +3535,23 @@ function WorkspaceSwitcher() {
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
           <div className="absolute left-0 top-11 z-40 w-56 rounded-xl border border-line bg-surface-raised shadow-2xl py-1.5">
-            <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-faint">Workspaces</div>
+            <div className="px-3 py-1.5 text-micro font-medium uppercase tracking-widest text-faint">Workspaces</div>
             {workspaces.map(w => (
               <button key={w.id} onClick={() => { switchWorkspace(w.id); setOpen(false); }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-fill hover:text-white transition-colors">
                 <span className={badgeCls}>{initial(w.name)}</span>
                 <span className="flex-1 truncate text-left">{w.name}</span>
-                {w.id === currentWorkspaceId && <Check className="w-3.5 h-3.5 text-violet-400 shrink-0" />}
+                {w.id === currentWorkspaceId && <Check className="w-3.5 h-3.5 text-brand-text shrink-0" />}
               </button>
             ))}
             {pendingInvites.length > 0 && (
               <>
                 <div className="my-1 h-px bg-fill-strong" />
-                <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-faint">Invitations</div>
+                <div className="px-3 py-1.5 text-micro font-medium uppercase tracking-widest text-faint">Invitations</div>
                 {pendingInvites.map(inv => (
                   <button key={inv.id} onClick={() => { setOpen(false); acceptInvitation(inv.token).catch(err => reportError(err, 'invitations.accept')); }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-fill hover:text-white transition-colors">
-                    <span className="w-4 h-4 rounded-md bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center shrink-0"><UserPlus className="w-2.5 h-2.5 text-emerald-300" /></span>
+                    <span className="w-4 h-4 rounded-md bg-success/20 border border-success-hover/30 flex items-center justify-center shrink-0"><UserPlus className="w-2.5 h-2.5 text-success-text" /></span>
                     <span className="flex-1 text-left truncate">Join {inv.workspaceName}</span>
                   </button>
                 ))}
@@ -3584,9 +3583,9 @@ function TopBar() {
   const showFilters = ['kanban', 'projects', 'schedule', 'matrix'].includes(view);
 
   const syncDot = {
-    live: 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]',
-    connecting: 'bg-amber-400 animate-pulse',
-    offline: 'bg-rose-400',
+    live: 'bg-success-hover shadow-[0_0_8px_rgba(52,211,153,0.6)]',
+    connecting: 'bg-warning-hover animate-pulse',
+    offline: 'bg-danger-hover',
   }[syncStatus];
   const syncLabel = { live: 'Synced', connecting: 'Connecting…', offline: 'Offline' }[syncStatus];
 
@@ -3595,7 +3594,7 @@ function TopBar() {
     <header className="sticky top-0 z-20 border-b border-line-subtle bg-surface/80 backdrop-blur-xl">
       <div className="flex items-center gap-2 px-4 lg:px-6 h-14">
         <div className="lg:hidden flex items-center gap-2 mr-2">
-          <div className="w-7 h-7 rounded-md bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center">
+          <div className="w-7 h-7 rounded-md bg-brand-gradient flex items-center justify-center">
             <Sparkles className="w-3.5 h-3.5 text-white" />
           </div>
         </div>
@@ -3606,7 +3605,7 @@ function TopBar() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-faint pointer-events-none" />
           <input id="global-search" value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
             placeholder="Search tasks… ( / )"
-            className="search-input w-full bg-black/30 border border-line rounded-xl pl-9 pr-8 h-9 text-sm text-white placeholder-faint outline-none focus:border-violet-400/50 focus:bg-black/40 transition-colors" />
+            className="search-input w-full bg-input border border-line rounded-xl pl-9 pr-8 h-9 text-sm text-white placeholder-faint outline-none focus:border-brand-hover/50 focus:bg-input-focus transition-colors" />
           {filters.search && (
             <button onClick={() => setFilters(f => ({ ...f, search: '' }))} aria-label="Clear search"
               className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-md flex items-center justify-center text-faint hover:text-secondary hover:bg-fill-strong transition-colors">
@@ -3627,7 +3626,7 @@ function TopBar() {
 
         <div className="hidden md:flex items-center gap-1.5 px-2.5 h-8 rounded-lg border border-line-subtle bg-fill-subtle" title={syncLabel}>
           <span className={cx('w-1.5 h-1.5 rounded-full transition-colors', syncDot)} />
-          <span className="text-[10px] font-medium text-muted">{syncLabel}</span>
+          <span className="text-micro font-medium text-muted">{syncLabel}</span>
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -3636,15 +3635,15 @@ function TopBar() {
           )}
           <IconButton icon={Command} label={`Command palette (${shortcutLabel('K')})`} onClick={() => setPaletteOpen(true)} />
           <button onClick={() => setQuickAddOpen(true)}
-            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-white text-black text-xs font-semibold hover:bg-white/90 transition-colors">
-            <Plus className="w-3.5 h-3.5" />New<kbd className="hidden sm:inline text-[9px] text-black/50 bg-black/10 rounded px-1 py-0.5">N</kbd>
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-inverse text-inverse-fg text-xs font-semibold hover:bg-inverse/90 transition-colors">
+            <Plus className="w-3.5 h-3.5" />New<kbd className="hidden sm:inline text-[9px] text-inverse-fg/50 bg-fill-strong rounded px-1 py-0.5">N</kbd>
           </button>
           <NotificationBell />
           <div className="relative">
             {/* The account menu trigger IS your avatar (the near-universal convention). Nothing is lost:
                 settings, theme, export/import, plans and sign-out all still live inside this menu. */}
             <button onClick={() => setMenuOpen(o => !o)} aria-label="Account and settings" aria-expanded={menuOpen}
-              className="rounded-full focus:outline-none focus-visible:ring-1 focus-visible:ring-violet-400/60 hover:opacity-80 transition-opacity">
+              className="rounded-full focus:outline-none focus-visible:ring-1 focus-visible:ring-brand-hover/60 hover:opacity-80 transition-opacity">
               <Avatar name={currentMember?.display_name || currentMember?.email} userId={meId} photoUrl={currentMember?.avatar_url} size={28} />
             </button>
             {menuOpen && (
@@ -3659,8 +3658,8 @@ function TopBar() {
                           {currentMember.status_emoji && <span className="mr-1">{currentMember.status_emoji}</span>}
                           {currentMember.display_name || currentMember.email}
                         </div>
-                        <div className="text-[10px] text-faint mt-0.5 capitalize truncate">{myRole || currentMember.role} · <span className="text-violet-300/80 normal-case">{entitlements.plan.name}</span></div>
-                        <div className="text-[10px] text-faint mt-0.5 truncate normal-case">{currentMember.status_text || currentMember.email}</div>
+                        <div className="text-micro text-faint mt-0.5 capitalize truncate">{myRole || currentMember.role} · <span className="text-brand-text/80 normal-case">{entitlements.plan.name}</span></div>
+                        <div className="text-micro text-faint mt-0.5 truncate normal-case">{currentMember.status_text || currentMember.email}</div>
                       </div>
                     </div>
                   )}
@@ -3798,7 +3797,7 @@ function ProfileModal({ onClose }) {
       {/* z-[80]: ProfileModal must layer ABOVE ProfileView (z-[70]) — "Edit profile" inside the profile
           card mounts this as a sibling body portal, and at the old z-[60] the editor painted invisibly
           BEHIND the card (clicking seemed to do nothing while focus sat in the hidden panel). */}
-      <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm" onClick={handleClose} />
+      <div className="fixed inset-0 z-[80] bg-overlay backdrop-blur-sm" onClick={handleClose} />
       <div className="fixed inset-0 z-[80] flex items-center justify-center p-6 pointer-events-none">
         <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Edit profile"
           className="pointer-events-auto w-full max-w-md rounded-2xl border border-line bg-surface-raised shadow-2xl p-5 outline-none max-h-[85vh] overflow-y-auto"
@@ -3814,59 +3813,59 @@ function ProfileModal({ onClose }) {
                 className="h-8 px-3 rounded-lg bg-fill border border-line text-xs font-medium text-secondary hover:bg-fill-strong transition-colors disabled:opacity-50">
                 {busy ? 'Working…' : 'Upload photo'}
               </button>
-              {(preview || avatarPath) && <button onClick={removePhoto} className="text-[11px] text-faint hover:text-rose-300 text-left">Remove photo</button>}
+              {(preview || avatarPath) && <button onClick={removePhoto} className="text-meta text-faint hover:text-danger-text text-left">Remove photo</button>}
               <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden"
                 onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; pickAvatar(f); }} />
             </div>
           </div>
 
-          <label className="block text-[11px] text-muted mb-1">Display name</label>
+          <label className="block text-meta text-muted mb-1">Display name</label>
           <input value={displayName} onChange={e => setDisplayName(e.target.value)} maxLength={60}
-            className="w-full h-9 px-3 mb-3 rounded-xl bg-fill border border-line text-xs text-white outline-none focus:border-violet-400/50" />
+            className="w-full h-9 px-3 mb-3 rounded-xl bg-fill border border-line text-xs text-white outline-none focus:border-brand-hover/50" />
 
-          <label className="block text-[11px] text-muted mb-1">Status</label>
+          <label className="block text-meta text-muted mb-1">Status</label>
           <div className="flex gap-2 mb-2">
             <button type="button" onClick={() => setEmojiOpen(o => !o)} aria-expanded={emojiOpen} aria-label="Pick a status emoji"
               className={cx('w-14 h-9 rounded-xl border flex items-center justify-center text-base transition-colors',
-                emojiOpen ? 'border-violet-400/50 bg-violet-500/20' : 'border-line bg-fill hover:bg-fill-strong')}>
+                emojiOpen ? 'border-brand-hover/50 bg-brand/20' : 'border-line bg-fill hover:bg-fill-strong')}>
               {statusEmoji || <Plus className="w-3.5 h-3.5 text-faint" />}
             </button>
             <input value={statusText} onChange={e => setStatusText(e.target.value)} maxLength={80} placeholder="What are you up to?" aria-label="Status text"
-              className="flex-1 h-9 px-3 rounded-xl bg-fill border border-line text-xs text-white outline-none focus:border-violet-400/50" />
+              className="flex-1 h-9 px-3 rounded-xl bg-fill border border-line text-xs text-white outline-none focus:border-brand-hover/50" />
           </div>
           {/* An INLINE grid, not a floating popover: the modal panel is overflow-y-auto, which would clip an
               absolutely-positioned one. Picking is the only input path — the server accepts emoji only, so a
               free-text field was never a valid way to set this. */}
-          {/* Theme-aware like Avatar: bg-black/30 read as a dark slab once the light overrides turned
+          {/* Theme-aware like Avatar: bg-input read as a dark slab once the light overrides turned
               the modal panel white, and the white-alpha hover was invisible on it. */}
           {emojiOpen && (
-            <div className={cx('mb-3 p-2 rounded-xl border border-line', light ? 'bg-black/5' : 'bg-black/30')}>
+            <div className={cx('mb-3 p-2 rounded-xl border border-line', light ? 'bg-fill' : 'bg-input')}>
               <div className="grid grid-cols-8 gap-1">
                 {STATUS_EMOJIS.map(em => (
                   <button key={em} type="button" onClick={() => { setStatusEmoji(em); setEmojiOpen(false); }} aria-label={`Status emoji ${em}`}
-                    className={cx('h-8 rounded-lg text-base transition-colors', light ? 'hover:bg-black/10' : 'hover:bg-fill-strong',
-                      statusEmoji === em && 'bg-violet-500/20 ring-1 ring-violet-400/50')}>{em}</button>
+                    className={cx('h-8 rounded-lg text-base transition-colors', light ? 'hover:bg-fill-strong' : 'hover:bg-fill-strong',
+                      statusEmoji === em && 'bg-brand/20 ring-1 ring-brand-hover/50')}>{em}</button>
                 ))}
               </div>
               {statusEmoji && (
                 <button type="button" onClick={() => { setStatusEmoji(''); setEmojiOpen(false); }}
-                  className="mt-1.5 w-full h-7 rounded-lg text-[11px] text-muted hover:text-rose-300 hover:bg-fill transition-colors">Clear emoji</button>
+                  className="mt-1.5 w-full h-7 rounded-lg text-meta text-muted hover:text-danger-text hover:bg-fill transition-colors">Clear emoji</button>
               )}
             </div>
           )}
 
-          <label className="block text-[11px] text-muted mb-1">Bio</label>
+          <label className="block text-meta text-muted mb-1">Bio</label>
           <textarea value={bio} onChange={e => setBio(e.target.value)} maxLength={280} rows={3}
-            className="w-full px-3 py-2 rounded-xl bg-fill border border-line text-xs text-white outline-none focus:border-violet-400/50 resize-none" />
-          <div className="text-[10px] text-faint text-right mb-3">{bio.length}/280</div>
+            className="w-full px-3 py-2 rounded-xl bg-fill border border-line text-xs text-white outline-none focus:border-brand-hover/50 resize-none" />
+          <div className="text-micro text-faint text-right mb-3">{bio.length}/280</div>
 
-          {err && <p className="text-xs text-rose-300 mb-3 break-words">{err}</p>}
+          {err && <p className="text-xs text-danger-text mb-3 break-words">{err}</p>}
 
           <div className="flex items-center justify-end gap-2">
             <button onClick={handleClose}
               className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">Cancel</button>
             <button onClick={save} disabled={busy}
-              className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors disabled:opacity-50">Save</button>
+              className="h-9 px-4 rounded-xl bg-brand hover:bg-brand-hover text-white text-xs font-semibold transition-colors disabled:opacity-50">Save</button>
           </div>
         </div>
       </div>
@@ -3888,7 +3887,7 @@ function PersonButton({ personId, children, className, title }) {
   return (
     <button type="button" title={title || 'View profile'}
       onClick={e => { e.stopPropagation(); e.preventDefault(); openProfile(personId); }}
-      className={cx('inline-flex items-center rounded-md hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-violet-400/60 transition-opacity', className)}>
+      className={cx('inline-flex items-center rounded-md hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-brand-hover/60 transition-opacity', className)}>
       {children}
     </button>
   );
@@ -3943,7 +3942,7 @@ function ProfileView() {
 
   return createPortal(
     <>
-      <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm" onClick={close} />
+      <div className="fixed inset-0 z-[70] bg-overlay backdrop-blur-sm" onClick={close} />
       <div className="fixed inset-0 z-[70] flex items-center justify-center p-6 pointer-events-none">
         <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={p ? `${p.name} profile` : 'Profile'}
           className="pointer-events-auto w-full max-w-sm rounded-2xl border border-line bg-surface-raised shadow-2xl p-5 outline-none"
@@ -3969,7 +3968,7 @@ function ProfileView() {
                 <Avatar name={p.name} userId={p.id} photoUrl={p.avatarUrl} size={72} className="mb-3" />
                 <h2 className="text-base font-semibold text-white break-words">{p.name}{p.isSelf && <span className="text-faint font-normal"> (you)</span>}</h2>
                 <div className="mt-1.5 flex items-center gap-2">
-                  <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full border border-line bg-fill text-muted">{p.role}</span>
+                  <span className="text-micro uppercase tracking-wide px-2 py-0.5 rounded-full border border-line bg-fill text-muted">{p.role}</span>
                 </div>
                 {(p.statusEmoji || p.statusText) && (
                   <div className="mt-3 inline-flex items-center gap-1.5 max-w-full px-2.5 py-1 rounded-full bg-fill border border-line">
@@ -3978,24 +3977,24 @@ function ProfileView() {
                   </div>
                 )}
                 {p.bio && <p className="mt-3 text-xs text-muted leading-relaxed whitespace-pre-wrap break-words">{p.bio}</p>}
-                {p.email && <p className="mt-3 text-[11px] text-faint break-all">{p.email}</p>}
+                {p.email && <p className="mt-3 text-meta text-faint break-all">{p.email}</p>}
               </div>
 
-              {dmErr && <p className="mt-3 text-xs text-rose-300 text-center break-words">{dmErr}</p>}
+              {dmErr && <p className="mt-3 text-xs text-danger-text text-center break-words">{dmErr}</p>}
 
               <div className="flex items-center justify-end gap-2 mt-5">
                 <button onClick={close}
                   className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">Close</button>
                 {p.isSelf ? (
                   <button onClick={() => setEditing(true)}
-                    className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5">
+                    className="h-9 px-4 rounded-xl bg-brand hover:bg-brand-hover text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5" />Edit profile
                   </button>
                 ) : (
                   /* Failure keeps the card OPEN with an inline error — the old handler closed
                      immediately and swallowed the rejection, so a failed start looked like a no-op. */
                   <button onClick={message} disabled={dmBusy}
-                    className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
+                    className="h-9 px-4 rounded-xl bg-brand hover:bg-brand-hover text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
                     <MessageSquare className="w-3.5 h-3.5" />{dmBusy ? 'Opening…' : 'Message'}
                   </button>
                 )}
@@ -4042,7 +4041,7 @@ function ViewHeader({ title, subtitle, accent }) {
         <h1 className="text-2xl lg:text-3xl font-semibold text-white font-display tracking-tight" style={{ letterSpacing: '-0.01em' }}>{title}</h1>
         {subtitle && <p className="text-sm text-faint mt-1">{subtitle}</p>}
       </div>
-      {accent && <div className="hidden sm:block text-[10px] uppercase tracking-widest text-faint">{accent}</div>}
+      {accent && <div className="hidden sm:block text-micro uppercase tracking-widest text-faint">{accent}</div>}
     </div>
   );
 }
@@ -4054,8 +4053,8 @@ function Card({ children, className, title, subtitle, action, accent }) {
       {(title || action) && (
         <div className="flex items-center justify-between px-5 pt-4 pb-3">
           <div>
-            {title && <h3 className="text-[13px] font-semibold text-white font-display tracking-tight">{title}</h3>}
-            {subtitle && <p className="text-[11px] text-faint mt-0.5">{subtitle}</p>}
+            {title && <h3 className="text-compact font-semibold text-white font-display tracking-tight">{title}</h3>}
+            {subtitle && <p className="text-meta text-faint mt-0.5">{subtitle}</p>}
           </div>
           {action}
         </div>
@@ -4122,7 +4121,7 @@ function DashboardView() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {top3.map((r, i) => (
               <div key={r.t.id} className="relative">
-                <div className="absolute -top-2 -left-2 z-10 w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white text-xs font-bold flex items-center justify-center shadow-lg shadow-fuchsia-500/30 font-display">
+                <div className="absolute -top-2 -left-2 z-10 w-7 h-7 rounded-full bg-gradient-to-br from-brand to-brand-alt text-white text-xs font-bold flex items-center justify-center shadow-lg shadow-brand-alt/30 font-display">
                   {i + 1}
                 </div>
                 <Tooltip content={`Why: ${scoreRationale(r.t)}`} className="block w-full">
@@ -4138,7 +4137,7 @@ function DashboardView() {
         <StatCard label="My tasks" value={counts.mine} color="#a78bfa" icon={<span className="w-2 h-2 rounded-full" style={{background:'#a78bfa'}} />} onClick={() => setView('mine')} />
         <StatCard label="Assigned to others" value={counts.others} color="#34d399" icon={<span className="w-2 h-2 rounded-full" style={{background:'#34d399'}} />} onClick={() => setView('kanban')} />
         <StatCard label="Unassigned" value={counts.unassigned} color={UNASSIGNED_STYLE.hex} icon={<span className="w-2 h-2 rounded-full" style={{background:UNASSIGNED_STYLE.hex}} />} onClick={() => setView('kanban')} />
-        <StatCard label="Completed this week" value={counts.doneWeek} color="#34d399" icon={<CheckCircle2 className="w-3 h-3 text-emerald-400" />} />
+        <StatCard label="Completed this week" value={counts.doneWeek} color="#34d399" icon={<CheckCircle2 className="w-3 h-3 text-success-text" />} />
       </div>
 
       <Card title="Priority distribution" subtitle="Open tasks by urgency level">
@@ -4164,11 +4163,11 @@ function DashboardView() {
       </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card title="My upcoming" subtitle="Tasks assigned to you, by due date" accent="#a78bfa" action={<button onClick={() => setView('mine')} className="text-[11px] text-faint hover:text-secondary inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
+        <Card title="My upcoming" subtitle="Tasks assigned to you, by due date" accent="#a78bfa" action={<button onClick={() => setView('mine')} className="text-meta text-faint hover:text-secondary inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
           {myUpcoming.length === 0 ? <EmptyState icon={Calendar} text="No upcoming tasks. Nothing on your plate." /> :
             <div className="space-y-2">{myUpcoming.map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}</div>}
         </Card>
-        <Card title="Assigned to others" subtitle="What your teammates are working on" accent="#34d399" action={<button onClick={() => setView('kanban')} className="text-[11px] text-faint hover:text-secondary inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
+        <Card title="Assigned to others" subtitle="What your teammates are working on" accent="#34d399" action={<button onClick={() => setView('kanban')} className="text-meta text-faint hover:text-secondary inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
           {othersUpcoming.length === 0 ? <EmptyState icon={UserCog} text="Nothing assigned to others." /> :
             <div className="space-y-2">{othersUpcoming.map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}</div>}
         </Card>
@@ -4229,7 +4228,7 @@ function StatCard({ label, value, color, icon, onClick }) {
       onClick && 'hover:border-line hover:-translate-y-0.5 cursor-pointer')}>
       <div className="absolute top-0 right-0 w-24 h-24 rounded-full opacity-20 blur-2xl" style={{ background: color }} />
       <div className="relative">
-        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-faint mb-2">{icon}{label}</div>
+        <div className="flex items-center gap-1.5 text-micro uppercase tracking-widest text-faint mb-2">{icon}{label}</div>
         <div className="text-3xl font-semibold text-white font-display tabular-nums" style={{ color }}>{value}</div>
       </div>
     </Tag>
@@ -4239,7 +4238,7 @@ function Metric({ label, value }) {
   return (
     <div className="rounded-xl border border-line-subtle bg-fill-subtle py-2">
       <div className="text-xl font-semibold text-white font-display tabular-nums">{value}</div>
-      <div className="text-[10px] uppercase tracking-widest text-faint">{label}</div>
+      <div className="text-micro uppercase tracking-widest text-faint">{label}</div>
     </div>
   );
 }
@@ -4251,12 +4250,12 @@ function MiniRow({ task, onClick, showBlocked, showTime }) {
     <button onClick={onClick} className="w-full flex items-center gap-3 p-2 -mx-2 rounded-lg hover:bg-fill text-left transition-colors group">
       <PriorityDot priority={task.priority} />
       <div className="flex-1 min-w-0">
-        <div className="text-[13px] text-primary font-medium truncate">{task.title}</div>
-        <div className="flex items-center gap-2 mt-0.5 text-[10px] text-faint">
+        <div className="text-compact text-primary font-medium truncate">{task.title}</div>
+        <div className="flex items-center gap-2 mt-0.5 text-micro text-faint">
           <span style={{ color: proj?.color }}>{proj?.icon} {proj?.name}</span>
-          {due && <><span>·</span><span className={cx(due.tone==='overdue' && 'text-rose-400', due.tone==='today' && 'text-amber-300')}>{due.label}</span></>}
+          {due && <><span>·</span><span className={cx(due.tone==='overdue' && 'text-danger-text', due.tone==='today' && 'text-warning-text')}>{due.label}</span></>}
           {showTime && <><span>·</span><span>{new Date(task.updatedAt).toLocaleDateString(undefined, { month:'short', day:'numeric'})}</span></>}
-          {showBlocked && task.blocked && <><span>·</span><span className="text-rose-400">blocked</span></>}
+          {showBlocked && task.blocked && <><span>·</span><span className="text-danger-text">blocked</span></>}
         </div>
       </div>
       <AssigneeChip assigneeId={task.assigneeId} showLabel={false} />
@@ -4289,10 +4288,10 @@ function FirstRunPanel() {
     { icon: MessageSquare, label: 'Start a conversation', desc: 'Team chat and direct messages.', cta: 'Open chat', go: () => setView('chat') },
   ].filter(Boolean);
   return (
-    <div className="relative rounded-3xl border border-line-subtle bg-gradient-to-br from-violet-500/[0.10] via-fuchsia-500/[0.05] to-transparent p-6 sm:p-8 overflow-hidden">
-      <div className="absolute top-0 right-0 w-72 h-72 rounded-full bg-violet-500/10 blur-3xl pointer-events-none" />
+    <div className="relative rounded-3xl border border-line-subtle bg-gradient-to-br from-brand/[0.10] via-brand-alt/[0.05] to-transparent p-6 sm:p-8 overflow-hidden">
+      <div className="absolute top-0 right-0 w-72 h-72 rounded-full bg-brand/10 blur-3xl pointer-events-none" />
       <div className="relative max-w-xl">
-        <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/25 mb-4">
+        <div className="w-11 h-11 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand-alt/25 mb-4">
           <Sparkles className="w-5 h-5 text-white" />
         </div>
         <h2 className="text-2xl font-semibold text-white font-display tracking-tight">Welcome to Command Center</h2>
@@ -4302,26 +4301,26 @@ function FirstRunPanel() {
         </p>
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <button onClick={() => setQuickAddOpen(true)}
-            className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-white text-black text-sm font-semibold hover:bg-white/90 transition-colors">
+            className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-inverse text-inverse-fg text-sm font-semibold hover:bg-inverse/90 transition-colors">
             <Plus className="w-4 h-4" />Create your first task
           </button>
-          <span className="text-[11px] text-faint">or press <kbd className="px-1.5 py-0.5 rounded bg-fill-strong border border-line font-medium text-muted">N</kbd></span>
+          <span className="text-meta text-faint">or press <kbd className="px-1.5 py-0.5 rounded bg-fill-strong border border-line font-medium text-muted">N</kbd></span>
         </div>
 
         {!hintsOff && (
           <div className="mt-7">
             <div className="flex items-center justify-between mb-2.5">
-              <div className="text-[10px] font-medium uppercase tracking-widest text-faint">A few things to try</div>
-              <button onClick={dismissHints} className="text-[11px] text-faint hover:text-secondary transition-colors">Dismiss</button>
+              <div className="text-micro font-medium uppercase tracking-widest text-faint">A few things to try</div>
+              <button onClick={dismissHints} className="text-meta text-faint hover:text-secondary transition-colors">Dismiss</button>
             </div>
             <div className="grid sm:grid-cols-3 gap-2.5">
               {hints.map(h => (
                 <button key={h.label} onClick={h.go}
                   className="text-left rounded-2xl border border-line-subtle bg-fill-subtle p-3.5 hover:bg-fill hover:border-line transition-colors group">
-                  <h.icon className="w-4 h-4 text-violet-300 mb-2" />
-                  <div className="text-[13px] font-medium text-primary">{h.label}</div>
-                  <div className="text-[11px] text-faint mt-0.5 leading-snug">{h.desc}</div>
-                  <div className="mt-2 text-[11px] font-medium text-violet-300/80 inline-flex items-center gap-0.5 group-hover:text-violet-200">{h.cta}<ChevronRight className="w-3 h-3" /></div>
+                  <h.icon className="w-4 h-4 text-brand-text mb-2" />
+                  <div className="text-compact font-medium text-primary">{h.label}</div>
+                  <div className="text-meta text-faint mt-0.5 leading-snug">{h.desc}</div>
+                  <div className="mt-2 text-meta font-medium text-brand-text/80 inline-flex items-center gap-0.5 group-hover:text-brand-text">{h.cta}<ChevronRight className="w-3 h-3" /></div>
                 </button>
               ))}
             </div>
@@ -4388,7 +4387,7 @@ function ColumnQuickAdd({ status }) {
   });
   return (
     <button onClick={add} type="button"
-      className="w-full flex items-center justify-center gap-1.5 py-2 text-[11px] text-faint hover:text-primary hover:bg-fill border border-dashed border-line hover:border-line-strong rounded-lg transition-colors">
+      className="w-full flex items-center justify-center gap-1.5 py-2 text-meta text-faint hover:text-primary hover:bg-fill border border-dashed border-line hover:border-line-strong rounded-lg transition-colors">
       <Plus className="w-3 h-3" /> Add task
     </button>
   );
@@ -4419,13 +4418,13 @@ function KanbanColumn({ column, tasks }) {
         <div className="flex items-center gap-2">
           <span className="w-1.5 h-1.5 rounded-full" style={{ background: columnAccent, boxShadow: `0 0 8px ${columnAccent}99` }} />
           <h4 className="text-sm font-semibold text-white font-display tracking-tight">{column.label}</h4>
-          <span className="text-[10px] text-faint bg-fill border border-line rounded-md px-1.5 h-4 flex items-center">{tasks.length}</span>
+          <span className="text-micro text-faint bg-fill border border-line rounded-md px-1.5 h-4 flex items-center">{tasks.length}</span>
         </div>
       </div>
       <div className="p-2 space-y-2 min-h-[120px] max-h-[calc(100vh-240px)] overflow-y-auto">
         {column.id !== 'done' && <ColumnQuickAdd status={column.id} />}
         {tasks.length === 0 ? (
-          <div className="text-center py-6 text-[11px] text-faint">{column.hint}</div>
+          <div className="text-center py-6 text-meta text-faint">{column.hint}</div>
         ) : (
           tasks.map(t => <TaskCard key={t.id} task={t} compact={compact} onClick={() => setEditingTask(t)} />)
         )}
@@ -4452,18 +4451,18 @@ function PrivateView() {
 
   return (
     <div className="space-y-6">
-      <div className="relative rounded-3xl border border-line-subtle bg-gradient-to-br from-[#1a1530] via-[#14101e] to-surface p-6 overflow-hidden">
-        <div className="absolute top-0 right-0 w-72 h-72 rounded-full bg-violet-500/10 blur-3xl" />
-        <div className="absolute bottom-0 left-20 w-64 h-64 rounded-full bg-fuchsia-500/5 blur-3xl" />
+      <div data-surface="inverted" className="relative rounded-3xl border border-line-subtle bg-hero-private p-6 overflow-hidden">
+        <div className="absolute top-0 right-0 w-72 h-72 rounded-full bg-brand/10 blur-3xl" />
+        <div className="absolute bottom-0 left-20 w-64 h-64 rounded-full bg-brand-alt/5 blur-3xl" />
         <div className="relative flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-line bg-black/30 backdrop-blur px-2.5 h-6 text-[10px] font-medium uppercase tracking-widest text-secondary mb-3">
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-line bg-input backdrop-blur px-2.5 h-6 text-micro font-medium uppercase tracking-widest text-secondary mb-3">
               <Lock className="w-3 h-3" />Private · you + assignee
             </div>
             <h1 className="text-3xl lg:text-4xl font-semibold text-white font-display tracking-tight" style={{letterSpacing:'-0.02em'}}>Private tasks</h1>
             <p className="text-sm text-muted mt-2 max-w-md">Private tasks are visible only to you and anyone they're assigned to, never the whole workspace.</p>
           </div>
-          <button onClick={() => setQuickAddOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-white text-black text-xs font-semibold hover:bg-white/90">
+          <button onClick={() => setQuickAddOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-inverse text-inverse-fg text-xs font-semibold hover:bg-inverse/90">
             <Plus className="w-3.5 h-3.5" />Add private task
           </button>
         </div>
@@ -4495,8 +4494,8 @@ function PrivateSection({ title, accent, tasks }) {
     <section>
       <div className="flex items-center gap-2 mb-3">
         <span className="w-1.5 h-1.5 rounded-full" style={{ background: accent, boxShadow: `0 0 8px ${accent}99` }} />
-        <h3 className="text-[11px] font-semibold uppercase tracking-widest text-muted">{title}</h3>
-        <span className="text-[10px] text-faint">{tasks.length}</span>
+        <h3 className="text-meta font-semibold uppercase tracking-widest text-muted">{title}</h3>
+        <span className="text-micro text-faint">{tasks.length}</span>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {tasks.map(t => <TaskCard key={t.id} task={t} onClick={() => setEditingTask(t)} />)}
@@ -4521,17 +4520,17 @@ function MyTasksView() {
 
   return (
     <div className="space-y-6">
-      <div className="relative rounded-3xl border border-line-subtle bg-gradient-to-br from-[#0d2a20] via-[#0c1a18] to-surface p-6 overflow-hidden">
-        <div className="absolute top-0 right-0 w-72 h-72 rounded-full bg-emerald-500/10 blur-3xl" />
+      <div data-surface="inverted" className="relative rounded-3xl border border-line-subtle bg-hero-mine p-6 overflow-hidden">
+        <div className="absolute top-0 right-0 w-72 h-72 rounded-full bg-success/10 blur-3xl" />
         <div className="relative flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 h-6 text-[10px] font-medium uppercase tracking-widest text-emerald-300 mb-3">
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-success/20 bg-success/10 px-2.5 h-6 text-micro font-medium uppercase tracking-widest text-success-text mb-3">
               <UserCog className="w-3 h-3" />Assigned to me
             </div>
             <h1 className="text-3xl lg:text-4xl font-semibold text-white font-display tracking-tight">My Tasks</h1>
             <p className="text-sm text-muted mt-2">Everything assigned to you. Prioritize and get it done.</p>
           </div>
-          <button onClick={() => setQuickAddOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-emerald-500 text-black text-xs font-semibold hover:bg-emerald-400">
+          <button onClick={() => setQuickAddOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-success text-inverse-fg text-xs font-semibold hover:bg-success-hover">
             <Plus className="w-3.5 h-3.5" />Add task
           </button>
         </div>
@@ -4561,7 +4560,7 @@ function MyTasksView() {
             <div className="space-y-2">{byStatus.waiting.map(t => (
               <div key={t.id} className="relative">
                 <TaskCard task={t} compact onClick={() => setEditingTask(t)} />
-                {t.blockedReason && <div className="mt-1 ml-2 text-[11px] text-rose-300/80 italic">↳ {t.blockedReason}</div>}
+                {t.blockedReason && <div className="mt-1 ml-2 text-meta text-danger-text/80 italic">↳ {t.blockedReason}</div>}
               </div>
             ))}</div>}
         </Card>
@@ -4572,8 +4571,8 @@ function MyTasksView() {
 function VaStat({ label, value, tone = 'default' }) {
   const tones = { default: '#34d399', warning: '#facc15', danger: '#f43f5e', success: '#34d399' };
   return (
-    <div className="rounded-xl border border-line bg-black/30 backdrop-blur p-3">
-      <div className="text-[10px] uppercase tracking-widest text-muted mb-1">{label}</div>
+    <div className="rounded-xl border border-line bg-input backdrop-blur p-3">
+      <div className="text-micro uppercase tracking-widest text-muted mb-1">{label}</div>
       <div className="text-2xl font-semibold font-display tabular-nums" style={{ color: tones[tone] }}>{value}</div>
     </div>
   );
@@ -4608,16 +4607,16 @@ function MatrixQuad({ id, title, subtitle, tasks, accent }) {
       <div className="relative flex items-start justify-between mb-3">
         <div>
           <h4 className="text-sm font-semibold text-white font-display" style={{ color: accent }}>{title}</h4>
-          <p className="text-[11px] text-faint mt-0.5">{subtitle}</p>
+          <p className="text-meta text-faint mt-0.5">{subtitle}</p>
         </div>
-        <span className="text-[10px] text-faint bg-fill border border-line rounded-md px-1.5 h-5 flex items-center">{tasks.length}</span>
+        <span className="text-micro text-faint bg-fill border border-line rounded-md px-1.5 h-5 flex items-center">{tasks.length}</span>
       </div>
       {tasks.length === 0 ? (
-        <div className="relative flex items-center justify-center h-40 text-[11px] text-faint italic">Drop tasks here</div>
+        <div className="relative flex items-center justify-center h-40 text-meta text-faint italic">Drop tasks here</div>
       ) : (
         <div className="relative space-y-2">
           {tasks.slice(0, 6).map(t => <TaskCard key={t.id} task={t} compact onClick={() => setEditingTask(t)} />)}
-          {tasks.length > 6 && <div className="text-[11px] text-faint pl-1">+ {tasks.length - 6} more</div>}
+          {tasks.length > 6 && <div className="text-meta text-faint pl-1">+ {tasks.length - 6} more</div>}
         </div>
       )}
     </div>
@@ -4646,17 +4645,17 @@ function MatrixView() {
     <div className="space-y-6">
       <ViewHeader title="Priority matrix" subtitle="Drag tasks into quadrants to reframe what actually matters." />
 
-      <div className="hidden md:flex items-center justify-center gap-2 text-[10px] font-semibold uppercase tracking-widest text-secondary md:ml-10">
-        <Flame className="w-3.5 h-3.5 text-rose-400" />
+      <div className="hidden md:flex items-center justify-center gap-2 text-micro font-semibold uppercase tracking-widest text-secondary md:ml-10">
+        <Flame className="w-3.5 h-3.5 text-danger-text" />
         <span>More urgent →</span>
       </div>
 
       <div className="flex gap-3 md:gap-4">
         <div className="hidden md:flex items-center justify-center w-7 shrink-0" aria-hidden>
           <div
-            className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-widest text-secondary whitespace-nowrap"
+            className="flex items-center gap-2 text-micro font-semibold uppercase tracking-widest text-secondary whitespace-nowrap"
             style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
-            <TrendingUp className="w-3.5 h-3.5 text-violet-400" />
+            <TrendingUp className="w-3.5 h-3.5 text-brand-text" />
             <span>More important →</span>
           </div>
         </div>
@@ -4669,7 +4668,7 @@ function MatrixView() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 text-[11px] text-faint justify-center text-center px-4">
+      <div className="flex items-center gap-2 text-meta text-faint justify-center text-center px-4">
         <Info className="w-3 h-3 shrink-0" />
         <span>Urgency and importance update automatically from priority + due date. Drag a task to override.</span>
       </div>
@@ -4718,7 +4717,7 @@ function ProjectsView() {
     <div className="space-y-6">
       <ViewHeader title="Projects" subtitle="Work grouped by where it lives." />
       <div className="flex items-center justify-between -mt-2">
-        <div className="text-[11px] text-faint">{projects.length} project{projects.length === 1 ? '' : 's'}</div>
+        <div className="text-meta text-faint">{projects.length} project{projects.length === 1 ? '' : 's'}</div>
         {canManage && (
           <button onClick={() => setCreateOpen(true)}
             className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-fill border border-line text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">
@@ -4731,7 +4730,7 @@ function ProjectsView() {
           <EmptyState icon={FolderKanban} title="No projects yet"
             text="Projects group your tasks by where they live — a client, an area, a workstream."
             action={canManage ? (
-              <button onClick={() => setCreateOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-white text-black text-xs font-semibold hover:bg-white/90 transition-colors">
+              <button onClick={() => setCreateOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-inverse text-inverse-fg text-xs font-semibold hover:bg-inverse/90 transition-colors">
                 <Plus className="w-3.5 h-3.5" />New project
               </button>
             ) : null} />
@@ -4755,7 +4754,7 @@ function ProjectsView() {
                     </div>
                     <div>
                       <h3 className="text-base font-semibold text-white font-display">{p.name}</h3>
-                      <div className="text-[11px] text-faint">{open.length} open · {done.length} done</div>
+                      <div className="text-meta text-faint">{open.length} open · {done.length} done</div>
                     </div>
                   </div>
                   {canManage && (
@@ -4766,7 +4765,7 @@ function ProjectsView() {
                       </button>
                       {(isOwner || isAdmin) && (
                         <button onClick={() => { setDeleteCount(null); setDeleteTarget(p); }} aria-label={`Delete ${p.name}`}
-                          className="p-1.5 rounded-lg text-faint hover:text-rose-300 hover:bg-fill transition-colors">
+                          className="p-1.5 rounded-lg text-faint hover:text-danger-text hover:bg-fill transition-colors">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       )}
@@ -4778,8 +4777,8 @@ function ProjectsView() {
                 </div>
                 <div className="space-y-1.5 max-h-64 overflow-y-auto">
                   {open.slice(0, 5).map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}
-                  {open.length === 0 && <div className="text-[11px] text-faint italic py-4 text-center">No open tasks in {p.name}.</div>}
-                  {open.length > 5 && <div className="text-[11px] text-faint pl-1">+ {open.length - 5} more</div>}
+                  {open.length === 0 && <div className="text-meta text-faint italic py-4 text-center">No open tasks in {p.name}.</div>}
+                  {open.length > 5 && <div className="text-meta text-faint pl-1">+ {open.length - 5} more</div>}
                 </div>
               </div>
             </section>
@@ -4845,18 +4844,18 @@ function ScheduleView() {
           return (
             <div key={d.date.toISOString()}
               className={cx('grid grid-cols-[80px,1fr] gap-4 rounded-2xl border p-4 transition-colors',
-                d.isToday ? 'border-violet-500/30 bg-violet-500/[0.06]' :
+                d.isToday ? 'border-brand/30 bg-brand/[0.06]' :
                 d.isPast ? 'border-line-subtle bg-fill-subtle opacity-70' :
                 'border-line-subtle bg-fill-subtle')}>
               <div className="text-center">
-                <div className="text-[10px] uppercase tracking-widest text-faint">{weekday}</div>
-                <div className={cx('text-2xl font-semibold font-display tabular-nums leading-none mt-1', d.isToday ? 'text-violet-300' : 'text-white')}>{dayNum}</div>
-                <div className="text-[10px] text-faint mt-0.5">{month}</div>
-                {d.isToday && <div className="inline-flex mt-2 text-[9px] font-semibold uppercase tracking-widest text-violet-300">Today</div>}
+                <div className="text-micro uppercase tracking-widest text-faint">{weekday}</div>
+                <div className={cx('text-2xl font-semibold font-display tabular-nums leading-none mt-1', d.isToday ? 'text-brand-text' : 'text-white')}>{dayNum}</div>
+                <div className="text-micro text-faint mt-0.5">{month}</div>
+                {d.isToday && <div className="inline-flex mt-2 text-[9px] font-semibold uppercase tracking-widest text-brand-text">Today</div>}
               </div>
               <div className="min-w-0">
                 {d.tasks.length === 0 ? (
-                  <div className="h-full flex items-center text-[11px] text-faint italic">Nothing scheduled</div>
+                  <div className="h-full flex items-center text-meta text-faint italic">Nothing scheduled</div>
                 ) : (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
                     {d.tasks.map(t => <TaskCard key={t.id} task={t} compact onClick={() => setEditingTask(t)} />)}
@@ -4993,7 +4992,7 @@ function AudioPlayer({ url, duration, seed, pending }) {
   };
   const ratio = total ? Math.min(1, current / total) : 0;
 
-  if (failed) return <div className="mt-1 text-[11px] text-rose-300/70">Voice note unavailable</div>;
+  if (failed) return <div className="mt-1 text-meta text-danger-text/70">Voice note unavailable</div>;
 
   const playedHex = light ? '#7c3aed' : '#a78bfa';
   const unplayedHex = light ? 'rgba(15,17,23,0.24)' : 'rgba(255,255,255,0.24)';
@@ -5017,14 +5016,14 @@ function AudioPlayer({ url, duration, seed, pending }) {
       </button>
       <div ref={barRef} onClick={onBarClick} onKeyDown={onBarKey} role="slider" tabIndex={pending ? -1 : 0}
         aria-label="Seek" aria-valuemin={0} aria-valuemax={Math.round(total)} aria-valuenow={Math.round(current)}
-        className="flex-1 h-7 flex items-center gap-[2px] cursor-pointer rounded focus:outline-none focus:ring-2 focus:ring-violet-400/40">
+        className="flex-1 h-7 flex items-center gap-[2px] cursor-pointer rounded focus:outline-none focus:ring-2 focus:ring-brand-hover/40">
         {peaks.map((p, i) => (
           <span key={i} aria-hidden="true"
             className="flex-1 rounded-full transition-colors duration-75"
             style={{ height: `${Math.round(p * 100)}%`, minWidth: 2, background: (i / WAVEFORM_BARS) < ratio ? playedHex : unplayedHex }} />
         ))}
       </div>
-      <span className="shrink-0 text-[10px] tabular-nums" style={{ color: light ? 'rgba(15,17,23,0.5)' : 'rgba(255,255,255,0.45)' }}>
+      <span className="shrink-0 text-micro tabular-nums" style={{ color: light ? 'rgba(15,17,23,0.5)' : 'rgba(255,255,255,0.45)' }}>
         {fmtDur(playing || current ? current : total)}
       </span>
     </div>
@@ -5042,9 +5041,9 @@ function VoiceNote({ path, localUrl, duration, pending }) {
     messagesApi.signedUrl(path).then(u => { if (on) setUrl(u); }).catch(logCaught('messages.signedUrl', () => { if (on) setFailed(true); }));
     return () => { on = false; };
   }, [path, url]);
-  if (failed) return <div className="mt-1 text-[11px] text-rose-300/70">Voice note unavailable</div>;
+  if (failed) return <div className="mt-1 text-meta text-danger-text/70">Voice note unavailable</div>;
   if (!url) return (
-    <div className="mt-1 inline-flex items-center gap-2 px-1 py-1.5 text-[11px] text-faint">
+    <div className="mt-1 inline-flex items-center gap-2 px-1 py-1.5 text-meta text-faint">
       <Loader2 className="w-3 h-3 animate-spin" />Loading…
     </div>
   );
@@ -5097,7 +5096,7 @@ function DayDivider({ label }) {
   const light = theme === 'light';
   return (
     <div className="sticky top-0 z-10 flex justify-center py-2 pointer-events-none">
-      <span className="px-2.5 h-6 inline-flex items-center rounded-full text-[10px] font-medium uppercase tracking-wider backdrop-blur-sm border"
+      <span className="px-2.5 h-6 inline-flex items-center rounded-full text-micro font-medium uppercase tracking-wider backdrop-blur-sm border"
         style={{ background: light ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.08)', color: light ? '#5a5d69' : 'rgba(255,255,255,0.5)', borderColor: light ? 'rgba(0,0,0,0.10)' : 'rgba(255,255,255,0.10)' }}>
         {label}
       </span>
@@ -5374,22 +5373,22 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
             className="fixed z-[71] w-44 rounded-xl border border-line bg-surface-raised shadow-2xl py-1 overflow-y-auto"
             style={{ top: pos.top, left: pos.left, maxHeight: 'calc(100vh - 16px)', animation: 'slideUp .12s ease' }}>
             {showEdit && (
-              <button onClick={startEdit} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-secondary hover:bg-fill whitespace-nowrap">
+              <button onClick={startEdit} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-note text-secondary hover:bg-fill whitespace-nowrap">
                 <Edit3 className="w-3.5 h-3.5" />Edit
               </button>
             )}
             {canCopy && (
-              <button onClick={copy} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-secondary hover:bg-fill whitespace-nowrap">
+              <button onClick={copy} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-note text-secondary hover:bg-fill whitespace-nowrap">
                 <Copy className="w-3.5 h-3.5" />Copy
               </button>
             )}
             {canHide && (
-              <button onClick={() => { setMenu(false); btnRef.current?.focus(); onHide?.(m); }} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-secondary hover:bg-fill whitespace-nowrap">
+              <button onClick={() => { setMenu(false); btnRef.current?.focus(); onHide?.(m); }} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-note text-secondary hover:bg-fill whitespace-nowrap">
                 <EyeOff className="w-3.5 h-3.5" />Delete for me
               </button>
             )}
             {showDeleteAll && (
-              <button onClick={() => { setMenu(false); btnRef.current?.focus(); onDelete?.(m); }} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-rose-300 hover:bg-rose-500/10 whitespace-nowrap">
+              <button onClick={() => { setMenu(false); btnRef.current?.focus(); onDelete?.(m); }} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-note text-danger-text hover:bg-danger/10 whitespace-nowrap">
                 <Trash2 className="w-3.5 h-3.5" />Delete for everyone
               </button>
             )}
@@ -5400,7 +5399,7 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
                 case where the menu would otherwise be empty. (It is never empty: menuBtn requires
                 one of canCopy/canHide/(mine && !deleted), and the last of those implies this hint.) */}
             {mine && !deleted && !actable && (
-              <div className="px-3 py-2 text-[11px] text-faint leading-snug">
+              <div className="px-3 py-2 text-meta text-faint leading-snug">
                 Edit and delete-for-everyone expire 10 minutes after sending.
               </div>
             )}
@@ -5415,7 +5414,7 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
   // carries the actions menu so it can be cleared from your own view ("delete for me", DMs).
   if (deleted) {
     return (
-      <div className={cx('group/bubble relative max-w-full rounded-2xl px-3 py-2 border text-[13px] italic text-faint bg-fill-subtle border-line',
+      <div className={cx('group/bubble relative max-w-full rounded-2xl px-3 py-2 border text-compact italic text-faint bg-fill-subtle border-line',
         mine ? 'rounded-tr-sm' : 'rounded-tl-sm')}>
         This message was deleted
         {actions}
@@ -5427,7 +5426,7 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
   if (editing) {
     return (
       <div className={cx('max-w-full rounded-2xl px-3 py-2 border',
-        mine ? 'bg-violet-500/20 border-violet-500/25 rounded-tr-sm' : 'bg-fill border-line rounded-tl-sm')}>
+        mine ? 'bg-brand/20 border-brand/25 rounded-tr-sm' : 'bg-fill border-line rounded-tl-sm')}>
         <textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(); }
@@ -5435,9 +5434,9 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
           }}
           rows={Math.min(6, Math.max(1, (draft.match(/\n/g)?.length || 0) + 1))}
           className="w-full bg-transparent text-sm text-primary leading-relaxed outline-none resize-none" />
-        <div className="mt-1 flex items-center justify-end gap-3 text-[11px]">
+        <div className="mt-1 flex items-center justify-end gap-3 text-meta">
           <button onClick={() => setEditing(false)} className="text-faint hover:text-secondary">Cancel</button>
-          <button onClick={saveEdit} className="font-medium text-violet-300 hover:text-violet-200">Save</button>
+          <button onClick={saveEdit} className="font-medium text-brand-text hover:text-brand-text">Save</button>
         </div>
       </div>
     );
@@ -5445,11 +5444,11 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
 
   return (
     <div className={cx('group/bubble relative max-w-full rounded-2xl px-3 py-2 border',
-      mine ? 'bg-violet-500/20 border-violet-500/25 rounded-tr-sm' : 'bg-fill border-line rounded-tl-sm')}>
+      mine ? 'bg-brand/20 border-brand/25 rounded-tr-sm' : 'bg-fill border-line rounded-tl-sm')}>
       {m.body && (
         <div className="text-sm text-primary leading-relaxed whitespace-pre-wrap break-words" title={absoluteTime(m.createdAt)}>
           <MentionText text={m.body} mentions={m.mentions} />
-          {edited && <span className="ml-1.5 text-[10px] text-faint not-italic">(edited)</span>}
+          {edited && <span className="ml-1.5 text-micro text-faint not-italic">(edited)</span>}
         </div>
       )}
       {(m.audioPath || m.localUrl) && (
@@ -5525,7 +5524,7 @@ function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelet
         {hasMore && (
           <div className="flex justify-center pb-2">
             <button onClick={handleLoadOlder} disabled={loadingOlder}
-              className="text-[11px] px-3 h-7 rounded-full bg-fill border border-line hover:bg-fill-strong text-muted disabled:opacity-50 transition-colors">
+              className="text-meta px-3 h-7 rounded-full bg-fill border border-line hover:bg-fill-strong text-muted disabled:opacity-50 transition-colors">
               {loadingOlder ? 'Loading…' : 'Load older messages'}
             </button>
           </div>
@@ -5546,11 +5545,11 @@ function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelet
                     {firstOfGroup && (
                       <div className={cx('flex items-baseline gap-2 mb-1 px-0.5', mine && 'flex-row-reverse')}>
                         {!mine && (
-                          <PersonButton personId={m.senderId} className="text-[12px] font-semibold text-secondary hover:text-white">
+                          <PersonButton personId={m.senderId} className="text-note font-semibold text-secondary hover:text-white">
                             {nameOf(m.senderId)}
                           </PersonButton>
                         )}
-                        <span className="text-[10px] text-faint tabular-nums">{clockTime(m.createdAt)}</span>
+                        <span className="text-micro text-faint tabular-nums">{clockTime(m.createdAt)}</span>
                       </div>
                     )}
                     <MsgBubble m={m} mine={mine} onDelete={onDelete} onEdit={onEdit} onHide={onHide} />
@@ -5606,11 +5605,11 @@ function usePresence(channelKey, userId, name) {
 function TypingStrip({ label }) {
   if (!label) return null;
   return (
-    <div className="px-4 py-1.5 text-[11px] text-faint border-t border-line-subtle shrink-0 flex items-center gap-1.5">
+    <div className="px-4 py-1.5 text-meta text-faint border-t border-line-subtle shrink-0 flex items-center gap-1.5">
       <span className="flex gap-0.5">
-        <span className="w-1 h-1 rounded-full bg-violet-400/70 animate-bounce" style={{ animationDelay: '0ms' }} />
-        <span className="w-1 h-1 rounded-full bg-violet-400/70 animate-bounce" style={{ animationDelay: '150ms' }} />
-        <span className="w-1 h-1 rounded-full bg-violet-400/70 animate-bounce" style={{ animationDelay: '300ms' }} />
+        <span className="w-1 h-1 rounded-full bg-brand-hover/70 animate-bounce" style={{ animationDelay: '0ms' }} />
+        <span className="w-1 h-1 rounded-full bg-brand-hover/70 animate-bounce" style={{ animationDelay: '150ms' }} />
+        <span className="w-1 h-1 rounded-full bg-brand-hover/70 animate-bounce" style={{ animationDelay: '300ms' }} />
       </span>
       {label}
     </div>
@@ -5647,25 +5646,25 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
   return (
     <div className="border-t border-line shrink-0">
       {failedBody && (
-        <div className="px-4 py-1.5 flex items-center gap-2 text-[11px] text-rose-300/90 border-b border-line-subtle">
+        <div className="px-4 py-1.5 flex items-center gap-2 text-meta text-danger-text/90 border-b border-line-subtle">
           <AlertCircle className="w-3.5 h-3.5 shrink-0" />
           <span className="flex-1 truncate">Couldn’t send “{failedBody}”.</span>
-          <button onClick={retry} className="font-semibold underline underline-offset-2 hover:text-rose-200">Retry</button>
+          <button onClick={retry} className="font-semibold underline underline-offset-2 hover:text-danger-text">Retry</button>
           <button onClick={() => setFailedBody('')} aria-label="Dismiss" className="text-faint hover:text-secondary"><X className="w-3.5 h-3.5" /></button>
         </div>
       )}
       <div className="p-3">
         {recording ? (
           <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-2 text-xs text-rose-300">
-              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" /> Recording {fmtDur(seconds)}
+            <span className="inline-flex items-center gap-2 text-xs text-danger-text">
+              <span className="w-2 h-2 rounded-full bg-danger animate-pulse" /> Recording {fmtDur(seconds)}
             </span>
             <span className="flex items-end gap-0.5 h-4" aria-hidden="true">
-              {[0, 1, 2, 3, 4].map(i => <span key={i} className="w-0.5 rounded-full bg-rose-400/70 animate-pulse" style={{ height: `${6 + ((i * 7 + seconds * 5) % 10)}px`, animationDelay: `${i * 120}ms` }} />)}
+              {[0, 1, 2, 3, 4].map(i => <span key={i} className="w-0.5 rounded-full bg-danger-hover/70 animate-pulse" style={{ height: `${6 + ((i * 7 + seconds * 5) % 10)}px`, animationDelay: `${i * 120}ms` }} />)}
             </span>
             <div className="flex-1" />
             <button onClick={() => onStopRecording(true)} className="text-xs text-muted hover:text-secondary">Cancel</button>
-            <button onClick={() => onStopRecording(false)} className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90">
+            <button onClick={() => onStopRecording(false)} className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-inverse text-inverse-fg hover:bg-inverse/90">
               <Square className="w-3 h-3" />Stop &amp; send
             </button>
           </div>
@@ -5677,7 +5676,7 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
             <MentionTextarea textareaRef={taRef} value={text} onChange={setText} onMentionsChange={setMentions}
               members={mentionMembers} meId={meId} onEnter={submit} onTyping={onTyping} onBlur={() => onStopTyping?.()} rows={1}
               placeholder={placeholder}
-              className="max-h-[140px] bg-fill border border-line rounded-xl px-3 py-2 text-sm text-primary placeholder-faint outline-none focus:border-violet-400/50 resize-none overflow-y-hidden leading-relaxed" />
+              className="max-h-[140px] bg-fill border border-line rounded-xl px-3 py-2 text-sm text-primary placeholder-faint outline-none focus:border-brand-hover/50 resize-none overflow-y-hidden leading-relaxed" />
             {/* focus-visible RING, not just the border tint. `focus:outline-none` suppressed the UA
                 ring and the only replacement was a 1px border going white/10 -> violet-400/50: a
                 1.92:1 state change in dark and 2.23:1 in light — effectively invisible, and well under
@@ -5686,16 +5685,16 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
             <button onClick={() => canVoice ? onStartRecording() : onUpgradeVoice?.()} disabled={sending}
               aria-label={canVoice ? 'Record a voice note' : 'Upgrade to unlock voice notes'}
               title={canVoice ? 'Record a voice note' : 'Upgrade to unlock voice notes'}
-              className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-line bg-fill text-secondary hover:bg-fill-strong hover:text-primary hover:border-line-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70 focus:border-violet-400/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 shrink-0">
+              className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-line bg-fill text-secondary hover:bg-fill-strong hover:text-primary hover:border-line-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-hover/70 focus:border-brand-hover/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 shrink-0">
               {canVoice ? <Mic className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}
             </button>
             <button onClick={submit} disabled={!text.trim() || sending}
-              className="inline-flex items-center gap-1.5 rounded-xl px-4 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed shrink-0">
+              className="inline-flex items-center gap-1.5 rounded-xl px-4 h-9 text-xs font-semibold bg-inverse text-inverse-fg hover:bg-inverse/90 disabled:opacity-30 disabled:cursor-not-allowed shrink-0">
               <Send className="w-3.5 h-3.5" />Send
             </button>
           </div>
         )}
-        {micError && <div className="mt-1.5 text-[11px] text-rose-300/80">{micError}</div>}
+        {micError && <div className="mt-1.5 text-meta text-danger-text/80">{micError}</div>}
       </div>
     </div>
   );
@@ -6034,7 +6033,7 @@ function ChatView() {
         ))}
         {/* aria-hidden: the sr-only summary above already names these people in full. */}
         {readers.length > shown.length && (
-          <span aria-hidden="true" className="text-[10px] text-faint tabular-nums pl-0.5">+{readers.length - shown.length}</span>
+          <span aria-hidden="true" className="text-micro text-faint tabular-nums pl-0.5">+{readers.length - shown.length}</span>
         )}
       </div>
     );
@@ -6055,10 +6054,10 @@ function ChatView() {
         [data-theme="light"] .cc-chat .bg-white\\/\\[0\\.05\\] { background: rgba(0,0,0,0.06) !important; }
       `}</style>
       <div className="px-4 py-3 border-b border-line-subtle flex items-center gap-2.5 shrink-0">
-        <span className="w-7 h-7 rounded-lg bg-violet-500/15 border border-violet-500/25 flex items-center justify-center text-violet-300 text-sm font-semibold shrink-0">#</span>
+        <span className="w-7 h-7 rounded-lg bg-brand/15 border border-brand/25 flex items-center justify-center text-brand-text text-sm font-semibold shrink-0">#</span>
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold text-primary leading-tight">Team chat</div>
-          <div className="text-[10px] text-faint leading-tight">Everyone in this workspace</div>
+          <div className="text-micro text-faint leading-tight">Everyone in this workspace</div>
         </div>
         {/* Hidden-message escape hatch. Without this, "Delete for me" is a one-way door the moment the
             undo toast expires: the message is gone from every read path (thread, search, unread), so
@@ -6067,7 +6066,7 @@ function ChatView() {
         {hiddenCount > 0 && (
           <button onClick={restoreAllHidden} type="button"
             title={`You have hidden ${hiddenCount} message${hiddenCount === 1 ? '' : 's'} in this channel. Restore them?`}
-            className="shrink-0 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-line bg-fill text-[11px] text-muted hover:text-primary hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70 transition-colors">
+            className="shrink-0 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-line bg-fill text-meta text-muted hover:text-primary hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-hover/70 transition-colors">
             <EyeOff className="w-3 h-3" />
             {hiddenCount} hidden — restore
           </button>
@@ -6107,11 +6106,11 @@ function ChatView() {
         receiptFor={receiptFor}
         empty={(
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-10">
-            <div className="w-12 h-12 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
-              <MessageSquare className="w-5 h-5 text-violet-300/70" />
+            <div className="w-12 h-12 rounded-2xl bg-brand/10 border border-brand/20 flex items-center justify-center">
+              <MessageSquare className="w-5 h-5 text-brand-text/70" />
             </div>
             <div className="text-sm font-medium text-secondary">No messages yet</div>
-            <div className="text-[12px] text-faint">Start the conversation with your team 👋</div>
+            <div className="text-note text-faint">Start the conversation with your team 👋</div>
           </div>
         )}
       />
@@ -6171,14 +6170,14 @@ function DirectMessagesView() {
         </div>
         <div className="relative">
           <button onClick={() => setPicking(p => !p)} disabled={peers.length === 0}
-            className="inline-flex items-center gap-1 text-[11px] px-2 h-7 rounded-lg bg-fill border border-line hover:bg-fill-strong disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+            className="inline-flex items-center gap-1 text-meta px-2 h-7 rounded-lg bg-fill border border-line hover:bg-fill-strong disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
             <Plus className="w-3 h-3" />New
           </button>
           {picking && (
             <>
               <div className="fixed inset-0 z-30" onClick={() => setPicking(false)} />
               <div className="absolute right-0 top-9 z-40 w-56 rounded-xl border border-line bg-surface-raised shadow-2xl py-1.5" style={{ animation: 'slideUp .15s ease' }}>
-                <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-faint">Message someone</div>
+                <div className="px-3 py-1.5 text-micro font-medium uppercase tracking-widest text-faint">Message someone</div>
                 {peers.map(m => {
                   return (
                     <button key={m.userId} onClick={() => onPick(m.userId)}
@@ -6198,10 +6197,10 @@ function DirectMessagesView() {
           )}
         </div>
       </div>
-      {startErr && <div className="px-3 py-1.5 text-[11px] text-rose-300/80 border-b border-line-subtle shrink-0">{startErr}</div>}
+      {startErr && <div className="px-3 py-1.5 text-meta text-danger-text/80 border-b border-line-subtle shrink-0">{startErr}</div>}
       <div className="flex-1 min-h-0 overflow-y-auto py-1">
         {dmConversations.length === 0 ? (
-          <div className="px-4 py-10 text-center text-[12px] text-faint">
+          <div className="px-4 py-10 text-center text-note text-faint">
             {peers.length === 0 ? 'No one else is in this workspace yet.' : 'No conversations yet. Start one with “New”.'}
           </div>
         ) : dmConversations.map(c => {
@@ -6223,12 +6222,12 @@ function DirectMessagesView() {
                     {a.statusEmoji && <span className="mr-1">{a.statusEmoji}</span>}
                     {a.label === 'Me' ? 'You' : a.label}
                   </span>
-                  <span className="text-[10px] text-faint shrink-0">{c.preview ? timeAgo(c.lastAt) : ''}</span>
+                  <span className="text-micro text-faint shrink-0">{c.preview ? timeAgo(c.lastAt) : ''}</span>
                 </span>
                 <span className="flex items-center justify-between gap-2">
-                  <span className={cx('text-[12px] truncate', c.unread > 0 ? 'text-secondary' : 'text-faint')}>{preview(c.preview)}</span>
+                  <span className={cx('text-note truncate', c.unread > 0 ? 'text-secondary' : 'text-faint')}>{preview(c.preview)}</span>
                   {c.unread > 0 && (
-                    <span className="shrink-0 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-rose-50 text-[9px] font-bold leading-none flex items-center justify-center">{c.unread > 9 ? '9+' : c.unread}</span>
+                    <span className="shrink-0 min-w-[16px] h-4 px-1 rounded-full bg-danger text-danger-text text-[9px] font-bold leading-none flex items-center justify-center">{c.unread > 9 ? '9+' : c.unread}</span>
                   )}
                 </span>
               </button>
@@ -6258,11 +6257,11 @@ function DirectMessagesView() {
           <DmThread key={active.id} conversationId={active.id} peerId={active.peerId} onBack={() => setDmActiveConv(null)} />
         ) : (
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 px-6">
-            <div className="w-12 h-12 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
-              <MessagesSquare className="w-5 h-5 text-violet-300/70" />
+            <div className="w-12 h-12 rounded-2xl bg-brand/10 border border-brand/20 flex items-center justify-center">
+              <MessagesSquare className="w-5 h-5 text-brand-text/70" />
             </div>
             <div className="text-sm font-medium text-secondary">Your conversations</div>
-            <div className="text-[12px] text-faint">Pick a conversation, or start a new one.</div>
+            <div className="text-note text-faint">Pick a conversation, or start a new one.</div>
           </div>
         )}
       </section>
@@ -6406,11 +6405,11 @@ function DmThread({ conversationId, peerId, onBack }) {
     if (m.id !== lastOwnId) return null;
     const seen = isSeen(m.createdAt);
     return (
-      <div className="mt-0.5 px-1 flex items-center gap-1 text-[10px]" title={seen ? 'Seen' : 'Sent'}>
+      <div className="mt-0.5 px-1 flex items-center gap-1 text-micro" title={seen ? 'Seen' : 'Sent'}>
         {/* Seen shows the peer's face (the Messenger convention) — it reads faster than a tick and it's
             unambiguous about WHO saw it. Sent keeps the plain tick: nobody has seen it yet. */}
         {seen
-          ? <><Avatar name={peer.known ? peerName : ''} userId={peerId} photoUrl={peer.avatarUrl} size={14} /><span className="text-violet-400/80">Seen</span></>
+          ? <><Avatar name={peer.known ? peerName : ''} userId={peerId} photoUrl={peer.avatarUrl} size={14} /><span className="text-brand-text/80">Seen</span></>
           : <><Check className="w-3 h-3 text-faint" /><span className="text-faint">Sent</span></>}
       </div>
     );
@@ -6581,7 +6580,7 @@ function DmThread({ conversationId, peerId, onBack }) {
           <div className="min-w-0 text-left">
             <div className="text-sm font-semibold text-primary leading-tight truncate">{isSelf ? 'You' : peerName}</div>
             {/* The subtitle was a static string; the peer's live status is far more useful here. */}
-            <div className="text-[10px] text-faint leading-tight truncate">
+            <div className="text-micro text-faint leading-tight truncate">
               {isSelf ? 'Notes to self'
                 : (peer.statusText || peer.statusEmoji)
                   ? <>{peer.statusEmoji && <span className="mr-1">{peer.statusEmoji}</span>}{peer.statusText || 'Direct message'}</>
@@ -6594,7 +6593,7 @@ function DmThread({ conversationId, peerId, onBack }) {
         {hiddenCount > 0 && (
           <button onClick={restoreAllHidden} type="button"
             title={`You have hidden ${hiddenCount} message${hiddenCount === 1 ? '' : 's'} in this thread. Restore them?`}
-            className="shrink-0 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-line bg-fill text-[11px] text-muted hover:text-primary hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70 transition-colors">
+            className="shrink-0 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-line bg-fill text-meta text-muted hover:text-primary hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-hover/70 transition-colors">
             <EyeOff className="w-3 h-3" />
             {hiddenCount} hidden — restore
           </button>
@@ -6619,7 +6618,7 @@ function DmThread({ conversationId, peerId, onBack }) {
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-10">
             <MsgAvatar name={peer.known ? peerName : ''} userId={peerId} photoUrl={peer.avatarUrl} size={48} />
             <div className="text-sm font-medium text-secondary">{isSelf ? 'Notes to self' : peerName}</div>
-            <div className="text-[12px] text-faint">{isSelf ? 'Jot down anything you want to remember.' : 'Say hello 👋'}</div>
+            <div className="text-note text-faint">{isSelf ? 'Jot down anything you want to remember.' : 'Say hello 👋'}</div>
           </div>
         )}
       />
@@ -6659,14 +6658,14 @@ function OnboardingScreen({ onSignOut }) {
       tagline="A workspace is where your team's tasks, projects, and chat live. Name it to get started. You'll be its owner."
       footnote={null}
       beforeCard={pendingInvites.length > 0 ? (
-        <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/[0.06] p-5 shadow-2xl mb-4">
-          <div className="text-[11px] font-medium uppercase tracking-widest text-emerald-300/70 mb-2">You've been invited</div>
+        <div className="rounded-2xl border border-success-hover/20 bg-success/[0.06] p-5 shadow-2xl mb-4">
+          <div className="text-meta font-medium uppercase tracking-widest text-success-text/70 mb-2">You've been invited</div>
           <div className="space-y-2">
             {pendingInvites.map(inv => (
               <div key={inv.id} className="flex items-center justify-between gap-2">
                 <div className="text-sm text-primary truncate">Join <span className="font-semibold">{inv.workspaceName}</span></div>
                 <button onClick={() => acceptInvitation(inv.token).catch(err => reportError(err, 'invitations.accept'))}
-                  className="shrink-0 h-8 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-semibold active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">Accept</button>
+                  className="shrink-0 h-8 px-3 rounded-lg bg-success hover:bg-success-hover text-white text-xs font-semibold active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-success-text">Accept</button>
               </div>
             ))}
           </div>
@@ -6674,13 +6673,13 @@ function OnboardingScreen({ onSignOut }) {
       ) : null}
       footer={
         <button onClick={() => onSignOut?.()}
-          className="mx-auto block text-[11px] text-faint hover:text-muted transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+          className="mx-auto block text-meta text-faint hover:text-muted transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
           Sign out
         </button>
       }
     >
-      {pendingInvites.length > 0 && <div className="text-[11px] text-faint mb-3 text-center">Or create your own workspace</div>}
-      <label className="text-[10px] font-medium uppercase tracking-widest text-faint mb-1.5 block">Workspace name</label>
+      {pendingInvites.length > 0 && <div className="text-meta text-faint mb-3 text-center">Or create your own workspace</div>}
+      <label className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5 block">Workspace name</label>
       <CreateWorkspaceForm submitLabel="Create workspace & continue" />
     </AuthShell>
   );
@@ -6786,15 +6785,15 @@ function MembersView() {
       <Card title="Invite a teammate" subtitle="Pick whether they join as a full member or a limited guest. No email is sent automatically — copy the invite link below and share it with them.">
         {entitlements.atSeatLimit && (
           <button type="button" onClick={() => requestUpgrade('seats')}
-            className="w-full mb-3 flex items-center gap-2 px-3 py-2.5 rounded-xl border border-violet-400/30 bg-violet-500/10 text-left hover:bg-violet-500/15 transition-colors">
-            <Lock className="w-3.5 h-3.5 text-violet-300 shrink-0" />
-            <span className="text-[12px] text-violet-100/90 flex-1">You've reached your plan's member limit ({entitlements.limits.seats}). Upgrade to add more.</span>
-            <span className="text-[11px] font-semibold text-violet-200 shrink-0">See plans</span>
+            className="w-full mb-3 flex items-center gap-2 px-3 py-2.5 rounded-xl border border-brand-hover/30 bg-brand/10 text-left hover:bg-brand/15 transition-colors">
+            <Lock className="w-3.5 h-3.5 text-brand-text shrink-0" />
+            <span className="text-note text-brand-text/90 flex-1">You've reached your plan's member limit ({entitlements.limits.seats}). Upgrade to add more.</span>
+            <span className="text-meta font-semibold text-brand-text shrink-0">See plans</span>
           </button>
         )}
         <form onSubmit={submit} className="flex flex-col sm:flex-row gap-2">
           <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="teammate@example.com"
-            className="flex-1 h-9 px-3 rounded-xl bg-fill border border-line text-sm text-primary outline-none focus:border-violet-400/50 transition-colors" />
+            className="flex-1 h-9 px-3 rounded-xl bg-fill border border-line text-sm text-primary outline-none focus:border-brand-hover/50 transition-colors" />
           <div className="inline-flex shrink-0 rounded-xl border border-line bg-fill p-0.5" role="radiogroup" aria-label="Invite as role">
             {['member', 'guest'].map(r => (
               <button key={r} type="button" role="radio" aria-checked={inviteRole === r} onClick={() => setInviteRole(r)}
@@ -6805,29 +6804,29 @@ function MembersView() {
             ))}
           </div>
           <button type="submit" disabled={busy || !email.trim()}
-            className={cx('h-9 px-4 rounded-xl text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors', (busy || !email.trim()) ? 'bg-violet-500/40 cursor-not-allowed' : 'bg-violet-500 hover:bg-violet-400')}>
+            className={cx('h-9 px-4 rounded-xl text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors', (busy || !email.trim()) ? 'bg-brand/40 cursor-not-allowed' : 'bg-brand hover:bg-brand-hover')}>
             <Mail className="w-3.5 h-3.5" />Create invite link
           </button>
         </form>
-        <p className="text-[11px] text-faint mt-2">
+        <p className="text-meta text-faint mt-2">
           {inviteRole === 'guest'
             ? 'Guests only see tasks assigned to them + direct messages — good for clients or freelancers. You can change their role later.'
             : 'Members get full access to this workspace (tasks, chat, projects). You can change their role later.'}
         </p>
-        {err && <p className="text-[11px] text-rose-300 mt-2">{err}</p>}
+        {err && <p className="text-meta text-danger-text mt-2">{err}</p>}
         {lastLink && (
           <div className="mt-3 p-3 rounded-xl border border-line bg-fill-subtle">
-            <div className="text-[11px] text-muted mb-1.5">{copied ? 'Link copied. ' : ''}Send this to {lastLink.email} — joins as <span className="capitalize text-secondary">{lastLink.role || 'member'}</span>:</div>
+            <div className="text-meta text-muted mb-1.5">{copied ? 'Link copied. ' : ''}Send this to {lastLink.email} — joins as <span className="capitalize text-secondary">{lastLink.role || 'member'}</span>:</div>
             <div className="flex items-center gap-2">
-              <code className="flex-1 truncate text-[11px] text-secondary">{lastLink.url}</code>
-              <button onClick={() => copy(lastLink.url)} className="shrink-0 text-[11px] px-2 h-7 rounded-lg bg-fill border border-line hover:bg-fill-strong transition-colors">Copy</button>
+              <code className="flex-1 truncate text-meta text-secondary">{lastLink.url}</code>
+              <button onClick={() => copy(lastLink.url)} className="shrink-0 text-meta px-2 h-7 rounded-lg bg-fill border border-line hover:bg-fill-strong transition-colors">Copy</button>
             </div>
           </div>
         )}
       </Card>
 
       <Card title="Current members" subtitle={`${members.length} in this workspace`}>
-        {roleErr && <p className="text-[11px] text-rose-300 mb-2">{roleErr}</p>}
+        {roleErr && <p className="text-meta text-danger-text mb-2">{roleErr}</p>}
         <div className="space-y-1.5">
           {members.map(m => {
             const targetRank = ROLE_RANK[m.role] ?? -1;
@@ -6846,31 +6845,31 @@ function MembersView() {
                       {m.displayName || m.email}{isSelf && <span className="text-faint"> (you)</span>}
                     </div>
                     {/* status when they've set one, else the email — the profile view carries both anyway */}
-                    <div className="text-[11px] text-faint truncate">{m.statusText || m.email}</div>
+                    <div className="text-meta text-faint truncate">{m.statusText || m.email}</div>
                   </div>
                 </PersonButton>
                 <div className="shrink-0 flex items-center gap-2">
                   {!isSelf && (
                     <button onClick={() => startDm(m.userId).catch(logCaught('dms.start from members'))} title={`Message ${m.displayName || m.email}`}
-                      className="text-[11px] px-2 h-7 rounded-lg bg-fill border border-line hover:bg-fill-strong inline-flex items-center gap-1 transition-colors">
+                      className="text-meta px-2 h-7 rounded-lg bg-fill border border-line hover:bg-fill-strong inline-flex items-center gap-1 transition-colors">
                       <MessagesSquare className="w-3 h-3" />Message
                     </button>
                   )}
                   {canModify ? (
                     <div className="relative">
                       <select value={m.role} onChange={(e) => changeRole(m.userId, e.target.value)} aria-label={`Role for ${m.displayName || m.email}`}
-                        className="appearance-none text-[11px] h-7 rounded-lg bg-fill border border-line text-secondary pl-2.5 pr-6 outline-none focus:border-line-strong hover:bg-fill-strong hover:border-line-strong cursor-pointer transition-colors">
+                        className="appearance-none text-meta h-7 rounded-lg bg-fill border border-line text-secondary pl-2.5 pr-6 outline-none focus:border-line-strong hover:bg-fill-strong hover:border-line-strong cursor-pointer transition-colors">
                         {settableRoles.map(r => <option key={r} value={r} className="bg-surface-raised">{ROLE_LABELS[r]}</option>)}
                       </select>
                       <ChevronDown className="w-3 h-3 text-faint absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                     </div>
                   ) : (
                     <span title={isLastOwner ? 'The last owner — promote another owner first to change this' : undefined}
-                      className="text-[10px] uppercase tracking-wide text-faint bg-fill border border-line rounded-md px-1.5 h-5 flex items-center">{ROLE_LABELS[m.role] || m.role}</span>
+                      className="text-micro uppercase tracking-wide text-faint bg-fill border border-line rounded-md px-1.5 h-5 flex items-center">{ROLE_LABELS[m.role] || m.role}</span>
                   )}
                   {canModify && (
                     <button onClick={() => setRemoveTarget(m)} aria-label={`Remove ${m.displayName || m.email}`}
-                      className="text-faint hover:text-rose-300 hover:bg-fill p-1.5 rounded-lg transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                      className="text-faint hover:text-danger-text hover:bg-fill p-1.5 rounded-lg transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
                   )}
                 </div>
               </div>
@@ -6881,18 +6880,18 @@ function MembersView() {
 
       <Card title="Pending invitations" subtitle={pending.length ? `${pending.length} awaiting acceptance` : 'None yet'}>
         {pending.length === 0 ? (
-          <div className="text-[11px] text-faint">No pending invitations.</div>
+          <div className="text-meta text-faint">No pending invitations.</div>
         ) : (
           <div className="space-y-1.5">
             {pending.map(i => (
               <div key={i.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-fill-subtle">
                 <div className="min-w-0">
                   <div className="text-sm text-primary truncate">{i.email}</div>
-                  <div className="text-[11px] text-faint">invited {timeAgo(i.created_at)}</div>
+                  <div className="text-meta text-faint">invited {timeAgo(i.created_at)}</div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <button onClick={() => copy(inviteUrl(i.token))} className="text-[11px] px-2 h-7 rounded-lg bg-fill border border-line hover:bg-fill-strong inline-flex items-center gap-1 transition-colors"><Link2 className="w-3 h-3" />Copy link</button>
-                  <button onClick={() => revoke(i.id)} aria-label="Revoke invitation" className="text-[11px] px-2 h-7 rounded-lg text-muted hover:text-rose-300 hover:bg-fill inline-flex items-center gap-1 transition-colors"><X className="w-3 h-3" />Revoke</button>
+                  <button onClick={() => copy(inviteUrl(i.token))} className="text-meta px-2 h-7 rounded-lg bg-fill border border-line hover:bg-fill-strong inline-flex items-center gap-1 transition-colors"><Link2 className="w-3 h-3" />Copy link</button>
+                  <button onClick={() => revoke(i.id)} aria-label="Revoke invitation" className="text-meta px-2 h-7 rounded-lg text-muted hover:text-danger-text hover:bg-fill inline-flex items-center gap-1 transition-colors"><X className="w-3 h-3" />Revoke</button>
                 </div>
               </div>
             ))}
@@ -6918,11 +6917,9 @@ function AppShell() {
   if (loading || (currentWorkspaceId && !membershipsLoaded)) {
     return (
       <div data-surface="dark" className="min-h-screen bg-canvas text-white flex items-center justify-center">
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
-          body { font-family: 'Outfit', sans-serif; background: #070810; }
-          .font-display { font-family: 'Fraunces', serif; }`}</style>
+        
         <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-2xl shadow-fuchsia-500/30 animate-pulse">
+          <div className="w-12 h-12 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-2xl shadow-brand-alt/30 animate-pulse">
             <Sparkles className="w-6 h-6 text-white" />
           </div>
           <div className="text-sm text-muted">Loading your workspace…</div>
@@ -6951,10 +6948,6 @@ function AppShell() {
   return (
     <div className="min-h-screen flex bg-[#070810] text-white" data-theme={theme}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
-        body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; font-feature-settings: "ss01","cv11"; background: #070810; }
-        .font-display { font-family: 'Fraunces', ui-serif, serif; font-optical-sizing: auto; font-weight: 500; }
-        .tabular-nums { font-variant-numeric: tabular-nums; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes fadeSlideOut { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(-6px) scale(0.97); } }

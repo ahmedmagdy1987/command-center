@@ -78,14 +78,14 @@ export default function ResetPasswordScreen() {
 
       {phase === 'invalid' && (
         <div className="text-center py-2">
-          <div className="w-11 h-11 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center mx-auto mb-3">
-            <AlertCircle className="w-5 h-5 text-rose-300" />
+          <div className="w-11 h-11 rounded-xl bg-danger/10 border border-danger/20 flex items-center justify-center mx-auto mb-3">
+            <AlertCircle className="w-5 h-5 text-danger-text" />
           </div>
           <h2 className="text-base font-semibold text-white">Reset link invalid or expired</h2>
-          <p className="text-[12px] text-faint mt-1.5 mb-5">This password-reset link is no longer valid. Request a fresh one and try again.</p>
+          <p className="text-note text-faint mt-1.5 mb-5">This password-reset link is no longer valid. Request a fresh one and try again.</p>
           <Magnetic>
             <Link to="/forgot-password"
-              className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm hover:shadow-lg hover:shadow-fuchsia-500/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+              className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl bg-brand-gradient-cta text-white font-semibold text-sm hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
               Request a new link <ArrowRight className="w-4 h-4" />
             </Link>
           </Magnetic>
@@ -95,22 +95,22 @@ export default function ResetPasswordScreen() {
       {(phase === 'ready' || phase === 'saving') && (
         <>
           <div className="text-center mb-5">
-            <div className="w-11 h-11 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center mx-auto mb-3">
-              <KeyRound className="w-5 h-5 text-violet-300" />
+            <div className="w-11 h-11 rounded-xl bg-brand/10 border border-brand/20 flex items-center justify-center mx-auto mb-3">
+              <KeyRound className="w-5 h-5 text-brand-text" />
             </div>
             <h2 className="text-base font-semibold text-white">Set a new password</h2>
-            <p className="text-[11px] text-faint mt-1">Choose a new password for your account.</p>
+            <p className="text-meta text-faint mt-1">Choose a new password for your account.</p>
           </div>
 
           <form onSubmit={submit} className="space-y-4">
             <div className="au-in" style={{ animationDelay: '.16s' }}>
-              <label className="text-[10px] font-medium uppercase tracking-widest text-faint mb-1.5 block">New password</label>
+              <label className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5 block">New password</label>
               <AuthField icon={Lock} type="password" value={password} onChange={e => setPassword(e.target.value)} required autoFocus
                 placeholder="At least 10 characters" />
             </div>
 
             <div className="au-in" style={{ animationDelay: '.2s' }}>
-              <label className="text-[10px] font-medium uppercase tracking-widest text-faint mb-1.5 block">Confirm password</label>
+              <label className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5 block">Confirm password</label>
               <AuthField icon={Lock} type="password" value={confirm} onChange={e => setConfirm(e.target.value)} required
                 placeholder="Re-enter your new password" />
             </div>

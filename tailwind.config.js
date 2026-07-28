@@ -61,6 +61,7 @@ export default {
           DEFAULT: 'rgb(var(--color-brand) / <alpha-value>)',
           hover: 'rgb(var(--color-brand-hover) / <alpha-value>)',
           text: 'rgb(var(--color-brand-text) / <alpha-value>)',
+          alt: 'rgb(var(--color-brand-alt) / <alpha-value>)',
           fg: 'rgb(var(--color-brand-fg) / <alpha-value>)',
           surface: 'var(--color-brand-surface)',
         },
@@ -116,6 +117,8 @@ export default {
       backgroundImage: {
         'brand-gradient': 'var(--gradient-brand)',
         'brand-gradient-cta': 'var(--gradient-brand-cta)',
+        'hero-private': 'var(--gradient-hero-private)',
+        'hero-mine': 'var(--gradient-hero-mine)',
       },
 
       // Additive only — Tailwind's own xs/sm/base are untouched on purpose.

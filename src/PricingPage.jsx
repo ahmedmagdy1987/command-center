@@ -42,9 +42,6 @@ export default function PricingPage({ session }) {
   return (
     <div ref={rootRef} data-surface="dark" className="pp-root min-h-screen bg-canvas text-white relative">
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
-        body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; background: #070810; }
-        .font-display { font-family: 'Fraunces', ui-serif, serif; font-optical-sizing: auto; font-weight: 500; }
 
         /* Entrance (fill: both; static styles = final state, so reduce shows the complete page) */
         @keyframes ppFadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
@@ -83,7 +80,7 @@ export default function PricingPage({ session }) {
       <main className="relative max-w-6xl mx-auto px-5 lg:px-8">
         {/* Hero (compact: the three plan cards fit above the fold on a typical laptop) */}
         <section className="pt-6 lg:pt-8 pb-5 text-center">
-          <div className="pp-in inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-widest text-violet-300/80 bg-violet-500/10 border border-violet-400/20 rounded-full px-3 h-7 mb-3" style={{ animationDelay: '.05s' }}>
+          <div className="pp-in inline-flex items-center gap-1.5 text-meta font-medium uppercase tracking-widest text-brand-text/80 bg-brand/10 border border-brand-hover/20 rounded-full px-3 h-7 mb-3" style={{ animationDelay: '.05s' }}>
             {PRICING_COPY.eyebrow}
           </div>
           <h1 className="pp-in text-2xl lg:text-3xl font-semibold font-display tracking-tight leading-[1.12] max-w-2xl mx-auto" style={{ animationDelay: '.12s' }}>
@@ -92,12 +89,12 @@ export default function PricingPage({ session }) {
           <p className="pp-in mt-2.5 text-sm lg:text-base text-muted max-w-xl mx-auto leading-relaxed" style={{ animationDelay: '.22s' }}>
             {PRICING_COPY.sub}
           </p>
-          <div className="pp-in mt-3.5 flex flex-wrap justify-center gap-x-6 gap-y-1.5 text-[12px] text-muted" style={{ animationDelay: '.32s' }}>
+          <div className="pp-in mt-3.5 flex flex-wrap justify-center gap-x-6 gap-y-1.5 text-note text-muted" style={{ animationDelay: '.32s' }}>
             {PRICING_COPY.benefits.map((b, i) => {
               const Icon = BENEFIT_ICONS[i] || Check;
               return (
                 <span key={b} className="inline-flex items-center gap-2">
-                  <Icon className="w-4 h-4 text-violet-300" />{b}
+                  <Icon className="w-4 h-4 text-brand-text" />{b}
                 </span>
               );
             })}
@@ -112,7 +109,7 @@ export default function PricingPage({ session }) {
             <button onClick={() => setCycle(BILLING_CYCLE.annual)}
               className={cycleBtn(annual)}>
               Annual
-              <span className="ml-1.5 text-[10px] font-semibold text-emerald-300">{PRICING_COPY.annualBadge}</span>
+              <span className="ml-1.5 text-micro font-semibold text-success-text">{PRICING_COPY.annualBadge}</span>
             </button>
           </div>
         </div>
@@ -133,22 +130,22 @@ export default function PricingPage({ session }) {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                 <span className="text-base font-semibold font-display">{plan.name}</span>
-                <span className="text-[12px] text-faint">{plan.tagline}</span>
+                <span className="text-note text-faint">{plan.tagline}</span>
               </div>
-              <div className="mt-0.5 text-[12px] text-muted">
+              <div className="mt-0.5 text-note text-muted">
                 <span className="text-secondary font-medium">{formatMoney(monthlyEquivalent(plan, annual ? BILLING_CYCLE.annual : BILLING_CYCLE.monthly))}/mo</span>
                 {' · '}{plan.highlights.join(' · ')}
               </div>
             </div>
             <button onClick={() => onChoose(plan)}
-              className="shrink-0 h-9 px-4 rounded-xl border border-line bg-fill text-xs font-semibold text-primary hover:bg-fill-strong active:scale-[.97] transition-all inline-flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+              className="shrink-0 h-9 px-4 rounded-xl border border-line bg-fill text-xs font-semibold text-primary hover:bg-fill-strong active:scale-[.97] transition-all inline-flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
               {plan.cta}<ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
         ))}
 
         {/* Early-access honesty note */}
-        <p className="pp-in mt-6 text-center text-[12px] text-faint max-w-2xl mx-auto" style={{ animationDelay: '.9s' }}>
+        <p className="pp-in mt-6 text-center text-note text-faint max-w-2xl mx-auto" style={{ animationDelay: '.9s' }}>
           {PRICING_COPY.earlyAccessNote}
         </p>
 
@@ -163,8 +160,8 @@ export default function PricingPage({ session }) {
                   <th className="text-left font-medium text-muted px-5 py-4 w-[40%]">Features</th>
                   {plans.map(p => (
                     <th key={p.id} className="px-4 py-4 text-center">
-                      <div className={cx('font-semibold font-display', p.popular ? 'text-violet-200' : 'text-primary')}>{p.name}</div>
-                      <div className="text-[11px] font-normal text-faint mt-0.5">
+                      <div className={cx('font-semibold font-display', p.popular ? 'text-brand-text' : 'text-primary')}>{p.name}</div>
+                      <div className="text-meta font-normal text-faint mt-0.5">
                         {p.paid ? `${formatMoney(monthlyEquivalent(p, annual ? BILLING_CYCLE.annual : BILLING_CYCLE.monthly))}/mo` : 'Free'}
                       </div>
                     </th>
@@ -188,29 +185,29 @@ export default function PricingPage({ session }) {
         {/* CTA band */}
         <section className="relative pb-16">
           <Hairline className="absolute top-0 inset-x-0" />
-          <div data-lp-reveal className="relative overflow-hidden rounded-2xl border border-violet-400/20 bg-[#0c0d15] p-8 lg:p-12 text-center mt-16">
-            <div className="absolute inset-0 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/[0.07] to-transparent" aria-hidden="true" />
+          <div data-lp-reveal className="relative overflow-hidden rounded-2xl border border-brand-hover/20 bg-[#0c0d15] p-8 lg:p-12 text-center mt-16">
+            <div className="absolute inset-0 bg-gradient-to-br from-brand/15 via-brand-alt/[0.07] to-transparent" aria-hidden="true" />
             <div className="absolute -top-24 left-1/2 -ml-48 w-96 h-96 rounded-full" aria-hidden="true" style={{ background: 'radial-gradient(closest-side, rgba(167,139,250,.18), transparent 70%)', animation: 'ppDrift1 18s ease-in-out infinite alternate' }} />
             <div className="absolute top-0 inset-x-0 h-px overflow-hidden" aria-hidden="true">
-              <span className="pp-comet absolute top-0 h-px w-60 bg-gradient-to-r from-transparent via-fuchsia-300/80 to-transparent" style={{ opacity: 0 }} />
+              <span className="pp-comet absolute top-0 h-px w-60 bg-gradient-to-r from-transparent via-brand-alt-text/80 to-transparent" style={{ opacity: 0 }} />
             </div>
             <h2 className="relative text-2xl lg:text-3xl font-semibold font-display tracking-tight">Get your team in one place</h2>
             <p className="relative mt-2 text-muted">Start free in seconds. Bring in your people, inside or outside your company.</p>
             <div className="relative mt-6 flex justify-center gap-3">
               {session ? (
                 <Magnetic>
-                  <Link to="/" className="h-12 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+                  <Link to="/" className="h-12 px-6 rounded-xl bg-brand-gradient-cta text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
                     Back to Command Center <ArrowRight className="w-4 h-4" />
                   </Link>
                 </Magnetic>
               ) : (
                 <>
                   <Magnetic>
-                    <Link to="/signup" className="h-12 px-6 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-fuchsia-500/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+                    <Link to="/signup" className="h-12 px-6 rounded-xl bg-brand-gradient-cta text-white font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
                       Get started free <ArrowRight className="w-4 h-4" />
                     </Link>
                   </Magnetic>
-                  <Link to="/login" className="h-12 px-6 rounded-xl border border-line bg-fill-subtle text-secondary font-medium text-sm flex items-center hover:bg-fill active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+                  <Link to="/login" className="h-12 px-6 rounded-xl border border-line bg-fill-subtle text-secondary font-medium text-sm flex items-center hover:bg-fill active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
                     Log in
                   </Link>
                 </>
@@ -228,16 +225,16 @@ export default function PricingPage({ session }) {
 /* ── Local helpers + subcomponents ─────────────────────────────────────────── */
 const cx = (...xs) => xs.filter(Boolean).join(' ');
 const cycleBtn = (active) =>
-  cx('inline-flex items-center h-9 px-4 rounded-full text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
-    active ? 'bg-white text-[#0a0b11]' : 'text-muted hover:text-white');
+  cx('inline-flex items-center h-9 px-4 rounded-full text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text',
+    active ? 'bg-inverse text-inverse-fg' : 'text-muted hover:text-white');
 
 function cellFor(row, plan) {
-  if (row.type === 'always') return <Check className="w-4 h-4 text-emerald-400 mx-auto" />;
+  if (row.type === 'always') return <Check className="w-4 h-4 text-success-text mx-auto" />;
   if (row.type === 'limit') return <span className="text-secondary font-medium tabular-nums">{formatLimit(plan.limits[row.key])}</span>;
   if (row.type === 'history') return <span className="text-secondary font-medium">{formatHistory(plan.limits[row.key])}</span>;
   // feature
   return plan.features?.[row.key]
-    ? <Check className="w-4 h-4 text-emerald-400 mx-auto" />
+    ? <Check className="w-4 h-4 text-success-text mx-auto" />
     : <Minus className="w-4 h-4 text-faint mx-auto" />;
 }
 
@@ -245,11 +242,11 @@ function PlanCard({ plan, annual, onChoose }) {
   const cycle = annual ? BILLING_CYCLE.annual : BILLING_CYCLE.monthly;
   const perMonth = monthlyEquivalent(plan, cycle);
   const savings = annualSavings(plan);
-  const ctaCls = cx('h-10 w-full rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-[.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
+  const ctaCls = cx('h-10 w-full rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-[.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text',
     plan.popular
-      ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white hover:shadow-lg hover:shadow-fuchsia-500/40 hover:brightness-110'
+      ? 'bg-brand-gradient-cta text-white hover:shadow-lg hover:shadow-brand-alt/40 hover:brightness-110'
       : plan.paid
-        ? 'bg-white text-[#0a0b11] hover:bg-white/90'
+        ? 'bg-inverse text-inverse-fg hover:bg-inverse/90'
         : 'border border-line bg-fill text-primary hover:bg-fill-strong');
   const ctaBtn = (
     <button onClick={onChoose} className={ctaCls}>
@@ -261,23 +258,23 @@ function PlanCard({ plan, annual, onChoose }) {
       'relative h-full rounded-2xl border p-5 flex flex-col transition-all duration-300 hover:-translate-y-1',
       plan.popular && 'mt-3 md:mt-0',
       plan.popular
-        ? 'border-violet-400/40 bg-gradient-to-b from-violet-500/[0.10] to-fill-subtle shadow-2xl shadow-violet-500/10 hover:shadow-violet-500/25'
-        : 'border-line-subtle bg-gradient-to-br from-fill-subtle to-transparent hover:border-violet-400/25 hover:shadow-xl hover:shadow-violet-950/40',
+        ? 'border-brand-hover/40 bg-gradient-to-b from-brand/[0.10] to-fill-subtle shadow-2xl shadow-brand/10 hover:shadow-brand/25'
+        : 'border-line-subtle bg-gradient-to-br from-fill-subtle to-transparent hover:border-brand-hover/25 hover:shadow-xl hover:shadow-brand/40',
     )}>
       {plan.popular && (
-        <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 h-6 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-[10px] font-bold uppercase tracking-widest flex items-center shadow-lg shadow-fuchsia-500/30">
+        <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 h-6 rounded-full bg-brand-gradient-cta text-white text-micro font-bold uppercase tracking-widest flex items-center shadow-lg shadow-brand-alt/30">
           Most popular
         </div>
       )}
 
       <div className="mb-1 text-lg font-semibold font-display tracking-tight">{plan.name}</div>
-      <p className="text-[12px] text-faint leading-relaxed min-h-[2rem]">{plan.tagline}</p>
+      <p className="text-note text-faint leading-relaxed min-h-[2rem]">{plan.tagline}</p>
 
       <div className="mt-3 mb-1 flex items-end gap-1.5">
         <span className="text-3xl lg:text-4xl font-semibold font-display tabular-nums">{formatMoney(plan.paid ? perMonth : 0)}</span>
         <span className="text-sm text-faint mb-1.5">{plan.paid ? '/mo' : 'forever'}</span>
       </div>
-      <div className="text-[11px] text-faint h-4">
+      <div className="text-meta text-faint h-4">
         {plan.paid
           ? (annual ? `${formatMoney(priceFor(plan, BILLING_CYCLE.annual))} billed yearly${savings > 0 ? ` · save ${formatMoney(savings)}` : ''}` : 'Billed monthly')
           : 'No card required'}
@@ -288,10 +285,10 @@ function PlanCard({ plan, annual, onChoose }) {
         : <div className="mt-4">{ctaBtn}</div>}
 
       <ul className="mt-4 space-y-2">
-        {plan.inherits && <li className="text-[12px] font-medium text-muted">Everything in {plan.inherits}, plus:</li>}
+        {plan.inherits && <li className="text-note font-medium text-muted">Everything in {plan.inherits}, plus:</li>}
         {plan.highlights.map(h => (
-          <li key={h} className="flex items-start gap-2 text-[13px] text-secondary">
-            <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+          <li key={h} className="flex items-start gap-2 text-compact text-secondary">
+            <Check className="w-4 h-4 text-success-text shrink-0 mt-0.5" />
             <span>{h}</span>
           </li>
         ))}

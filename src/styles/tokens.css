@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
+
 /* =============================================================================
  * DESIGN TOKENS — the single place colour is decided.
  * =============================================================================
@@ -157,6 +159,11 @@
   --color-brand-text: 196 181 253;     /* #C4B5FD  violet-300 — brand TEXT on dark */
   --color-brand-fg: 255 255 255;       /* text/icon ON a brand-filled surface */
 
+  /* The SECOND gradient stop. It needs its own name: folding fuchsia into
+   * --color-brand would turn every `from-violet-500 to-fuchsia-500` into a solid
+   * `from-brand to-brand`, silently deleting the gradient from ~15 surfaces. */
+  --color-brand-alt: 217 70 239;       /* #D946EF  fuchsia-500 (Phase 2 -> Flow Mint) */
+
   /* Accent — reserved. Phase 2 introduces Flow Mint for sync/progress moments.
    * Held at brand until then so an accidental early usage is not a visual leak. */
   --color-accent: 139 92 246;          /* Phase 2 -> #3DD6B3 */
@@ -227,7 +234,15 @@
    * what makes a product read as a hobby project.
    * ------------------------------------------------------------------- */
   --gradient-brand: linear-gradient(135deg, #8b5cf6 0%, #d946ef 50%, #f43f5e 100%);
-  --gradient-brand-cta: linear-gradient(135deg, #8b5cf6 0%, #d946ef 100%);
+  --gradient-brand-cta: linear-gradient(90deg, #8b5cf6 0%, #d946ef 100%);
+
+  /* HERO ISLANDS — the Private and My Tasks banners, which stay dark in BOTH
+   * themes. Pair each with `data-surface="inverted"` on the same element: the
+   * gradient paints the island and the attribute re-scopes every token inside
+   * it, which is what retires the 15 descendant `!important` rules that existed
+   * only to re-whiten the heroes' children in light mode. */
+  --gradient-hero-private: linear-gradient(135deg, #1a1530 0%, #14101e 50%, #0a0b11 100%);
+  --gradient-hero-mine: linear-gradient(135deg, #0d2a20 0%, #0c1a18 50%, #0a0b11 100%);
 
   /* ---------------------------------------------------------------------
    * TYPOGRAPHY — wired here so Phase 3 swaps fonts in one place.
@@ -305,13 +320,19 @@
 
   /* Brand gradient darkens so white text on it still passes contrast. */
   --gradient-brand: linear-gradient(135deg, #6d28d9 0%, #a21caf 50%, #be123c 100%);
-  --gradient-brand-cta: linear-gradient(135deg, #6d28d9 0%, #a21caf 100%);
+  --gradient-brand-cta: linear-gradient(90deg, #6d28d9 0%, #a21caf 100%);
+
+  /* Heroes lift slightly on light so they read as a deliberate dark island
+   * rather than a hole — the exact values the old override sheet used. */
+  --gradient-hero-private: linear-gradient(135deg, #2a2245 0%, #1f1a30 50%, #1a1d28 100%);
+  --gradient-hero-mine: linear-gradient(135deg, #134032 0%, #0f2820 50%, #1a1d28 100%);
 
   /* Brand darkens for light surfaces — a bright violet on white fails contrast.
    * This mirrors the old `#6d28d9` override, now expressed once. */
   --color-brand: 109 40 217;           /* #6D28D9 */
   --color-brand-hover: 91 33 182;      /* #5B21B6 */
   --color-brand-text: 109 40 217;      /* converges: a light violet is illegible on white */
+  --color-brand-alt: 162 28 175;       /* #A21CAF */
   --color-brand-fg: 255 255 255;
   --color-accent: 109 40 217;
 
@@ -381,6 +402,7 @@
   --color-brand: 167 139 250;
   --color-brand-hover: 196 181 253;
   --color-brand-text: 196 181 253;
+  --color-brand-alt: 217 70 239;
   --color-success: 16 185 129;
   --color-success-hover: 52 211 153;
   --color-success-text: 167 243 208;
@@ -407,6 +429,15 @@ html,
 body {
   background: rgb(var(--color-canvas));
   color: rgb(var(--color-text-primary));
+}
+
+/* The pre-app funnel pins its own subtree dark via [data-surface="dark"], but
+ * <body> is OUTSIDE that subtree — so in light mode the overscroll gutter behind
+ * a marketing page would flash the light canvas. Each funnel page used to pin
+ * `body { background: #070810 }` in its own <style> block; this replaces all
+ * seven of those with one declarative rule. */
+body:has([data-surface='dark']) {
+  background: rgb(7 8 16);
 }
 
 body {

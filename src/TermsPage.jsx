@@ -21,11 +21,7 @@ const SECTIONS = [
 export default function TermsPage({ session }) {
   return (
     <div data-surface="dark" className="min-h-screen bg-canvas text-white flex flex-col">
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
-        body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; background: #070810; }
-        .font-display { font-family: 'Fraunces', ui-serif, serif; font-optical-sizing: auto; font-weight: 500; }
-      `}</style>
+      
       <SiteHeader session={session} />
       <main className="flex-1 w-full max-w-3xl mx-auto px-5 lg:px-8 py-12">
         <h1 className="text-3xl lg:text-4xl font-semibold font-display tracking-tight">Terms of Service</h1>
