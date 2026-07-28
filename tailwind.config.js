@@ -62,6 +62,8 @@ export default {
           hover: 'rgb(var(--color-brand-hover) / <alpha-value>)',
           text: 'rgb(var(--color-brand-text) / <alpha-value>)',
           alt: 'rgb(var(--color-brand-alt) / <alpha-value>)',
+          'alt-hover': 'rgb(var(--color-brand-alt-hover) / <alpha-value>)',
+          'alt-text': 'rgb(var(--color-brand-alt-text) / <alpha-value>)',
           fg: 'rgb(var(--color-brand-fg) / <alpha-value>)',
           surface: 'var(--color-brand-surface)',
         },
