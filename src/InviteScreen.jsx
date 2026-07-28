@@ -80,7 +80,7 @@ export default function InviteScreen({ session }) {
   const signOut = async () => { try { await auth.signOut(); } catch (e) { reportError(e, 'auth.signOut'); } };
 
   return (
-    <AuthShell icon={UserPlus} heading="You're invited" tagline="Join your team on Command Center">
+    <AuthShell icon={UserPlus} heading="You're invited" tagline="Join your team on Corlyvo">
       {!session ? (
         // ---- Signed out: sign in or create an account ----
         <>

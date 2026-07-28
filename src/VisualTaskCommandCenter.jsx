@@ -169,7 +169,7 @@ const isOverdue = (task) => task.dueDate && daysBetween(new Date(), task.dueDate
 const isDueToday = (task) => task.dueDate && daysBetween(new Date(), task.dueDate) === 0 && task.status !== 'done';
 const isDueSoon = (task) => task.dueDate && daysBetween(new Date(), task.dueDate) <= 3 && !isOverdue(task) && task.status !== 'done';
 
-const getNextBestScore = (task) => {
+const getUpNextScore = (task) => {
   if (task.status === 'done') return -999;
   let score = 0;
   score += PRIORITIES[task.priority].rank * 20;
@@ -2439,7 +2439,7 @@ function CommandPalette() {
 
   const commands = useMemo(() => { const all = [
     { id: 'new-task', label: 'New task', icon: Plus, run: () => { setPaletteOpen(false); setQuickAddOpen(true); } },
-    { id: 'v-dash', label: 'Go to Dashboard', icon: LayoutDashboard, run: () => { setView('dashboard'); setPaletteOpen(false); } },
+    { id: 'v-dash', label: 'Go to Home', icon: LayoutDashboard, run: () => { setView('dashboard'); setPaletteOpen(false); } },
     { id: 'v-kan', label: 'Go to Kanban', icon: KanbanSquare, run: () => { setView('kanban'); setPaletteOpen(false); } },
     { id: 'v-mat', label: 'Go to Priority Matrix', icon: Grid3x3, run: () => { setView('matrix'); setPaletteOpen(false); } },
     { id: 'v-proj', label: 'Go to Projects', icon: FolderKanban, run: () => { setView('projects'); setPaletteOpen(false); } },
@@ -2606,7 +2606,7 @@ function Sidebar() {
             <Sparkles className="w-4 h-4 text-brand-fg" />
           </div>
           <div className="leading-tight">
-            <div className="text-[15px] font-semibold text-primary font-brand tracking-tight">Command Center</div>
+            <div className="text-[15px] font-semibold text-primary font-brand tracking-tight">Corlyvo</div>
             <div className="text-micro text-faint uppercase tracking-widest">Visual task management</div>
           </div>
         </div>
@@ -2623,7 +2623,7 @@ function Sidebar() {
         ) : (
           <>
             <div className="px-3 pb-2 text-micro font-medium uppercase tracking-widest text-faint">Team</div>
-            {item('dashboard', LayoutDashboard, 'Dashboard')}
+            {item('dashboard', LayoutDashboard, 'Home')}
             {item('kanban', KanbanSquare, 'Kanban', counts.all)}
             {item('matrix', Grid3x3, 'Priority Matrix')}
             {item('projects', FolderKanban, 'Projects')}
@@ -4085,14 +4085,14 @@ function DashboardView() {
   if (tasks.length === 0) {
     return (
       <div className="space-y-6">
-        <ViewHeader title="Dashboard" subtitle="Your team's command center — tasks, priorities, and messages in one place." accent={new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric'})} />
+        <ViewHeader title="Home" subtitle="Your team's tasks, priorities, and messages in one place." accent={new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric'})} />
         <FirstRunPanel />
       </div>
     );
   }
 
   const open = tasks.filter(t => t.status !== 'done');
-  const ranked = [...open].map(t => ({ t, s: getNextBestScore(t) })).sort((a,b) => b.s - a.s);
+  const ranked = [...open].map(t => ({ t, s: getUpNextScore(t) })).sort((a,b) => b.s - a.s);
   const top3 = ranked.slice(0, 3);
   const myUpcoming = open.filter(t => t.assigneeId === meId && t.dueDate).sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 5);
   const othersUpcoming = open.filter(t => t.assigneeId && t.assigneeId !== meId && t.dueDate).sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 5);
@@ -4121,9 +4121,9 @@ function DashboardView() {
 
   return (
     <div className="space-y-6">
-      <ViewHeader title="Dashboard" subtitle="Today's ranked priorities, flagged blockers, and where your energy should go." accent={new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric'})} />
+      <ViewHeader title="Home" subtitle="Today's ranked priorities, flagged blockers, and where your energy should go." accent={new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric'})} />
 
-      <Card title="Top 3 priorities right now" subtitle="Auto-ranked by priority, due date, urgency, and blockers." accent="#7c8cff">
+      <Card title="Up next" subtitle="Auto-ranked by priority, due date, urgency, and blockers." accent="#7c8cff">
         {top3.length === 0 ? (
           <EmptyState icon={Sparkles} text="Nothing on fire. Beautiful." />
         ) : (
@@ -4305,7 +4305,7 @@ function FirstRunPanel() {
         <div className="w-11 h-11 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand/15 mb-4">
           <Sparkles className="w-5 h-5 text-brand-fg" />
         </div>
-        <h2 className="text-2xl font-semibold text-primary font-display tracking-tight">Welcome to Command Center</h2>
+        <h2 className="text-2xl font-semibold text-primary font-display tracking-tight">Welcome to Corlyvo</h2>
         <p className="mt-2 text-sm text-muted leading-relaxed">
           One shared place for who’s doing what — tasks, a board, and your schedule, plus team chat and
           direct messages. Start by adding your first task.
@@ -6899,7 +6899,8 @@ function MembersView() {
   );
 }
 
-/** Redirect old /va-desk links to /my-tasks, preserving the ?ws= workspace query param. */
+/** Redirect the legacy /va-desk path to /my-tasks, preserving the ?ws= workspace query param.
+ *  The ROUTE must stay even though the label is long gone — old bookmarks and links still hit it. */
 function RedirectToMyTasks() {
   const location = useLocation();
   return <Navigate to={`/my-tasks${location.search}`} replace />;

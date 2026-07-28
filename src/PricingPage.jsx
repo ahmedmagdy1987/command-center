@@ -197,7 +197,7 @@ export default function PricingPage({ session }) {
               {session ? (
                 <Magnetic>
                   <Link to="/" className="h-12 px-6 rounded-xl bg-brand hover:bg-brand-hover text-brand-fg font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand/20 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
-                    Back to Command Center <ArrowRight className="w-4 h-4" />
+                    Back to Corlyvo <ArrowRight className="w-4 h-4" />
                   </Link>
                 </Magnetic>
               ) : (

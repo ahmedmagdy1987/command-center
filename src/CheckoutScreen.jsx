@@ -115,7 +115,7 @@ export default function CheckoutScreen({ session }) {
           <Card>
             {done ? (
               <Centered tone="ok" title="Thanks for your interest" body={`Billing for ${plan.name} isn’t live yet, so no charge was made — every feature stays free for founding members during early access. Check back soon.`}>
-                <button onClick={() => navigate('/')} className="primary-cta">Back to Command Center <ArrowRight className="w-4 h-4" /></button>
+                <button onClick={() => navigate('/')} className="primary-cta">Back to Corlyvo <ArrowRight className="w-4 h-4" /></button>
               </Centered>
             ) : (
               <>
@@ -177,7 +177,7 @@ function Shell({ children }) {
             <div className="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand/10">
               <Sparkles className="w-4 h-4 text-brand-fg" />
             </div>
-            <span className="text-[15px] font-semibold font-brand tracking-tight">Command Center</span>
+            <span className="text-[15px] font-semibold font-brand tracking-tight">Corlyvo</span>
           </Link>
           <Link to="/pricing" className="text-note text-muted hover:text-secondary transition-colors">All plans</Link>
         </header>

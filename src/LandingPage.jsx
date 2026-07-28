@@ -8,7 +8,7 @@ import { pointerMotionOK, useRevealOnScroll } from './lib/motion';
 
 /**
  * Public marketing landing page (logged-out `/`). Honest to what the product actually does: a
- * visual team task command center, with no invented stats, logos, or testimonials. Copy is
+ * visual team task hub, with no invented stats, logos, or testimonials. Copy is
  * placeholder positioning meant to be refined. Matches the app's visual language (dark, the
  * Corlyvo Blue -> Flow Mint gradient, Geist for product copy + Manrope for headings).
  *

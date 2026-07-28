@@ -5,7 +5,7 @@ import { SiteHeader, SiteFooter } from './SiteChrome';
  * it is NOT legal advice and must be reviewed by a qualified professional before real use.
  */
 const SECTIONS = [
-  { h: 'Overview', b: 'This Privacy Policy explains what information Command Center (the "Service") collects, how it is used, and the choices you have. By using the Service, you agree to the practices described here.' },
+  { h: 'Overview', b: 'This Privacy Policy explains what information Corlyvo (the "Service") collects, how it is used, and the choices you have. By using the Service, you agree to the practices described here.' },
   { h: 'Information we collect', b: 'We collect the information you provide directly, such as your name, email address, and the content you create in the Service. We also collect basic technical information, such as device and usage data, that is generated as you use the Service.' },
   { h: 'How we use information', b: 'We use information to provide, secure, and improve the Service, to authenticate accounts, to enable collaboration features, to communicate with you about the Service, and to comply with legal obligations.' },
   { h: 'How we share information', b: 'We do not sell your personal information. We share it only with service providers that help us operate the Service, with other members of your workspace as required for collaboration, or when required by law.' },

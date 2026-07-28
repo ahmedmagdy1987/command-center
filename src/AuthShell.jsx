@@ -21,7 +21,7 @@ const GRAIN =
 
 export default function AuthShell({
   icon: Icon = Sparkles,
-  heading = 'Command Center',
+  heading = 'Corlyvo',
   tagline = 'Visual task management',
   footnote = 'Your private tasks stay yours. Workspace tasks sync with your team.',
   beforeCard = null,

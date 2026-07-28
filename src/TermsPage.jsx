@@ -5,7 +5,7 @@ import { SiteHeader, SiteFooter } from './SiteChrome';
  * it is NOT legal advice and must be reviewed by a qualified professional before real use.
  */
 const SECTIONS = [
-  { h: '1. Agreement to these terms', b: 'These Terms of Service govern your access to and use of Command Center (the "Service"). By creating an account or using the Service, you agree to these terms. If you do not agree, do not use the Service.' },
+  { h: '1. Agreement to these terms', b: 'These Terms of Service govern your access to and use of Corlyvo (the "Service"). By creating an account or using the Service, you agree to these terms. If you do not agree, do not use the Service.' },
   { h: '2. Using the Service', b: 'You may use the Service only in compliance with these terms and all applicable laws. We may add, change, or remove features at any time. We may also suspend or stop providing the Service, with or without notice.' },
   { h: '3. Your account', b: 'You are responsible for your account, for keeping your login credentials secure, and for all activity that happens under your account. Notify us promptly of any unauthorized use. You must provide accurate information and keep it up to date.' },
   { h: '4. Acceptable use', b: 'Do not misuse the Service. That includes attempting to access it in unauthorized ways, disrupting its operation, uploading unlawful or infringing content, or using it to harm others. We may remove content or restrict accounts that violate these terms.' },

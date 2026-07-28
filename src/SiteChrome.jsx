@@ -85,7 +85,7 @@ export function SiteHeader({ session }) {
           <div className="w-7 h-7 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand/10 transition-transform duration-300 motion-reduce:transition-none group-hover:scale-110 group-hover:rotate-6">
             <Sparkles className="w-3.5 h-3.5 text-brand-fg" />
           </div>
-          <span className="text-[15px] font-semibold font-brand tracking-tight">Command Center</span>
+          <span className="text-[15px] font-semibold font-brand tracking-tight">Corlyvo</span>
         </Link>
         <nav className="flex items-center gap-1.5">
           <NavTextLink to="/pricing" className="hidden sm:inline-flex">Pricing</NavTextLink>
@@ -133,7 +133,7 @@ export function SiteFooter() {
               <div className="w-6 h-6 rounded-md bg-brand-gradient flex items-center justify-center">
                 <Sparkles className="w-3 h-3 text-brand-fg" />
               </div>
-              <span className="text-secondary font-semibold font-brand tracking-tight">Command Center</span>
+              <span className="text-secondary font-semibold font-brand tracking-tight">Corlyvo</span>
             </div>
             <p className="mt-3 text-note text-faint leading-relaxed">
               One visual workspace for your team’s tasks, owners, and due dates — live for everyone.
@@ -145,7 +145,7 @@ export function SiteFooter() {
           </div>
         </div>
         <div className="mt-9 pt-5 border-t border-line-subtle text-note text-muted">
-          © {year} Command Center. All rights reserved.
+          © {year} Corlyvo. All rights reserved.
         </div>
       </div>
     </footer>

@@ -67,7 +67,7 @@ export default function AuthScreen({ mode = 'signin', initialSignup = false }) {
                 : 'Welcome back';
   const subheading = view === 'reset' ? 'Enter your email and we’ll send you a reset link.'
                    : view === 'signup' ? 'Set up your credentials to get started.'
-                   : 'Sign in to your Command Center.';
+                   : 'Sign in to your Corlyvo.';
   const cta = view === 'reset' ? 'Send reset link'
             : view === 'signup' ? 'Create account'
             : 'Sign in';
