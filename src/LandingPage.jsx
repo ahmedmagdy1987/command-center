@@ -10,7 +10,7 @@ import { pointerMotionOK, useRevealOnScroll } from './lib/motion';
  * Public marketing landing page (logged-out `/`). Honest to what the product actually does: a
  * visual team task command center, with no invented stats, logos, or testimonials. Copy is
  * placeholder positioning meant to be refined. Matches the app's visual language (dark, the
- * violet/fuchsia/rose gradient, Outfit + Fraunces).
+ * Corlyvo Blue -> Flow Mint gradient, Geist for product copy + Manrope for headings).
  *
  * Motion system (all decorative, all GPU-composited — transform/opacity only, no layout writes):
  *  - Hero entrance: a single ~1.3s choreography (badge → headline line-reveals → subhead → CTAs →
@@ -224,7 +224,7 @@ export default function LandingPage() {
           to   { opacity: 1; transform: perspective(1200px) rotateX(0deg) rotateY(0deg) scale(1) translateY(0); }
         }
         .lp-in { animation: lpFadeUp .7s cubic-bezier(.22,1,.36,1) both; }
-        /* Clip-reveal lines: outer clips, inner rises. Padding absorbs Fraunces descenders. */
+        /* Clip-reveal lines: outer clips, inner rises. Padding absorbs the descenders. */
         .lp-line { display: block; overflow: hidden; padding-bottom: .12em; margin-bottom: -.12em; }
         .lp-line-inner { display: block; animation: lpRise .85s cubic-bezier(.22,1,.36,1) both; }
 
@@ -340,7 +340,7 @@ export default function LandingPage() {
             <div className="lp-in inline-flex items-center gap-1.5 text-meta font-medium uppercase tracking-widest text-brand-text/80 bg-brand/10 border border-brand-hover/20 rounded-full px-3 h-7 mb-4" style={{ animationDelay: '.05s' }}>
               Visual task management for teams
             </div>
-            <h1 className="text-3xl lg:text-4xl xl:text-5xl font-semibold font-display tracking-tight leading-[1.05]">
+            <h1 className="text-3xl lg:text-4xl xl:text-5xl font-semibold font-brand tracking-tight leading-[1.05]">
               <span className="lp-line"><span className="lp-line-inner" style={{ animationDelay: '.12s' }}>Stop losing track of</span></span>
               <span className="lp-line"><span className="lp-line-inner bg-gradient-to-r from-brand-text via-brand-alt-text to-danger-text bg-clip-text text-transparent" style={{ animationDelay: '.24s' }}>who’s doing what.</span></span>
             </h1>
@@ -380,7 +380,7 @@ export default function LandingPage() {
         <section className="relative py-14">
           <Divider />
           <div data-lp-reveal>
-            <h2 className="text-2xl lg:text-3xl font-semibold font-display tracking-tight">Everything your team needs to stay on track</h2>
+            <h2 className="text-2xl lg:text-3xl font-semibold font-brand tracking-tight">Everything your team needs to stay on track</h2>
             <p className="mt-2 text-faint max-w-2xl">One workspace for the work, the people, and the plan.</p>
           </div>
           <div className="mt-9 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -407,7 +407,7 @@ export default function LandingPage() {
         {/* How it works */}
         <section className="relative py-14">
           <Divider />
-          <h2 data-lp-reveal className="text-2xl lg:text-3xl font-semibold font-display tracking-tight">How it works</h2>
+          <h2 data-lp-reveal className="text-2xl lg:text-3xl font-semibold font-brand tracking-tight">How it works</h2>
           <div className="mt-9 grid md:grid-cols-3 gap-4">
             {STEPS.map((s, i) => (
               <div key={s.n} data-lp-reveal style={{ '--lp-d': `${i * 110}ms` }}>
@@ -431,7 +431,7 @@ export default function LandingPage() {
             <div className="absolute top-0 inset-x-0 h-px overflow-hidden" aria-hidden="true">
               <span className="lp-comet absolute top-0 h-px w-60 bg-gradient-to-r from-transparent via-brand-alt-text/80 to-transparent" style={{ opacity: 0 }} />
             </div>
-            <h2 className="relative text-2xl lg:text-3xl font-semibold font-display tracking-tight">Ready to organize your team’s work?</h2>
+            <h2 className="relative text-2xl lg:text-3xl font-semibold font-brand tracking-tight">Ready to organize your team’s work?</h2>
             <p className="relative mt-2 text-muted">Create a workspace in seconds. It’s free to get started.</p>
             <div className="relative mt-6 flex justify-center gap-3">
               <Magnetic>

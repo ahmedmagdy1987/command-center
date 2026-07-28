@@ -23,7 +23,7 @@ export default function PrivacyPage({ session }) {
       
       <SiteHeader session={session} />
       <main className="flex-1 w-full max-w-3xl mx-auto px-5 lg:px-8 py-12">
-        <h1 className="text-3xl lg:text-4xl font-semibold font-display tracking-tight">Privacy Policy</h1>
+        <h1 className="text-3xl lg:text-4xl font-semibold font-brand tracking-tight">Privacy Policy</h1>
         <p className="mt-2 text-sm text-faint">Last updated: June 2026</p>
         <div className="mt-8 space-y-7">
           {SECTIONS.map(s => (

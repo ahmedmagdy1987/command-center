@@ -2606,7 +2606,7 @@ function Sidebar() {
             <Sparkles className="w-4 h-4 text-brand-fg" />
           </div>
           <div className="leading-tight">
-            <div className="text-[15px] font-semibold text-primary font-display tracking-tight">Command Center</div>
+            <div className="text-[15px] font-semibold text-primary font-brand tracking-tight">Command Center</div>
             <div className="text-micro text-faint uppercase tracking-widest">Visual task management</div>
           </div>
         </div>

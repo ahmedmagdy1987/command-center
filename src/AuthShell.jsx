@@ -62,7 +62,7 @@ export default function AuthShell({
           <div className="w-14 h-14 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-2xl shadow-brand/15 mb-4">
             <Icon className="w-7 h-7 text-brand-fg" />
           </div>
-          <h1 className="text-2xl font-semibold text-primary font-display tracking-tight">{heading}</h1>
+          <h1 className="text-2xl font-semibold text-primary font-brand tracking-tight">{heading}</h1>
           {tagline && <p className="text-sm text-faint mt-1 text-center">{tagline}</p>}
         </div>
 

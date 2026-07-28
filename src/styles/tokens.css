@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@100..900&family=Manrope:wght@400..800&display=swap');
 
 /* =============================================================================
  * DESIGN TOKENS — the single place colour is decided.
@@ -266,9 +266,23 @@
   /* ---------------------------------------------------------------------
    * TYPOGRAPHY — wired here so Phase 3 swaps fonts in one place.
    * ------------------------------------------------------------------- */
-  --font-sans: 'Outfit', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-display: 'Fraunces', ui-serif, Georgia, serif;
-  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  /* TWO faces, with different jobs:
+   *
+   *   --font-sans   Geist    THE IN-PRODUCT FACE. Everything inside the app, including
+   *                          headings. Chosen for dense UI: unambiguous 1/l/I and 0/O,
+   *                          real tabular figures, and it holds up at 10-11px where the
+   *                          previous face (Outfit) got soft.
+   *   --font-brand  Manrope  Logo wordmark and MARKETING headings only. Geometric and a
+   *                          little warmer — it signals "brand" against Geist's neutral
+   *                          product voice. Never used inside the app chrome.
+   *
+   * Fraunces is GONE. It was the old identity's display serif and is no longer imported,
+   * so nothing silently falls back to Georgia. If an editorial/quote surface ever wants
+   * it, re-add it to the @import above and define --font-editorial — do not reintroduce
+   * it as a heading face. */
+  --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-brand: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* ---------------------------------------------------------------------
    * TYPE SCALE — the sub-14px range, which was 228 ad-hoc `text-[Npx]` values.
@@ -484,18 +498,32 @@ html:has([data-surface='dark'])::-webkit-scrollbar-thumb:hover {
 
 body {
   font-family: var(--font-sans);
-  font-feature-settings: 'ss01', 'cv11';
+  /* `ss01`/`cv11` were Outfit/Inter stylistic sets. Geist does not define them, and
+   * requesting undefined features is a no-op at best — removed rather than left as
+   * cargo cult. `cv01` below gives Geist its disambiguated one-storey shapes. */
+  font-feature-settings: 'cv01';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+/* In-product headings. Same face as body — the hierarchy comes from weight and
+ * tracking, not from a second typeface. Optical tracking tightens as size grows. */
 .font-display {
-  font-family: var(--font-display);
-  font-optical-sizing: auto;
-  font-weight: 500;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: -0.021em;
 }
 
-.tabular-nums {
-  font-variant-numeric: tabular-nums;
+/* Brand voice: the logo wordmark and marketing-page headings. */
+.font-brand {
+  font-family: var(--font-brand);
+  font-weight: 700;
+  letter-spacing: -0.022em;
 }
+
+/* NB: `.tabular-nums` is Tailwind's own utility — not redefined here. Dense numeric
+ * columns (Matrix counts, StatCards, the progress ring) rely on it, and Geist ships
+ * real tabular figures, so digits keep a fixed advance width and columns stay aligned. */
 
 /* Scrollbars — themed by variable instead of a duplicated light-mode block. */
 ::-webkit-scrollbar {

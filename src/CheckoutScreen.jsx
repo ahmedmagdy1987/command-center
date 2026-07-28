@@ -77,7 +77,7 @@ export default function CheckoutScreen({ session }) {
           <Card>
             <div className="text-micro font-medium uppercase tracking-widest text-faint mb-2">You’re upgrading to</div>
             <div className="flex items-center justify-between gap-3 mb-1">
-              <h2 className="text-2xl font-semibold font-display tracking-tight">{plan.name}</h2>
+              <h2 className="text-2xl font-semibold font-brand tracking-tight">{plan.name}</h2>
               <Link to="/pricing" className="text-meta text-faint hover:text-secondary transition-colors shrink-0">Change plan</Link>
             </div>
             <p className="text-compact text-muted mb-5">{plan.tagline}</p>
@@ -90,7 +90,7 @@ export default function CheckoutScreen({ session }) {
             </div>
 
             <div className="flex items-end gap-1.5 mb-1">
-              <span className="text-4xl font-semibold font-display tabular-nums">{formatMoney(monthlyEquivalent(plan, cycle))}</span>
+              <span className="text-4xl font-semibold font-brand tabular-nums">{formatMoney(monthlyEquivalent(plan, cycle))}</span>
               <span className="text-sm text-faint mb-1.5">/mo</span>
             </div>
             <div className="text-meta text-faint mb-5">
@@ -177,7 +177,7 @@ function Shell({ children }) {
             <div className="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand/10">
               <Sparkles className="w-4 h-4 text-brand-fg" />
             </div>
-            <span className="text-[15px] font-semibold font-display tracking-tight">Command Center</span>
+            <span className="text-[15px] font-semibold font-brand tracking-tight">Command Center</span>
           </Link>
           <Link to="/pricing" className="text-note text-muted hover:text-secondary transition-colors">All plans</Link>
         </header>

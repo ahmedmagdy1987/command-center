@@ -139,9 +139,11 @@ export default {
       // than `shadow-xl`. The --shadow-* tokens still exist in tokens.css for
       // deliberate use via arbitrary values; they must not hijack the size scale.
 
+      // `font-brand` and `font-display` are COMPONENT classes in tokens.css — they carry
+      // weight and optical tracking, not just a family. Declaring `brand` here too would
+      // emit a second, weaker rule with the same name and shadow the family half of it.
       fontFamily: {
         sans: 'var(--font-sans)',
-        display: 'var(--font-display)',
         mono: 'var(--font-mono)',
       },
     },

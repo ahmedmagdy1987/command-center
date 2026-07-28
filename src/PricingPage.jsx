@@ -10,7 +10,7 @@ import { useRevealOnScroll } from './lib/motion';
 
 /**
  * Public pricing page (/pricing). Reachable from the landing nav and from in-app upgrade prompts.
- * Built to the PRODUCT_AUDIT design direction (dark "ops console", Outfit + Fraunces, violet to
+ * Built to the Corlyvo design direction (dark "ops console", Geist + Manrope, Corlyvo Blue to
  * fuchsia brand) and the audit glossary (Workspace = tenant, Members = seats, Messages).
  * Everything reads from lib/plans.js. Positioned BROADLY via benefits, never branded narrowly.
  * No invented stats, logos, or testimonials.
@@ -83,7 +83,7 @@ export default function PricingPage({ session }) {
           <div className="pp-in inline-flex items-center gap-1.5 text-meta font-medium uppercase tracking-widest text-brand-text/80 bg-brand/10 border border-brand-hover/20 rounded-full px-3 h-7 mb-3" style={{ animationDelay: '.05s' }}>
             {PRICING_COPY.eyebrow}
           </div>
-          <h1 className="pp-in text-2xl lg:text-3xl font-semibold font-display tracking-tight leading-[1.12] max-w-2xl mx-auto" style={{ animationDelay: '.12s' }}>
+          <h1 className="pp-in text-2xl lg:text-3xl font-semibold font-brand tracking-tight leading-[1.12] max-w-2xl mx-auto" style={{ animationDelay: '.12s' }}>
             {PRICING_COPY.headline}
           </h1>
           <p className="pp-in mt-2.5 text-sm lg:text-base text-muted max-w-xl mx-auto leading-relaxed" style={{ animationDelay: '.22s' }}>
@@ -129,7 +129,7 @@ export default function PricingPage({ session }) {
           <div key={plan.id} className="pp-in mt-5 max-w-3xl mx-auto rounded-2xl border border-line-subtle bg-fill-subtle px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3" style={{ animationDelay: '.78s' }}>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                <span className="text-base font-semibold font-display">{plan.name}</span>
+                <span className="text-base font-semibold font-brand">{plan.name}</span>
                 <span className="text-note text-faint">{plan.tagline}</span>
               </div>
               <div className="mt-0.5 text-note text-muted">
@@ -152,7 +152,7 @@ export default function PricingPage({ session }) {
         {/* Comparison table */}
         <section className="relative mt-10 py-16">
           <Hairline className="absolute top-0 inset-x-0" />
-          <h2 data-lp-reveal className="text-2xl lg:text-3xl font-semibold font-display tracking-tight text-center mb-8">Compare plans</h2>
+          <h2 data-lp-reveal className="text-2xl lg:text-3xl font-semibold font-brand tracking-tight text-center mb-8">Compare plans</h2>
           <div data-lp-reveal style={{ '--lp-d': '120ms' }} className="overflow-x-auto rounded-2xl border border-line-subtle bg-gradient-to-br from-fill-subtle to-transparent">
             <table className="w-full min-w-[640px] text-sm">
               <thead>
@@ -160,7 +160,7 @@ export default function PricingPage({ session }) {
                   <th className="text-left font-medium text-muted px-5 py-4 w-[40%]">Features</th>
                   {plans.map(p => (
                     <th key={p.id} className="px-4 py-4 text-center">
-                      <div className={cx('font-semibold font-display', p.popular ? 'text-brand-text' : 'text-primary')}>{p.name}</div>
+                      <div className={cx('font-semibold font-brand', p.popular ? 'text-brand-text' : 'text-primary')}>{p.name}</div>
                       <div className="text-meta font-normal text-faint mt-0.5">
                         {p.paid ? `${formatMoney(monthlyEquivalent(p, annual ? BILLING_CYCLE.annual : BILLING_CYCLE.monthly))}/mo` : 'Free'}
                       </div>
@@ -191,7 +191,7 @@ export default function PricingPage({ session }) {
             <div className="absolute top-0 inset-x-0 h-px overflow-hidden" aria-hidden="true">
               <span className="pp-comet absolute top-0 h-px w-60 bg-gradient-to-r from-transparent via-brand-alt-text/80 to-transparent" style={{ opacity: 0 }} />
             </div>
-            <h2 className="relative text-2xl lg:text-3xl font-semibold font-display tracking-tight">Get your team in one place</h2>
+            <h2 className="relative text-2xl lg:text-3xl font-semibold font-brand tracking-tight">Get your team in one place</h2>
             <p className="relative mt-2 text-muted">Start free in seconds. Bring in your people, inside or outside your company.</p>
             <div className="relative mt-6 flex justify-center gap-3">
               {session ? (
@@ -267,11 +267,11 @@ function PlanCard({ plan, annual, onChoose }) {
         </div>
       )}
 
-      <div className="mb-1 text-lg font-semibold font-display tracking-tight">{plan.name}</div>
+      <div className="mb-1 text-lg font-semibold font-brand tracking-tight">{plan.name}</div>
       <p className="text-note text-faint leading-relaxed min-h-[2rem]">{plan.tagline}</p>
 
       <div className="mt-3 mb-1 flex items-end gap-1.5">
-        <span className="text-3xl lg:text-4xl font-semibold font-display tabular-nums">{formatMoney(plan.paid ? perMonth : 0)}</span>
+        <span className="text-3xl lg:text-4xl font-semibold font-brand tabular-nums">{formatMoney(plan.paid ? perMonth : 0)}</span>
         <span className="text-sm text-faint mb-1.5">{plan.paid ? '/mo' : 'forever'}</span>
       </div>
       <div className="text-meta text-faint h-4">
