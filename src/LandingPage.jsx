@@ -218,15 +218,33 @@ export default function LandingPage() {
 
         /* ---------- Hero entrance choreography (fill: both; static styles = final state) ---------- */
         @keyframes lpFadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes lpRise { from { transform: translateY(112%); } to { transform: translateY(0); } }
+        @keyframes lpRise { from { transform: translateY(125%); } to { transform: translateY(0); } }
         @keyframes lpSettle {
           from { opacity: 0; transform: perspective(1200px) rotateX(9deg) rotateY(-6deg) scale(.93) translateY(26px); }
           to   { opacity: 1; transform: perspective(1200px) rotateX(0deg) rotateY(0deg) scale(1) translateY(0); }
         }
         .lp-in { animation: lpFadeUp .7s cubic-bezier(.22,1,.36,1) both; }
-        /* Clip-reveal lines: outer clips, inner rises. Padding absorbs the descenders. */
-        .lp-line { display: block; overflow: hidden; padding-bottom: .12em; margin-bottom: -.12em; }
-        .lp-line-inner { display: block; animation: lpRise .85s cubic-bezier(.22,1,.36,1) both; }
+        /* Clip-reveal lines: outer clips, inner rises.
+         *
+         * BOTH elements need the padding/negative-margin pair, for DIFFERENT reasons, and
+         * dropping either one clips the descenders of g/y/p/j in the hero headline:
+         *
+         *   .lp-line       "overflow: hidden" is what creates the reveal, so its padding box
+         *                  is also the CLIP box. Without extra room at the bottom it slices
+         *                  through any descender.
+         *   .lp-line-inner the second line is "bg-clip-text" + "text-transparent", so the
+         *                  gradient is painted only across this element's BACKGROUND box.
+         *                  At "leading-[1.05]" that box stops above the descender, so the
+         *                  tail of the "g" got no paint at all and vanished — while the part
+         *                  inside the box still rendered, which is what read as a broken
+         *                  glyph with a stray stroke under it.
+         *
+         * "padding-bottom: X" + "margin-bottom: -X" is exactly layout-neutral: the border box
+         * grows by X, the margin box does not, so line spacing is unchanged no matter the
+         * value. .28em clears Manrope's descender (~.24em below the baseline) with margin.
+         * These were tuned at .12em for Fraunces, which Phase 3 replaced. */
+        .lp-line { display: block; overflow: hidden; padding-bottom: .28em; margin-bottom: -.28em; }
+        .lp-line-inner { display: block; padding-bottom: .28em; margin-bottom: -.28em; animation: lpRise .85s cubic-bezier(.22,1,.36,1) both; }
 
         /* ---------- Ambient drift (wrappers get JS parallax; blobs get these) ---------- */
         @keyframes lpDrift1 { from { transform: translate3d(0,0,0) scale(1); } to { transform: translate3d(56px,36px,0) scale(1.14); } }

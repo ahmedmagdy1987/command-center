@@ -1,5 +1,6 @@
-import { Sparkles, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { Magnetic } from './SiteChrome';
+import { CorlyvoMark } from './brand/Logo';
 
 /**
  * Shared shell + primitives for the pre-app auth screens (/login, /forgot-password,
@@ -20,7 +21,9 @@ const GRAIN =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E\")";
 
 export default function AuthShell({
-  icon: Icon = Sparkles,
+  // No icon supplied => this is a brand surface (sign-in, reset) and gets the real
+  // mark. InviteScreen / OnboardingScreen pass a CONTEXTUAL icon and keep the tile.
+  icon: Icon = null,
   heading = 'Corlyvo',
   tagline = 'Visual task management',
   footnote = 'Your private tasks stay yours. Workspace tasks sync with your team.',
@@ -59,9 +62,13 @@ export default function AuthShell({
       <div className="relative w-full max-w-md">
         {/* Brand lockup */}
         <div className="au-in flex flex-col items-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-2xl shadow-brand/15 mb-4">
-            <Icon className="w-7 h-7 text-brand-fg" />
-          </div>
+          {Icon ? (
+            <div className="w-14 h-14 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-2xl shadow-brand/15 mb-4">
+              <Icon className="w-7 h-7 text-brand-fg" />
+            </div>
+          ) : (
+            <CorlyvoMark size={56} className="mb-4" title="Corlyvo" />
+          )}
           <h1 className="text-2xl font-semibold text-primary font-brand tracking-tight">{heading}</h1>
           {tagline && <p className="text-sm text-faint mt-1 text-center">{tagline}</p>}
         </div>

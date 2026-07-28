@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Sparkles } from 'lucide-react';
 import { pointerMotionOK } from './lib/motion';
+import { CorlyvoLogo } from './brand/Logo';
 
 /**
  * Shared marketing chrome used across the public pages (landing, pricing, terms, privacy) so the
@@ -82,10 +82,7 @@ export function SiteHeader({ session }) {
       />
       <div className="relative max-w-6xl mx-auto px-5 lg:px-8 h-14 flex items-center justify-between">
         <Link to="/" className="group flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
-          <div className="w-7 h-7 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand/10 transition-transform duration-300 motion-reduce:transition-none group-hover:scale-110 group-hover:rotate-6">
-            <Sparkles className="w-3.5 h-3.5 text-brand-fg" />
-          </div>
-          <span className="text-[15px] font-semibold font-brand tracking-tight">Corlyvo</span>
+          <CorlyvoLogo height={26} className="transition-transform duration-300 motion-reduce:transition-none group-hover:scale-[1.03]" />
         </Link>
         <nav className="flex items-center gap-1.5">
           <NavTextLink to="/pricing" className="hidden sm:inline-flex">Pricing</NavTextLink>
@@ -129,12 +126,7 @@ export function SiteFooter() {
       <div className="relative max-w-6xl mx-auto px-5 lg:px-8 pt-10 pb-8">
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-8">
           <div className="max-w-xs">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-brand-gradient flex items-center justify-center">
-                <Sparkles className="w-3 h-3 text-brand-fg" />
-              </div>
-              <span className="text-secondary font-semibold font-brand tracking-tight">Corlyvo</span>
-            </div>
+            <CorlyvoLogo height={22} className="text-secondary" />
             <p className="mt-3 text-note text-faint leading-relaxed">
               One visual workspace for your team’s tasks, owners, and due dates — live for everyone.
             </p>
