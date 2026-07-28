@@ -1,16 +1,26 @@
 import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  KanbanSquare, Grid3x3, CalendarDays, UserCog, Zap, UserPlus, ArrowRight, Check, MousePointer2,
+  KanbanSquare, UserCog, Zap, UserPlus, ArrowRight, Check, MousePointer2, Lock, MessageSquare, Mic,
 } from 'lucide-react';
 import { SiteHeader, SiteFooter, Magnetic, Hairline } from './SiteChrome';
 import { pointerMotionOK, useRevealOnScroll } from './lib/motion';
+import LandingDemo from './LandingDemo';
+import { PLANS, MAIN_PLAN_IDS, PRICING_COPY, monthlyEquivalent, formatMoney, BILLING_CYCLE } from './lib/plans';
 
 /**
- * Public marketing landing page (logged-out `/`). Honest to what the product actually does: a
- * visual team task hub, with no invented stats, logos, or testimonials. Copy is
- * placeholder positioning meant to be refined. Matches the app's visual language (dark, the
- * Corlyvo Blue -> Flow Mint gradient, Geist for product copy + Manrope for headings).
+ * Public marketing landing page (logged-out `/`). A conversion page built around the
+ * product's actual differentiator: one workspace for the whole team INCLUDING people
+ * outside the company (freelancers, contractors, VAs — the product's guest role).
+ *
+ * Honest by rule: no invented stats, logos, testimonials, or review counts. The
+ * social-proof section is deliberately ABSENT until there is real proof to show —
+ * see the marked slot below the demo section.
+ *
+ * Structure: hero (cross-org headline + living board) → interactive demo (tabbed
+ * Kanban/Matrix/Schedule/Chat preview, see LandingDemo.jsx) → features (cross-org
+ * framing, each with a mini visual) → pricing teaser (driven from lib/plans.js so it
+ * can never drift from the real plans) → final CTA → footer.
  *
  * Motion system (all decorative, all GPU-composited — transform/opacity only, no layout writes):
  *  - Hero entrance: a single ~1.3s choreography (badge → headline line-reveals → subhead → CTAs →
@@ -21,24 +31,51 @@ import { pointerMotionOK, useRevealOnScroll } from './lib/motion';
  *    visual, lift glow, cursor, drop hint, landed card, toast). The "drag" is sleight of hand: the
  *    static top card fades out while an overlay clone travels `translate(calc(100% + 12px))` (one
  *    column + the fixed gap-3) and fades away over a pre-rendered landed card. No layout ever moves.
+ *  - Demo panels: the `ld*` keyframes at the bottom of the style block; same rest-state rules.
  *  - Ambient: radial-gradient aurora blobs (no blur() filters — the gradient IS the softness) on
  *    slow drift loops, a static masked grid, static SVG-noise grain, and an rAF mouse parallax
  *    (desktop fine-pointer only) that transforms the blobs' WRAPPERS so it can't fight the drift
  *    animation on the blob itself.
  */
-const FEATURES = [
-  { icon: KanbanSquare, title: 'Kanban board', body: 'Drag tasks across stages and see your whole pipeline at a glance.' },
-  { icon: Grid3x3, title: 'Priority matrix', body: 'Sort by urgent vs. important so the right work rises to the top.' },
-  { icon: CalendarDays, title: 'Schedule', body: 'Plan tasks on a timeline and keep due dates in view.' },
-  { icon: UserCog, title: 'Assign to your team', body: 'Give every task an assignee so everyone sees who owns what.' },
-  { icon: Zap, title: 'Real-time sync', body: 'Edits, comments, and new tasks appear instantly for the whole workspace.' },
-  { icon: UserPlus, title: 'Workspaces & invites', body: 'Spin up a workspace and invite teammates by email to join.' },
-];
 
-const STEPS = [
-  { n: '1', title: 'Create your workspace', body: 'Sign up and name your workspace. You’re its owner.' },
-  { n: '2', title: 'Add work and assign it', body: 'Capture tasks, set priority and due dates, assign teammates.' },
-  { n: '3', title: 'Track it your way', body: 'Kanban, priority matrix, or schedule, all live and in sync.' },
+/* Feature cards: the cross-org story carried by the copy AND a mini visual per card. */
+const FEATURES = [
+  {
+    icon: UserPlus,
+    title: 'Bring in people outside your company',
+    body: 'Invite freelancers, contractors, and VAs as guests. They work their tasks alongside your team — and see only what’s theirs.',
+    viz: 'guests',
+  },
+  {
+    icon: UserCog,
+    title: 'Assign anyone, inside or out',
+    body: 'Every task has one clear owner — an employee or an outside collaborator. No more “who was doing this?”',
+    viz: 'assign',
+  },
+  {
+    icon: Lock,
+    title: 'Private & shared tasks',
+    body: 'Keep a task between you and its assignee, or share it with the workspace. Privacy is per-task, not per-tool.',
+    viz: 'private',
+  },
+  {
+    icon: KanbanSquare,
+    title: 'Kanban, matrix & schedule',
+    body: 'The same tasks, three ways to steer them: pipeline board, urgent-vs-important matrix, weekly schedule.',
+    viz: 'views',
+  },
+  {
+    icon: MessageSquare,
+    title: 'Chat where the work is',
+    body: 'Team chat, direct messages, and voice notes in the same workspace as the tasks — no separate chat app.',
+    viz: 'chat',
+  },
+  {
+    icon: Zap,
+    title: 'Live for everyone',
+    body: 'Edits, comments, and new tasks sync in real time, with due-date reminders before things slip.',
+    viz: 'sync',
+  },
 ];
 
 /* Grain: tiny inline SVG turbulence tile, painted once and repeated. Static — never animated. */
@@ -175,6 +212,85 @@ function LiveBoard() {
   );
 }
 
+/* ── Mini visuals for the feature cards. Pure CSS/SVG-free, ~40px tall, decorative. ── */
+function FeatureViz({ kind }) {
+  const bar = (w, extra = '') => <span className={`block h-1.5 rounded-full bg-fill-strong ${extra}`} style={{ width: w }} />;
+  const face = (hex, soft, letter, dashed = false) => (
+    <span
+      className={`w-6 h-6 rounded-full inline-flex items-center justify-center text-[10px] font-bold shrink-0 ${dashed ? 'border border-dashed' : 'border border-line-subtle'}`}
+      style={{ background: soft, color: hex, borderColor: dashed ? hex : undefined }}
+    >
+      {letter}
+    </span>
+  );
+  switch (kind) {
+    case 'guests':
+      return (
+        <div className="flex items-center gap-1.5">
+          <span className="flex -space-x-1.5">
+            {face('#7c8cff', 'rgba(124,140,255,.14)', 'M')}
+            {face('#34d399', 'rgba(52,211,153,.14)', 'J')}
+            {face('#fb923c', 'rgba(251,146,60,.14)', 'S')}
+          </span>
+          <span className="text-faint text-micro">+</span>
+          {face('#f472b6', 'rgba(244,114,182,.14)', 'P', true)}
+          <span className="rounded-full border border-brand-alt/40 bg-brand-alt/10 text-brand-alt-text px-1.5 h-4 inline-flex items-center text-[9px] font-semibold uppercase tracking-wide">guest</span>
+        </div>
+      );
+    case 'assign':
+      return (
+        <div className="flex items-center gap-2">
+          {bar('34%')}
+          <span className="lp-vizSlide inline-flex items-center gap-1 rounded-full bg-brand/15 border border-brand-hover/30 pl-0.5 pr-2 h-5">
+            {face('#f472b6', 'rgba(244,114,182,.14)', 'P', true)}
+            <span className="text-micro text-brand-text font-medium">assigned</span>
+          </span>
+        </div>
+      );
+    case 'private':
+      return (
+        <div className="space-y-1.5 w-full max-w-[180px]">
+          <span className="flex items-center gap-1.5">{bar('62%')}<span className="text-[9px] text-faint uppercase">shared</span></span>
+          <span className="flex items-center gap-1.5">{bar('44%')}<Lock className="w-3 h-3 text-brand-text shrink-0" /><span className="text-[9px] text-faint uppercase">you + assignee</span></span>
+        </div>
+      );
+    case 'views':
+      return (
+        <div className="flex items-end gap-1.5 h-8" aria-hidden="true">
+          {[['#7c8cff', 'h-8'], ['#38bdf8', 'h-6'], ['#34d399', 'h-7']].map(([c, h], i) => (
+            <span key={i} className={`w-7 ${h} rounded-md border border-line-subtle bg-fill-subtle relative overflow-hidden`}>
+              <span className="absolute top-1 left-1 right-1 h-1 rounded-full" style={{ background: c, opacity: 0.6 }} />
+              <span className="absolute top-3 left-1 right-2 h-1 rounded-full bg-fill-strong" />
+            </span>
+          ))}
+        </div>
+      );
+    case 'chat':
+      return (
+        <div className="flex items-center gap-2">
+          <span className="rounded-xl rounded-bl-sm bg-fill border border-line-subtle px-2 py-1">{bar('34px')}</span>
+          <span className="rounded-xl rounded-br-sm bg-brand/15 border border-brand-hover/25 px-2 py-1 inline-flex items-center gap-1">
+            <Mic className="w-3 h-3 text-brand-text" />
+            <span className="flex items-center gap-[2px]">
+              {[4, 8, 5, 9, 6].map((h, i) => <span key={i} className="w-[2px] rounded-full bg-brand-text/60" style={{ height: h }} />)}
+            </span>
+          </span>
+        </div>
+      );
+    case 'sync':
+    default:
+      return (
+        <div className="flex items-center gap-2">
+          <span className="relative w-2.5 h-2.5">
+            <span className="lp-ping absolute inset-0 rounded-full bg-success-hover" style={{ opacity: 0 }} />
+            <span className="absolute inset-0 rounded-full bg-success-hover" />
+          </span>
+          <span className="text-micro text-faint">Synced just now, for everyone</span>
+        </div>
+      );
+  }
+}
+
 export default function LandingPage() {
   const rootRef = useRef(null);
 
@@ -211,6 +327,9 @@ export default function LandingPage() {
 
   /* Scroll storytelling: shared reveal observer (see SiteChrome.useRevealOnScroll). */
   useRevealOnScroll(rootRef);
+
+  const free = PLANS[MAIN_PLAN_IDS[0]];
+  const pro = PLANS[MAIN_PLAN_IDS[1]];
 
   return (
     <div ref={rootRef} data-surface="dark" className="lp-root min-h-screen bg-canvas text-primary relative">
@@ -299,6 +418,34 @@ export default function LandingPage() {
         .lp-ping-2   { animation-delay: 1.6s; }
         .lp-sheen    { animation: lpSheenMove 3.6s ease-in-out infinite; }
 
+        /* ---------- Interactive demo (LandingDemo.jsx) — same rest-state discipline:
+                     every static style is the complete page; reduced motion kills all. ---------- */
+        @keyframes ldEnter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .ld-enter { animation: ldEnter .3s ease both; }
+        @keyframes ldGo {
+          0%, 22% { transform: translate(0,0); }
+          30%     { transform: translate(calc(50% + 6px), -6px); }
+          38%, 94% { transform: translate(calc(100% + 12px), 0); }
+          100%    { transform: translate(0,0); }
+        }
+        @keyframes ldGoCard { 0%,18% { opacity: 0; } 24%,36% { opacity: 1; } 42%,100% { opacity: 0; } }
+        @keyframes ldGoA { 0%,20% { opacity: 1; } 26%,90% { opacity: 0; } 97%,100% { opacity: 1; } }
+        @keyframes ldLandB { 0%,40% { opacity: 0; } 46%,95% { opacity: 1; } 100% { opacity: 0; } }
+        @keyframes ldHint { 0%,24% { opacity: 0; } 29%,36% { opacity: .9; } 41%,100% { opacity: 0; } }
+        .ld-go       { animation: ldGo 11s cubic-bezier(.45,.05,.35,1) infinite; }
+        .ld-go > div { animation: ldGoCard 11s ease infinite; }
+        .ld-goA      { animation: ldGoA 11s ease infinite; }
+        .ld-landB    { animation: ldLandB 11s ease infinite; }
+        .ld-hint     { animation: ldHint 11s ease infinite; }
+        @keyframes ldPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.015); } }
+        .ld-pulse { animation: ldPulse 2.8s ease-in-out infinite; }
+        @keyframes ldMsg { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .ld-msg { animation: ldMsg .5s ease both; animation-delay: var(--ld-d, 0s); }
+        @keyframes ldDot { 0%,100% { transform: translateY(0); opacity: .5; } 40% { transform: translateY(-3px); opacity: 1; } }
+        .ld-dot { animation: ldDot 1.1s ease-in-out infinite; }
+        @keyframes lpVizSlide { 0%,100% { transform: translateX(0); } 50% { transform: translateX(4px); } }
+        .lp-vizSlide { animation: lpVizSlide 3.4s ease-in-out infinite; }
+
         /* ---------- Scroll reveals (hidden state exists ONLY when motion is allowed) ---------- */
         @media (prefers-reduced-motion: no-preference) {
           [data-lp-reveal] {
@@ -356,15 +503,16 @@ export default function LandingPage() {
         <section className="pt-8 lg:pt-12 pb-10 grid lg:grid-cols-2 gap-8 lg:gap-10 items-center">
           <div>
             <div className="lp-in inline-flex items-center gap-1.5 text-meta font-medium uppercase tracking-widest text-brand-text/80 bg-brand/10 border border-brand-hover/20 rounded-full px-3 h-7 mb-4" style={{ animationDelay: '.05s' }}>
-              Visual task management for teams
+              One workspace, across company lines
             </div>
             <h1 className="text-3xl lg:text-4xl xl:text-5xl font-semibold font-brand tracking-tight leading-[1.05]">
-              <span className="lp-line"><span className="lp-line-inner" style={{ animationDelay: '.12s' }}>Stop losing track of</span></span>
-              <span className="lp-line"><span className="lp-line-inner bg-gradient-to-r from-brand-text via-brand-alt-text to-danger-text bg-clip-text text-transparent" style={{ animationDelay: '.24s' }}>who’s doing what.</span></span>
+              <span className="lp-line"><span className="lp-line-inner" style={{ animationDelay: '.12s' }}>Coordinate your whole team —</span></span>
+              <span className="lp-line"><span className="lp-line-inner bg-gradient-to-r from-brand-text via-brand-alt-text to-danger-text bg-clip-text text-transparent" style={{ animationDelay: '.24s' }}>even people outside your company.</span></span>
             </h1>
             <p className="lp-in mt-4 text-sm lg:text-base text-muted max-w-xl leading-relaxed" style={{ animationDelay: '.4s' }}>
-              Pull every task, owner, and due date into one visual workspace. Track it on a kanban board,
-              a priority matrix, or a schedule, live for the whole team.
+              Tasks, owners, due dates, and chat in one visual workspace — for staff <em>and</em> the
+              freelancers, contractors, and VAs who work with them. Everyone sees who’s doing what.
+              Outside collaborators see only what’s theirs.
             </p>
             <div className="lp-in mt-6 flex flex-wrap items-center gap-3" style={{ animationDelay: '.52s' }}>
               <Magnetic>
@@ -377,9 +525,9 @@ export default function LandingPage() {
               </Link>
             </div>
             <div className="lp-in mt-5 flex flex-wrap gap-x-5 gap-y-1.5 text-note text-faint" style={{ animationDelay: '.66s' }}>
+              <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-success-text" /> No credit card required</span>
               <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-success-text" /> Real-time sync</span>
-              <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-success-text" /> Private &amp; shared tasks</span>
-              <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-success-text" /> Team chat &amp; direct messages</span>
+              <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-success-text" /> Guest access for outside collaborators</span>
             </div>
           </div>
 
@@ -394,12 +542,39 @@ export default function LandingPage() {
           </div>
         </section>
 
+        {/* Interactive demo — the centerpiece: click through the real views with sample data. */}
+        <section className="relative py-14" id="demo">
+          <Divider />
+          <div data-lp-reveal className="text-center max-w-2xl mx-auto">
+            <h2 className="text-2xl lg:text-3xl font-semibold font-brand tracking-tight">Try it right here — no account needed</h2>
+            <p className="mt-2 text-faint">
+              Click through the product’s actual views. Watch for <span className="text-brand-alt-text">Priya</span>, the
+              outside collaborator: she’s on the board, in the matrix, and in chat — seeing only her own work.
+            </p>
+          </div>
+          <div data-lp-reveal className="mt-8" style={{ '--lp-d': '120ms' }}>
+            <LandingDemo />
+          </div>
+          <div data-lp-reveal className="mt-6 text-center" style={{ '--lp-d': '200ms' }}>
+            <Link to="/signup" className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-text hover:text-brand-text-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text rounded">
+              Like what you see? Get organized free <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+        </section>
+
+        {/*  SOCIAL PROOF — deliberately absent until there is real proof to show.
+             House rule: never fabricate logos, testimonials, user counts, or stats.
+             When real quotes/customers exist, they slot in here as a band between
+             the demo and the features grid. */}
+
         {/* Features */}
         <section className="relative py-14">
           <Divider />
           <div data-lp-reveal>
-            <h2 className="text-2xl lg:text-3xl font-semibold font-brand tracking-tight">Everything your team needs to stay on track</h2>
-            <p className="mt-2 text-faint max-w-2xl">One workspace for the work, the people, and the plan.</p>
+            <h2 className="text-2xl lg:text-3xl font-semibold font-brand tracking-tight">Built for teams that don’t fit inside one org chart</h2>
+            <p className="mt-2 text-faint max-w-2xl">
+              Most tools assume everyone works at the same company. Corlyvo assumes some of your best people don’t.
+            </p>
           </div>
           <div className="mt-9 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* Reveal lives on a WRAPPER div so its transition rule can never collide with the
@@ -411,8 +586,13 @@ export default function LandingPage() {
                   className="group relative h-full overflow-hidden rounded-2xl border border-line-subtle bg-gradient-to-br from-fill-subtle to-transparent p-5 transition-all duration-300 hover:-translate-y-1 hover:border-brand-hover/25 hover:shadow-xl hover:shadow-brand/20"
                 >
                   <span className="lp-cardGlow opacity-0 group-hover:opacity-100 transition-opacity duration-300" aria-hidden="true" />
-                  <div className="relative w-10 h-10 rounded-xl bg-brand/10 border border-brand-hover/20 flex items-center justify-center mb-3 transition-colors duration-300 group-hover:bg-brand/20 group-hover:border-brand-hover/40">
-                    <f.icon className="w-5 h-5 text-brand-text transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6" />
+                  <div className="relative flex items-start justify-between gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-xl bg-brand/10 border border-brand-hover/20 flex items-center justify-center transition-colors duration-300 group-hover:bg-brand/20 group-hover:border-brand-hover/40">
+                      <f.icon className="w-5 h-5 text-brand-text transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6" />
+                    </div>
+                  </div>
+                  <div className="relative h-10 flex items-center mb-2" aria-hidden="true">
+                    <FeatureViz kind={f.viz} />
                   </div>
                   <h3 className="relative text-base font-semibold text-primary">{f.title}</h3>
                   <p className="relative mt-1 text-compact text-muted leading-relaxed">{f.body}</p>
@@ -422,21 +602,57 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* How it works */}
+        {/* Pricing teaser — driven from lib/plans.js (the single source of truth), so this
+            section can never advertise something the plans don't contain. */}
         <section className="relative py-14">
           <Divider />
-          <h2 data-lp-reveal className="text-2xl lg:text-3xl font-semibold font-brand tracking-tight">How it works</h2>
-          <div className="mt-9 grid md:grid-cols-3 gap-4">
-            {STEPS.map((s, i) => (
-              <div key={s.n} data-lp-reveal style={{ '--lp-d': `${i * 110}ms` }}>
-                <div className="group h-full rounded-2xl border border-line-subtle bg-fill-subtle p-5 transition-all duration-300 hover:-translate-y-1 hover:border-line">
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand to-brand-alt flex items-center justify-center text-sm font-bold mb-3 shadow-lg shadow-brand/25 transition-transform duration-300 group-hover:scale-110">{s.n}</div>
-                  <h3 className="text-base font-semibold text-primary">{s.title}</h3>
-                  <p className="mt-1 text-compact text-muted leading-relaxed">{s.body}</p>
+          <div data-lp-reveal className="text-center max-w-2xl mx-auto">
+            <h2 className="text-2xl lg:text-3xl font-semibold font-brand tracking-tight">Simple plans, free to start</h2>
+            <p className="mt-2 text-faint">{PRICING_COPY.earlyAccessNote}</p>
+          </div>
+          <div className="mt-9 grid sm:grid-cols-2 gap-4 max-w-3xl mx-auto items-stretch">
+            {[free, pro].map((plan) => (
+              <div key={plan.id} data-lp-reveal style={{ '--lp-d': plan.popular ? '120ms' : '0ms' }} className="h-full">
+                <div className={`relative h-full rounded-2xl border p-6 flex flex-col ${plan.popular ? 'border-brand-hover/40 bg-brand/10' : 'border-line-subtle bg-fill-subtle'}`}>
+                  {plan.popular && (
+                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 h-6 rounded-full bg-brand-gradient-cta text-brand-fg text-micro font-bold uppercase tracking-wider inline-flex items-center">
+                      Most popular
+                    </span>
+                  )}
+                  <div className="text-sm font-semibold text-primary">{plan.name}</div>
+                  <div className="mt-1 flex items-baseline gap-1">
+                    <span className="text-3xl font-semibold font-brand tracking-tight text-primary">
+                      {formatMoney(monthlyEquivalent(plan, BILLING_CYCLE.monthly))}
+                    </span>
+                    <span className="text-note text-faint">/ month</span>
+                  </div>
+                  <p className="mt-1 text-compact text-muted">{plan.tagline}</p>
+                  <ul className="mt-4 space-y-2 flex-1">
+                    {plan.highlights.slice(0, 4).map((h) => (
+                      <li key={h} className="flex items-start gap-2 text-compact text-secondary">
+                        <Check className="w-3.5 h-3.5 text-success-text mt-0.5 shrink-0" />{h}
+                      </li>
+                    ))}
+                  </ul>
+                  {plan.popular ? (
+                    <Link to="/pricing" className="mt-5 h-10 rounded-xl bg-brand hover:bg-brand-hover text-brand-fg text-sm font-semibold flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
+                      See everything in Pro
+                    </Link>
+                  ) : (
+                    <Link to="/signup" className="mt-5 h-10 rounded-xl border border-line bg-fill text-sm font-semibold text-primary hover:bg-fill-strong flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
+                      Start free
+                    </Link>
+                  )}
                 </div>
               </div>
             ))}
           </div>
+          <p data-lp-reveal className="mt-5 text-center text-note text-faint">
+            Running several teams?{' '}
+            <Link to="/pricing" className="text-brand-text hover:text-brand-text-hover underline underline-offset-2 transition-colors">
+              Compare all plans, including Business
+            </Link>
+          </p>
         </section>
 
         {/* CTA band */}
@@ -449,12 +665,12 @@ export default function LandingPage() {
             <div className="absolute top-0 inset-x-0 h-px overflow-hidden" aria-hidden="true">
               <span className="lp-comet absolute top-0 h-px w-60 bg-gradient-to-r from-transparent via-brand-alt-text/80 to-transparent" style={{ opacity: 0 }} />
             </div>
-            <h2 className="relative text-2xl lg:text-3xl font-semibold font-brand tracking-tight">Ready to organize your team’s work?</h2>
-            <p className="relative mt-2 text-muted">Create a workspace in seconds. It’s free to get started.</p>
+            <h2 className="relative text-2xl lg:text-3xl font-semibold font-brand tracking-tight">One team. One workspace. Inside and out.</h2>
+            <p className="relative mt-2 text-muted">Create a workspace in seconds and invite anyone — staff or not.</p>
             <div className="relative mt-6 flex justify-center gap-3">
               <Magnetic>
                 <Link to="/signup" className="h-12 px-6 rounded-xl bg-brand-gradient-cta text-brand-fg font-semibold text-sm flex items-center gap-2 hover:shadow-lg hover:shadow-brand/20 hover:brightness-110 active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
-                  Get organized free <ArrowRight className="w-4 h-4" />
+                  Start free <ArrowRight className="w-4 h-4" />
                 </Link>
               </Magnetic>
             </div>
