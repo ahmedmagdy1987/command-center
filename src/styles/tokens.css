@@ -517,7 +517,9 @@ body {
 /* Brand voice: the logo wordmark and marketing-page headings. */
 .font-brand {
   font-family: var(--font-brand);
-  font-weight: 700;
+  /* No font-weight here on purpose: every call site pairs this with a Tailwind weight
+   * utility (font-semibold), which is emitted later and wins. Declaring 700 here just
+   * looked like it did something. */
   letter-spacing: -0.022em;
 }
 

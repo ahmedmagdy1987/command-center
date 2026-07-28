@@ -60,14 +60,16 @@ export default function AuthShell({
       </div>
 
       <div className="relative w-full max-w-md">
-        {/* Brand lockup */}
+        {/* Brand lockup. The mark carries NO title: the <h1> directly below already
+            reads "Corlyvo", so labelling the svg too would announce the brand twice to
+            a screen reader. Without a title the component sets aria-hidden. */}
         <div className="au-in flex flex-col items-center mb-8">
           {Icon ? (
             <div className="w-14 h-14 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-2xl shadow-brand/15 mb-4">
               <Icon className="w-7 h-7 text-brand-fg" />
             </div>
           ) : (
-            <CorlyvoMark size={56} className="mb-4" title="Corlyvo" />
+            <CorlyvoMark size={56} className="mb-4" />
           )}
           <h1 className="text-2xl font-semibold text-primary font-brand tracking-tight">{heading}</h1>
           {tagline && <p className="text-sm text-faint mt-1 text-center">{tagline}</p>}
