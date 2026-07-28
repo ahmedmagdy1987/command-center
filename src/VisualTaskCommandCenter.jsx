@@ -2602,11 +2602,12 @@ function Sidebar() {
   return (
     <aside className="hidden lg:flex flex-col w-64 shrink-0 border-r border-line-subtle bg-surface">
       <div className="px-5 pt-6 pb-5 border-b border-line-subtle">
-        <div className="flex items-center gap-2.5">
-          <CorlyvoLogo height={26} className="text-primary" />
-          <div className="leading-tight">
-            <div className="text-micro text-faint uppercase tracking-widest">Visual task management</div>
-          </div>
+        {/* Lockup STACKED over the tagline. The old layout put a square tile beside a
+            text block; the lockup is ~3.9:1, so side-by-side would need ~241px inside a
+            216px content box (w-64 minus px-5) and would squash or clip. */}
+        <div className="flex flex-col gap-1.5">
+          <CorlyvoLogo height={24} className="text-primary" />
+          <div className="text-micro text-faint uppercase tracking-widest">Visual task management</div>
         </div>
       </div>
 
