@@ -53,10 +53,18 @@ const shortcutLabel = (key) => (IS_MAC ? `⌘${key}` : `Ctrl+${key}`);
    CONSTANTS
 ================================================================================= */
 // Per-assignee color, deterministic from the user id, + the neutral "unassigned" style.
+// DELIBERATELY OUTSIDE the semantic token layer in src/styles/tokens.css. This is a CATEGORICAL
+// palette — its job is to make people distinguishable from each other, not to express meaning or
+// react to the theme. Forcing it through brand/status tokens would collapse seven identities onto
+// one hue. It is consumed as inline style (hex + a 14% `soft` tint), never as a class.
+// Retuned in Phase 2: the violet (#a78bfa) and fuchsia (#e879f9) entries WERE the old brand
+// identity, so a person keyed to one kept the retired palette alive on every avatar. They are
+// now periwinkle (brand-adjacent) and pink. The other five are neutral hues and are unchanged;
+// what matters here is that the seven stay maximally distinguishable from each other.
 const ASSIGNEE_PALETTE = [
-  { hex: '#a78bfa', soft: 'rgba(167,139,250,0.14)' },
+  { hex: '#7c8cff', soft: 'rgba(124,140,255,0.14)' },
   { hex: '#34d399', soft: 'rgba(52,211,153,0.14)' },
-  { hex: '#e879f9', soft: 'rgba(232,121,249,0.14)' },
+  { hex: '#f472b6', soft: 'rgba(244,114,182,0.14)' },
   { hex: '#38bdf8', soft: 'rgba(56,189,248,0.14)' },
   { hex: '#fb923c', soft: 'rgba(251,146,60,0.14)' },
   { hex: '#f43f5e', soft: 'rgba(244,63,94,0.14)' },
@@ -114,9 +122,8 @@ const STATUSES = {
 // renders no chip (`projects.find(...)` -> undefined). That is the intended graceful degradation.
 
 // Palette + glyphs offered when creating/editing a project.
-const PROJECT_PALETTE = ['#a78bfa','#f472b6','#38bdf8','#34d399','#fb923c','#f43f5e','#facc15','#94a3b8','#64748b','#22d3ee','#c084fc','#4ade80'];
+const PROJECT_PALETTE = ['#7c8cff','#f472b6','#38bdf8','#34d399','#fb923c','#f43f5e','#facc15','#94a3b8','#64748b','#22d3ee','#3dd6b3','#4ade80'];
 const PROJECT_ICONS = ['◇','◈','◎','☉','✎','↗','♡','◐','⚙','★','✦','⬢'];
-
 
 const EFFORTS = {
   quick:  { id: 'quick',  label: 'Quick',  mins: 15, hex: '#34d399' },
@@ -162,7 +169,7 @@ const isOverdue = (task) => task.dueDate && daysBetween(new Date(), task.dueDate
 const isDueToday = (task) => task.dueDate && daysBetween(new Date(), task.dueDate) === 0 && task.status !== 'done';
 const isDueSoon = (task) => task.dueDate && daysBetween(new Date(), task.dueDate) <= 3 && !isOverdue(task) && task.status !== 'done';
 
-const getNextBestScore = (task) => {
+const getUpNextScore = (task) => {
   if (task.status === 'done') return -999;
   let score = 0;
   score += PRIORITIES[task.priority].rank * 20;
@@ -1151,13 +1158,13 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
           {appToasts.map(tt => (
             <div key={tt.id} style={{ animation: 'slideUp .2s ease' }}
               className={cx('pointer-events-auto w-full flex items-start gap-2 rounded-xl border px-3.5 py-2.5 text-xs shadow-2xl backdrop-blur',
-                tt.tone === 'error' ? 'border-rose-500/25 bg-rose-500/10 text-rose-200' : 'border-white/10 bg-[#0f1017]/90 text-white/80')}>
+                tt.tone === 'error' ? 'border-danger/25 bg-danger/10 text-danger-text' : 'border-line bg-surface-raised/90 text-secondary')}>
               {tt.tone === 'error' ? <AlertCircle className="w-4 h-4 shrink-0 mt-px" /> : <Info className="w-4 h-4 shrink-0 mt-px" />}
               <span className="flex-1 break-words">{tt.message}</span>
               {tt.action && (
                 <button
                   onClick={() => { setAppToasts(p => p.filter(x => x.id !== tt.id)); tt.action.onClick?.(); }}
-                  className="shrink-0 font-semibold underline underline-offset-2 text-violet-300 hover:text-violet-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70 rounded px-0.5">
+                  className="shrink-0 font-semibold underline underline-offset-2 text-brand-text hover:text-brand-text-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-hover/70 rounded px-0.5">
                   {tt.action.label}
                 </button>
               )}
@@ -1237,7 +1244,7 @@ function AssigneeChip({ assigneeId, showLabel = true, size = 'sm' }) {
   const { resolveAssignee, theme } = useApp();
   const a = resolveAssignee(assigneeId);
   const light = theme === 'light';
-  const dims = size === 'sm' ? 'h-5 text-[10px]' : 'h-6 text-xs';
+  const dims = size === 'sm' ? 'h-5 text-micro' : 'h-6 text-xs';
   const face = size === 'sm' ? 14 : 18;
   return (
     <span className={cx('inline-flex items-center gap-1 rounded-full font-medium tracking-wide pl-0.5', dims, showLabel ? (size === 'sm' ? 'pr-2' : 'pr-2.5') : 'pr-0.5')}
@@ -1257,15 +1264,15 @@ function AssigneeChip({ assigneeId, showLabel = true, size = 'sm' }) {
 
 function Badge({ children, tone = 'neutral', icon: Icon }) {
   const tones = {
-    neutral: 'bg-white/5 text-white/60 border-white/10',
-    overdue: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
-    today:   'bg-amber-500/15 text-amber-300 border-amber-500/30',
-    soon:    'bg-sky-500/15 text-sky-300 border-sky-500/30',
-    later:   'bg-white/5 text-white/50 border-white/10',
-    block:   'bg-rose-500/15 text-rose-300 border-rose-500/30',
-    success: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+    neutral: 'bg-fill text-muted border-line',
+    overdue: 'bg-danger/15 text-danger-text border-danger/30',
+    today:   'bg-warning/15 text-warning-text border-warning/30',
+    soon:    'bg-info/15 text-info-text border-info/30',
+    later:   'bg-fill text-muted border-line',
+    block:   'bg-danger/15 text-danger-text border-danger/30',
+    success: 'bg-success/15 text-success-text border-success/30',
   };
-  return <span className={cx('inline-flex items-center gap-1 rounded-md border px-1.5 h-5 text-[10px] font-medium', tones[tone])}>
+  return <span className={cx('inline-flex items-center gap-1 rounded-md border px-1.5 h-5 text-micro font-medium', tones[tone])}>
     {Icon && <Icon className="w-3 h-3" />}{children}
   </span>;
 }
@@ -1275,8 +1282,8 @@ function IconButton({ icon: Icon, label, active, onClick }) {
     <button onClick={onClick} aria-label={label} title={label}
       className={cx(
         'inline-flex items-center justify-center w-9 h-9 rounded-xl transition-all duration-200',
-        'border border-white/5 hover:border-white/10',
-        active ? 'bg-white/10 text-white' : 'bg-white/[0.03] text-white/60 hover:bg-white/[0.07] hover:text-white/90',
+        'border border-line-subtle hover:border-line',
+        active ? 'bg-fill-strong text-primary' : 'bg-fill-subtle text-muted hover:bg-fill hover:text-primary',
       )}>
       <Icon className="w-4 h-4" />
     </button>
@@ -1287,7 +1294,7 @@ function Tooltip({ children, content, className = 'inline-flex' }) {
   return (
     <span className={cx('relative group', className)}>
       {children}
-      <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-9 whitespace-nowrap text-[10px] font-medium px-2 py-1 rounded-md bg-black/90 border border-white/10 text-white/90 opacity-0 group-hover:opacity-100 transition-opacity z-50">
+      <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-9 whitespace-nowrap text-micro font-medium px-2 py-1 rounded-md bg-tooltip border border-tooltip-fg/15 text-tooltip-fg opacity-0 group-hover:opacity-100 transition-opacity z-50">
         {content}
       </span>
     </span>
@@ -1353,41 +1360,41 @@ function ChangePasswordModal({ open, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-[fadeIn_.15s_ease]" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-6">
+    <div className="fixed inset-0 z-50 bg-overlay backdrop-blur-sm flex items-center justify-center p-4 animate-[fadeIn_.15s_ease]" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-line bg-surface-raised shadow-2xl p-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white font-display">Change password</h3>
-          <button onClick={onClose} className="text-white/50 hover:text-white"><X className="w-4 h-4" /></button>
+          <h3 className="text-lg font-semibold text-primary font-display">Change password</h3>
+          <button onClick={onClose} className="text-muted hover:text-primary"><X className="w-4 h-4" /></button>
         </div>
 
         {success ? (
           <div className="py-8 text-center">
-            <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center mx-auto mb-3">
-              <Check className="w-6 h-6 text-emerald-400" strokeWidth={3} />
+            <div className="w-12 h-12 rounded-full bg-success/20 border border-success/30 flex items-center justify-center mx-auto mb-3">
+              <Check className="w-6 h-6 text-success-text" strokeWidth={3} />
             </div>
-            <div className="text-sm text-white/90 font-medium">Password changed successfully</div>
+            <div className="text-sm text-primary font-medium">Password changed successfully</div>
           </div>
         ) : (
           <form onSubmit={submit} className="space-y-3">
             <div>
-              <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">Current password</label>
+              <label className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5 block">Current password</label>
               <input type="password" value={current} onChange={e => setCurrent(e.target.value)} required autoFocus
-                className="w-full bg-black/30 border border-white/10 rounded-lg px-3 h-10 text-sm text-white outline-none focus:border-violet-400/50" />
+                className="w-full bg-input border border-line rounded-lg px-3 h-10 text-sm text-primary outline-none focus:border-brand-hover/50" />
             </div>
             <div>
-              <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">New password</label>
+              <label className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5 block">New password</label>
               <input type="password" value={next} onChange={e => setNext(e.target.value)} required minLength={10}
                 placeholder="At least 10 characters"
-                className="w-full bg-black/30 border border-white/10 rounded-lg px-3 h-10 text-sm text-white placeholder-white/30 outline-none focus:border-violet-400/50" />
+                className="w-full bg-input border border-line rounded-lg px-3 h-10 text-sm text-primary placeholder-faint outline-none focus:border-brand-hover/50" />
             </div>
             <div>
-              <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">Confirm new password</label>
+              <label className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5 block">Confirm new password</label>
               <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} required
-                className="w-full bg-black/30 border border-white/10 rounded-lg px-3 h-10 text-sm text-white outline-none focus:border-violet-400/50" />
+                className="w-full bg-input border border-line rounded-lg px-3 h-10 text-sm text-primary outline-none focus:border-brand-hover/50" />
             </div>
 
             {error && (
-              <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300">
+              <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-danger/10 border border-danger/20 text-xs text-danger-text">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-px" />
                 <span>{error}</span>
               </div>
@@ -1395,11 +1402,11 @@ function ChangePasswordModal({ open, onClose }) {
 
             <div className="flex gap-2 pt-2">
               <button type="button" onClick={onClose} disabled={loading}
-                className="flex-1 h-10 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-sm text-white/80 font-medium transition-colors disabled:opacity-50">
+                className="flex-1 h-10 rounded-lg border border-line bg-fill hover:bg-fill-strong text-sm text-secondary font-medium transition-colors disabled:opacity-50">
                 Cancel
               </button>
               <button type="submit" disabled={loading || !current || !next || !confirm}
-                className="flex-1 h-10 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold text-sm hover:shadow-lg hover:shadow-fuchsia-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2">
+                className="flex-1 h-10 rounded-lg bg-brand hover:bg-brand-hover text-brand-fg font-semibold text-sm hover:shadow-lg hover:shadow-brand/15 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2">
                 {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Change'}
               </button>
             </div>
@@ -1441,8 +1448,8 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showAssign
       onClick={onClick}
       className={cx(
         'group relative rounded-xl border cursor-pointer transition-all duration-200',
-        'border-white/[0.06] bg-gradient-to-br from-white/[0.04] to-white/[0.015]',
-        'hover:border-white/15 hover:from-white/[0.06] hover:to-white/[0.02]',
+        'border-line-subtle bg-gradient-to-br from-fill to-fill-subtle',
+        'hover:border-line hover:from-fill-strong hover:to-fill',
         'hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/30',
         done && 'opacity-50',
         exiting && 'animate-[fadeSlideOut_.18s_ease_forwards] pointer-events-none',
@@ -1456,42 +1463,42 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showAssign
 
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-center gap-2 min-w-0 flex-1">
-          {/* Unchecked ring via border-white/20 (class, not inline rgba): same 20% white in dark, but the
+          {/* Unchecked ring via border-line-strong (class, not inline rgba): same 20% white in dark, but the
               light sheet remaps the CLASS to visible black-alpha — inline stayed white-on-white in light. */}
           <button
             onClick={(e) => { e.stopPropagation(); updateTask(task.id, { status: done ? 'inbox' : 'done' }); }}
-            className="shrink-0 w-4 h-4 rounded-full border-2 border-white/20 flex items-center justify-center transition-all"
+            className="shrink-0 w-4 h-4 rounded-full border-2 border-line-strong flex items-center justify-center transition-all"
             style={{ borderColor: done ? priority.hex : undefined, background: done ? priority.hex : 'transparent' }}
           >
-            {done && <Check className="w-2.5 h-2.5" style={{ color: '#0a0b11' }} strokeWidth={3} />}
+            {done && <Check className="w-2.5 h-2.5" style={{ color: 'rgb(var(--color-canvas))' }} strokeWidth={3} />}
           </button>
           <PriorityDot priority={task.priority} />
-          {isPrivate && <span title="Private: visible only to the creator and assignee"><Lock className="w-3 h-3 text-white/40 shrink-0" /></span>}
-          {task.blocked && <PauseCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
+          {isPrivate && <span title="Private: visible only to the creator and assignee"><Lock className="w-3 h-3 text-faint shrink-0" /></span>}
+          {task.blocked && <PauseCircle className="w-3.5 h-3.5 text-danger-text shrink-0" />}
         </div>
         {showAssignee && <AssigneeChip assigneeId={task.assigneeId} showLabel={!compact} size="sm" />}
       </div>
 
-      <div className={cx('font-medium leading-snug text-white/95 mb-2', done && 'line-through text-white/50', compact ? 'text-sm' : 'text-[15px]')}>
+      <div className={cx('font-medium leading-snug text-primary mb-2', done && 'line-through text-muted', compact ? 'text-sm' : 'text-[15px]')}>
         {task.title}
       </div>
 
       {!compact && task.description && (
-        <p className="text-xs text-white/50 leading-relaxed mb-3 line-clamp-2">{task.description}</p>
+        <p className="text-xs text-muted leading-relaxed mb-3 line-clamp-2">{task.description}</p>
       )}
 
       {totalSub > 0 && !compact && (
         <div className="mb-3">
-          <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+          <div className="h-1 bg-fill rounded-full overflow-hidden">
             <div className="h-full rounded-full transition-all" style={{ width: `${(doneCount/totalSub)*100}%`, background: `linear-gradient(90deg, ${priority.hex}, ${assignee.hex})` }} />
           </div>
-          <div className="text-[10px] text-white/40 mt-1 font-medium tracking-wide">{doneCount}/{totalSub} subtasks</div>
+          <div className="text-micro text-faint mt-1 font-medium tracking-wide">{doneCount}/{totalSub} subtasks</div>
         </div>
       )}
 
       <div className="flex flex-wrap items-center gap-1.5">
         {project && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-white/60">
+          <span className="inline-flex items-center gap-1 text-micro font-medium text-muted">
             <span style={{ color: project.color }}>{project.icon}</span>
             <span>{project.name}</span>
           </span>
@@ -1502,11 +1509,11 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showAssign
         )}
         {task.blocked && <Badge tone="block">Blocked</Badge>}
         {task.tags.slice(0, compact ? 0 : 2).map(t => (
-          <span key={t} className="text-[10px] text-white/40">#{t}</span>
+          <span key={t} className="text-micro text-faint">#{t}</span>
         ))}
         {!compact && task.createdBy && (
           /* A face, but NOT a PersonButton: the whole card is already a click target for opening the task. */
-          <span className="text-[10px] text-white/30 inline-flex items-center gap-1">
+          <span className="text-micro text-faint inline-flex items-center gap-1">
             · by
             <Avatar name={resolveAssignee(task.createdBy).known ? creatorLabel(task.createdBy) : ''} userId={task.createdBy} photoUrl={resolveAssignee(task.createdBy).avatarUrl} size={12} />
             {creatorLabel(task.createdBy)}
@@ -1539,7 +1546,7 @@ function MentionText({ text, mentions }) {
   return s.split(re).map((p, i) => idByAt.has(p)
     ? <button key={i} type="button" title="View profile"
         onClick={e => { e.stopPropagation(); e.preventDefault(); openProfile(idByAt.get(p)); }}
-        className="rounded px-1 -mx-0.5 bg-violet-500/20 text-violet-200 font-medium hover:bg-violet-500/30 transition-colors">{p}</button>
+        className="rounded px-1 -mx-0.5 bg-brand/20 text-brand-text font-medium hover:bg-brand/30 transition-colors">{p}</button>
     : p);
 }
 
@@ -1602,12 +1609,12 @@ function MentionTextarea({ value, onChange, onMentionsChange, members, meId, onE
         onClick={(e) => openMenuFor(e.target.value, e.target.selectionStart ?? 0)}
         onBlur={onBlur} rows={rows} placeholder={placeholder} autoFocus={autoFocus} className={cx(className, 'w-full')} />
       {menu && pos && filtered.length > 0 && createPortal(
-        <div className="fixed z-[80] max-h-52 overflow-y-auto rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1"
+        <div className="fixed z-[80] max-h-52 overflow-y-auto rounded-xl border border-line bg-surface-raised shadow-2xl py-1"
           style={{ left: pos.left, bottom: pos.bottom, width: pos.width }}>
-          <div className="px-3 pt-1 pb-1.5 text-[10px] font-medium uppercase tracking-widest text-white/40">Mention someone</div>
+          <div className="px-3 pt-1 pb-1.5 text-micro font-medium uppercase tracking-widest text-faint">Mention someone</div>
           {filtered.map((m, i) => (
             <button key={m.userId} type="button" onMouseDown={(ev) => { ev.preventDefault(); pick(m); }} onMouseEnter={() => setActive(i)}
-              className={cx('w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left', i === active ? 'bg-violet-500/25 text-white' : 'text-white/85')}>
+              className={cx('w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left', i === active ? 'bg-brand/25 text-primary' : 'text-primary')}>
               <Avatar name={m.displayName || m.email} userId={m.userId} photoUrl={m.avatarUrl} size={20} />
               <span className="truncate">{m.displayName || m.email}</span>
             </button>
@@ -1706,18 +1713,18 @@ function TaskComments({ taskId }) {
   };
 
   return (
-    <div className="pt-5 border-t border-white/5">
+    <div className="pt-5 border-t border-line-subtle">
       <div className="flex items-center gap-2 mb-3">
-        <MessageSquare className="w-4 h-4 text-white/50" />
-        <div className="text-[10px] font-medium uppercase tracking-widest text-white/40">Discussion</div>
-        {items.length > 0 && <div className="text-[10px] text-white/30">{items.length}</div>}
+        <MessageSquare className="w-4 h-4 text-muted" />
+        <div className="text-micro font-medium uppercase tracking-widest text-faint">Discussion</div>
+        {items.length > 0 && <div className="text-micro text-faint">{items.length}</div>}
       </div>
 
       <div ref={scrollRef} className="max-h-72 overflow-y-auto no-scrollbar space-y-3 pr-1">
         {loading ? (
-          <div className="py-4 text-center text-[11px] text-white/40">Loading…</div>
+          <div className="py-4 text-center text-meta text-faint">Loading…</div>
         ) : items.length === 0 ? (
-          <div className="py-6 text-center text-[11px] text-white/40">No comments yet. Start the discussion.</div>
+          <div className="py-6 text-center text-meta text-faint">No comments yet. Start the discussion.</div>
         ) : items.map(c => {
           const mine = c.authorId === userId;
           const edited = c.updatedAt && c.createdAt && c.updatedAt !== c.createdAt;
@@ -1727,16 +1734,16 @@ function TaskComments({ taskId }) {
                 {/* `people` is members.list() (select('*')) so avatar_url/status_emoji are already loaded. */}
                 <PersonButton personId={c.authorId} className="gap-1.5 min-w-0" title={mine ? 'Your profile' : `View ${nameOf(c.authorId)}'s profile`}>
                   <Avatar name={nameOf(c.authorId)} userId={c.authorId} photoUrl={people[c.authorId]?.avatar_url} size={20} />
-                  <span className="text-xs font-medium text-white/80 truncate">
+                  <span className="text-xs font-medium text-secondary truncate">
                     {people[c.authorId]?.status_emoji && <span className="mr-1">{people[c.authorId].status_emoji}</span>}
                     {mine ? 'You' : nameOf(c.authorId)}
                   </span>
                 </PersonButton>
-                <span className="text-[10px] text-white/35 shrink-0">{timeAgo(c.createdAt)}{edited ? ' · edited' : ''}</span>
+                <span className="text-micro text-faint shrink-0">{timeAgo(c.createdAt)}{edited ? ' · edited' : ''}</span>
                 {mine && editId !== c.id && (
                   <span className="ml-auto flex items-center gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100 transition-opacity">
-                    <button onClick={() => { setEditId(c.id); setEditText(c.body); }} className="text-[10px] text-white/40 hover:text-white/80">Edit</button>
-                    <button onClick={() => remove(c.id)} className="text-[10px] text-white/40 hover:text-rose-300">Delete</button>
+                    <button onClick={() => { setEditId(c.id); setEditText(c.body); }} className="text-micro text-faint hover:text-secondary">Edit</button>
+                    <button onClick={() => remove(c.id)} className="text-micro text-faint hover:text-danger-text">Delete</button>
                   </span>
                 )}
               </div>
@@ -1744,14 +1751,14 @@ function TaskComments({ taskId }) {
                 <div className="space-y-1.5">
                   <textarea value={editText} onChange={e => setEditText(e.target.value)} rows={2}
                     onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(c.id); } else if (e.key === 'Escape') setEditId(null); }}
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white/90 outline-none focus:border-violet-400/50 resize-none" />
+                    className="w-full bg-fill border border-line rounded-lg px-3 py-2 text-xs text-primary outline-none focus:border-brand-hover/50 resize-none" />
                   <div className="flex items-center gap-3">
-                    <button onClick={() => saveEdit(c.id)} className="text-[10px] font-semibold text-violet-300 hover:text-violet-200">Save</button>
-                    <button onClick={() => setEditId(null)} className="text-[10px] text-white/40 hover:text-white/70">Cancel</button>
+                    <button onClick={() => saveEdit(c.id)} className="text-micro font-semibold text-brand-text hover:text-brand-text-hover">Save</button>
+                    <button onClick={() => setEditId(null)} className="text-micro text-faint hover:text-secondary">Cancel</button>
                   </div>
                 </div>
               ) : (
-                <div className="text-xs text-white/70 leading-relaxed whitespace-pre-wrap break-words rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2"><MentionText text={c.body} mentions={c.mentions} /></div>
+                <div className="text-xs text-secondary leading-relaxed whitespace-pre-wrap break-words rounded-lg border border-line-subtle bg-fill-subtle px-3 py-2"><MentionText text={c.body} mentions={c.mentions} /></div>
               )}
             </div>
           );
@@ -1761,9 +1768,9 @@ function TaskComments({ taskId }) {
       <div className="flex items-end gap-2 mt-3">
         <MentionTextarea value={text} onChange={setText} onMentionsChange={setMentions} members={members} meId={userId} onEnter={send} rows={2}
           placeholder="Write a comment…  (@ to mention, Enter to send)"
-          className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none" />
+          className="bg-fill border border-line rounded-lg px-3 py-2 text-xs text-primary placeholder-faint outline-none focus:border-brand-hover/50 resize-none" />
         <button onClick={send} disabled={!text.trim()}
-          className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity shrink-0">
+          className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-inverse text-inverse-fg hover:bg-inverse/90 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity shrink-0">
           <Send className="w-3.5 h-3.5" />Send
         </button>
       </div>
@@ -1793,12 +1800,12 @@ function AttachmentThumb({ attachment }) {
     return () => { on = false; };
   }, [attachment.storagePath, isImg]);
   if (isImg && url && !failed) {
-    return <img src={url} alt="" className="w-10 h-10 rounded-md object-cover border border-white/10 shrink-0" />;
+    return <img src={url} alt="" className="w-10 h-10 rounded-md object-cover border border-line shrink-0" />;
   }
   const Icon = isImg ? FileImage : FileText;
   return (
-    <div className="w-10 h-10 rounded-md border border-white/10 bg-white/5 flex items-center justify-center shrink-0">
-      <Icon className="w-4 h-4 text-white/50" />
+    <div className="w-10 h-10 rounded-md border border-line bg-fill flex items-center justify-center shrink-0">
+      <Icon className="w-4 h-4 text-muted" />
     </div>
   );
 }
@@ -1878,8 +1885,8 @@ function Attachments({ taskId, canEdit }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 flex items-center gap-1.5"><Paperclip className="w-3 h-3" />Attachments</div>
-        {count > 0 && <div className="text-[10px] text-white/40 font-medium tabular-nums">{count}/{attachmentsApi.MAX_PER_TASK}</div>}
+        <div className="text-micro font-medium uppercase tracking-widest text-faint flex items-center gap-1.5"><Paperclip className="w-3 h-3" />Attachments</div>
+        {count > 0 && <div className="text-micro text-faint font-medium tabular-nums">{count}/{attachmentsApi.MAX_PER_TASK}</div>}
       </div>
 
       {canEdit && (
@@ -1891,13 +1898,13 @@ function Attachments({ taskId, canEdit }) {
           onDragOver={e => { e.preventDefault(); setDragActive(true); }}
           onDragLeave={() => setDragActive(false)}
           onDrop={onDrop}
-          className={cx('mb-2 rounded-lg border border-dashed px-3 py-3 text-center cursor-pointer transition-colors outline-none focus-visible:border-violet-400/60 focus-visible:bg-violet-400/5',
-            dragActive ? 'border-violet-400/60 bg-violet-400/5' : 'border-white/15 bg-white/[0.02] hover:bg-white/[0.04]')}
+          className={cx('mb-2 rounded-lg border border-dashed px-3 py-3 text-center cursor-pointer transition-colors outline-none focus-visible:border-brand-hover/60 focus-visible:bg-brand-hover/5',
+            dragActive ? 'border-brand-hover/60 bg-brand-hover/5' : 'border-line bg-fill-subtle hover:bg-fill')}
         >
-          <div className="flex items-center justify-center gap-2 text-xs text-white/50">
+          <div className="flex items-center justify-center gap-2 text-xs text-muted">
             {uploading ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Uploading…</> : <><Upload className="w-3.5 h-3.5" />Drop files or click to upload</>}
           </div>
-          <div className="mt-0.5 text-[10px] text-white/30">Images, PDF, docs · up to 25 MB each</div>
+          <div className="mt-0.5 text-micro text-faint">Images, PDF, docs · up to 25 MB each</div>
           <input ref={fileRef} type="file" multiple className="hidden"
             accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv,application/zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
             onChange={onPick} />
@@ -1905,32 +1912,32 @@ function Attachments({ taskId, canEdit }) {
       )}
 
       {error && (
-        <div className="mb-2 flex items-start gap-1.5 text-[11px] text-rose-300/90">
+        <div className="mb-2 flex items-start gap-1.5 text-meta text-danger-text/90">
           <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-px" /><span className="flex-1 break-words">{error}</span>
-          <button onClick={() => setError('')} aria-label="Dismiss" className="text-white/40 hover:text-white/70 shrink-0"><X className="w-3.5 h-3.5" /></button>
+          <button onClick={() => setError('')} aria-label="Dismiss" className="text-faint hover:text-secondary shrink-0"><X className="w-3.5 h-3.5" /></button>
         </div>
       )}
 
       {items === null ? (
-        <div className="inline-flex items-center gap-2 text-[11px] text-white/40"><Loader2 className="w-3 h-3 animate-spin" />Loading…</div>
+        <div className="inline-flex items-center gap-2 text-meta text-faint"><Loader2 className="w-3 h-3 animate-spin" />Loading…</div>
       ) : count === 0 ? (
-        !canEdit && <div className="text-xs text-white/30 italic">No attachments.</div>
+        !canEdit && <div className="text-xs text-faint italic">No attachments.</div>
       ) : (
         <div className="space-y-1.5">
           {items.map(a => (
-            <div key={a.id} className="group flex items-center gap-2.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5">
+            <div key={a.id} className="group flex items-center gap-2.5 rounded-lg border border-line bg-fill px-2.5 py-1.5">
               <AttachmentThumb attachment={a} />
               <div className="min-w-0 flex-1">
-                <div className="text-sm text-white/90 truncate">{a.filename}</div>
-                <div className="text-[10px] text-white/35 truncate">
+                <div className="text-sm text-primary truncate">{a.filename}</div>
+                <div className="text-micro text-faint truncate">
                   {a.sizeBytes != null && `${attachHumanSize(a.sizeBytes)} · `}{creatorLabel(a.uploadedBy)} · {new Date(a.createdAt).toLocaleDateString()}
                 </div>
               </div>
               <button onClick={() => download(a)} aria-label={`Download ${a.filename}`}
-                className="shrink-0 text-white/40 hover:text-white/80 transition-colors p-1"><Download className="w-4 h-4" /></button>
+                className="shrink-0 text-faint hover:text-secondary transition-colors p-1"><Download className="w-4 h-4" /></button>
               {canDelete(a) && (
                 <button onClick={() => setConfirmDel(a)} aria-label={`Delete ${a.filename}`}
-                  className="shrink-0 text-white/30 hover:text-rose-300 focus:text-rose-300 transition-all p-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"><Trash2 className="w-4 h-4" /></button>
+                  className="shrink-0 text-faint hover:text-danger-text focus:text-danger-text transition-all p-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"><Trash2 className="w-4 h-4" /></button>
               )}
             </div>
           ))}
@@ -1969,9 +1976,9 @@ function TaskModal() {
   const doneSub = t.subtasks.filter(s => s.done).length;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center p-0 sm:p-6 animate-[fadeIn_.15s_ease]" onClick={closeEditing}>
-      <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Edit task" className="w-full sm:max-w-2xl max-h-screen sm:max-h-[85vh] overflow-hidden rounded-t-2xl sm:rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl flex flex-col">
-        <div className="px-6 pt-5 pb-3 border-b border-white/5" style={{ background: `linear-gradient(180deg, ${priority.bg}, transparent)` }}>
+    <div className="fixed inset-0 z-50 bg-overlay backdrop-blur-sm flex items-start sm:items-center justify-center p-0 sm:p-6 animate-[fadeIn_.15s_ease]" onClick={closeEditing}>
+      <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Edit task" className="w-full sm:max-w-2xl max-h-screen sm:max-h-[85vh] overflow-hidden rounded-t-2xl sm:rounded-2xl border border-line bg-surface-raised shadow-2xl flex flex-col">
+        <div className="px-6 pt-5 pb-3 border-b border-line-subtle" style={{ background: `linear-gradient(180deg, ${priority.bg}, transparent)` }}>
           <div className="flex items-center gap-2 mb-3">
             <AssigneeChip assigneeId={t.assigneeId} />
             {t.privacy === 'private' && <Badge icon={Lock}>Private</Badge>}
@@ -1986,15 +1993,15 @@ function TaskModal() {
             onChange={e => set({ title: e.target.value })}
             readOnly={!canEditTask}
             maxLength={500}
-            className="w-full bg-transparent text-xl sm:text-2xl font-semibold text-white placeholder-white/30 outline-none font-display read-only:cursor-default break-words"
+            className="w-full bg-transparent text-xl sm:text-2xl font-semibold text-primary placeholder-faint outline-none font-display read-only:cursor-default break-words"
             placeholder="Task title"
           />
           {t.createdBy && (() => { const cr = resolveAssignee(t.createdBy); return (
-            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-white/35">
+            <div className="mt-1.5 flex items-center gap-1.5 text-meta text-faint">
               <span>Added by</span>
               <PersonButton personId={t.createdBy} className="gap-1.5 min-w-0" title={`View ${creatorLabel(t.createdBy)}'s profile`}>
                 <Avatar name={cr.known ? creatorLabel(t.createdBy) : ''} userId={t.createdBy} photoUrl={cr.avatarUrl} size={16} />
-                <span className="text-white/55 hover:text-white/80 truncate">
+                <span className="text-muted hover:text-secondary truncate">
                   {cr.statusEmoji && <span className="mr-1">{cr.statusEmoji}</span>}
                   {creatorLabel(t.createdBy)}
                 </span>
@@ -2022,51 +2029,51 @@ function TaskModal() {
 
           <div className="flex flex-wrap gap-2">
             <ToggleChip active={t.urgent} onClick={() => set({ urgent: !t.urgent })} icon={Zap} label="Urgent" color="#fb923c" disabled={!canEditTask} />
-            <ToggleChip active={t.important} onClick={() => set({ important: !t.important })} icon={Flag} label="Important" color="#a78bfa" disabled={!canEditTask} />
+            <ToggleChip active={t.important} onClick={() => set({ important: !t.important })} icon={Flag} label="Important" color="#7c8cff" disabled={!canEditTask} />
             <ToggleChip active={t.blocked} onClick={() => set({ blocked: !t.blocked })} icon={PauseCircle} label="Blocked" color="#f43f5e" disabled={!canEditTask} />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5">Due date</div>
+              <div className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5">Due date</div>
               <input type="date" value={t.dueDate ? t.dueDate.slice(0,10) : ''} onChange={e => set({ dueDate: e.target.value ? new Date(e.target.value + 'T12:00:00').toISOString() : null })}
                 disabled={!canEditTask}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/90 outline-none focus:border-white/25 disabled:opacity-60 disabled:cursor-default" />
+                className="w-full bg-fill border border-line rounded-lg px-3 py-2 text-sm text-primary outline-none focus:border-line-strong disabled:opacity-60 disabled:cursor-default" />
             </div>
             <div>
-              <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5">Scheduled for</div>
+              <div className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5">Scheduled for</div>
               <input type="date" value={t.scheduledDate ? t.scheduledDate.slice(0,10) : ''} onChange={e => set({ scheduledDate: e.target.value ? new Date(e.target.value + 'T12:00:00').toISOString() : null })}
                 disabled={!canEditTask}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/90 outline-none focus:border-white/25 disabled:opacity-60 disabled:cursor-default" />
+                className="w-full bg-fill border border-line rounded-lg px-3 py-2 text-sm text-primary outline-none focus:border-line-strong disabled:opacity-60 disabled:cursor-default" />
             </div>
           </div>
 
           <div>
-            <div className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5">Notes</div>
+            <div className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5">Notes</div>
             <textarea value={t.description} onChange={e => set({ description: e.target.value })} rows={4}
               readOnly={!canEditTask}
               maxLength={20000}
               placeholder="Context, acceptance criteria, links…"
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white/90 outline-none focus:border-white/25 resize-y read-only:cursor-default read-only:opacity-80" />
+              className="w-full bg-fill border border-line rounded-lg px-3 py-2.5 text-sm text-primary outline-none focus:border-line-strong resize-y read-only:cursor-default read-only:opacity-80" />
           </div>
 
           {t.blocked && (
             <div>
-              <div className="text-[10px] font-medium uppercase tracking-widest text-rose-300/70 mb-1.5">Blocked because</div>
+              <div className="text-micro font-medium uppercase tracking-widest text-danger-text/70 mb-1.5">Blocked because</div>
               <input value={t.blockedReason} onChange={e => set({ blockedReason: e.target.value })} placeholder="Waiting on…"
                 readOnly={!canEditTask}
                 maxLength={1000}
-                className="w-full bg-rose-500/5 border border-rose-500/20 rounded-lg px-3 py-2 text-sm text-white/90 outline-none focus:border-rose-500/40 read-only:cursor-default" />
+                className="w-full bg-danger/5 border border-danger/20 rounded-lg px-3 py-2 text-sm text-primary outline-none focus:border-danger/40 read-only:cursor-default" />
             </div>
           )}
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <div className="text-[10px] font-medium uppercase tracking-widest text-white/40">Checklist</div>
-              {t.subtasks.length > 0 && <div className="text-[10px] text-white/40 font-medium tabular-nums">{doneSub}/{t.subtasks.length} done</div>}
+              <div className="text-micro font-medium uppercase tracking-widest text-faint">Checklist</div>
+              {t.subtasks.length > 0 && <div className="text-micro text-faint font-medium tabular-nums">{doneSub}/{t.subtasks.length} done</div>}
             </div>
             {t.subtasks.length > 0 && (
-              <div className="h-1 bg-white/5 rounded-full overflow-hidden mb-2.5">
+              <div className="h-1 bg-fill rounded-full overflow-hidden mb-2.5">
                 <div className="h-full rounded-full transition-all duration-300" style={{ width: `${(doneSub / t.subtasks.length) * 100}%`, background: `linear-gradient(90deg, ${priority.hex}, ${assignee.hex})` }} />
               </div>
             )}
@@ -2074,19 +2081,19 @@ function TaskModal() {
               {t.subtasks.map((s, i) => (
                 <div key={s.id} className="flex items-center gap-2 group">
                   <button onClick={() => canEditTask && toggleSubtask(t.id, s.id)} disabled={!canEditTask} aria-pressed={s.done}
-                    className={cx('shrink-0 w-4 h-4 rounded border-2 border-white/20 flex items-center justify-center transition-all', !canEditTask && 'cursor-default')}
+                    className={cx('shrink-0 w-4 h-4 rounded border-2 border-line-strong flex items-center justify-center transition-all', !canEditTask && 'cursor-default')}
                     style={{ borderColor: s.done ? priority.hex : undefined, background: s.done ? priority.hex : 'transparent' }}>
-                    {s.done && <Check className="w-2.5 h-2.5" style={{ color: '#0a0b11' }} strokeWidth={3} />}
+                    {s.done && <Check className="w-2.5 h-2.5" style={{ color: 'rgb(var(--color-canvas))' }} strokeWidth={3} />}
                   </button>
-                  <div className={cx('flex-1 text-sm', s.done ? 'text-white/40 line-through' : 'text-white/85')}>{s.title}</div>
+                  <div className={cx('flex-1 text-sm', s.done ? 'text-faint line-through' : 'text-primary')}>{s.title}</div>
                   {canEditTask && (
                     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                       <button onClick={() => moveSubtask(t.id, s.id, -1)} disabled={i === 0} aria-label="Move item up"
-                        className="text-white/30 hover:text-white/70 disabled:opacity-20 disabled:cursor-default transition-colors"><ChevronUp className="w-3.5 h-3.5" /></button>
+                        className="text-faint hover:text-secondary disabled:opacity-20 disabled:cursor-default transition-colors"><ChevronUp className="w-3.5 h-3.5" /></button>
                       <button onClick={() => moveSubtask(t.id, s.id, 1)} disabled={i === t.subtasks.length - 1} aria-label="Move item down"
-                        className="text-white/30 hover:text-white/70 disabled:opacity-20 disabled:cursor-default transition-colors"><ChevronDown className="w-3.5 h-3.5" /></button>
+                        className="text-faint hover:text-secondary disabled:opacity-20 disabled:cursor-default transition-colors"><ChevronDown className="w-3.5 h-3.5" /></button>
                       <button onClick={() => removeSubtask(t.id, s.id)} aria-label="Delete item"
-                        className="ml-0.5 text-white/30 hover:text-rose-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
+                        className="ml-0.5 text-faint hover:text-danger-text transition-colors"><X className="w-3.5 h-3.5" /></button>
                     </div>
                   )}
                 </div>
@@ -2095,18 +2102,18 @@ function TaskModal() {
                 <div className="flex gap-2 pt-1">
                   <input value={newSub} onChange={e => setNewSub(e.target.value)} onKeyDown={e => e.key === 'Enter' && submitSub()}
                     placeholder="Add checklist item…" maxLength={500}
-                    className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white/90 outline-none focus:border-violet-400/50" />
-                  <button onClick={submitSub} className="px-3 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white/70 text-sm">Add</button>
+                    className="flex-1 bg-fill border border-line rounded-lg px-3 py-1.5 text-sm text-primary outline-none focus:border-brand-hover/50" />
+                  <button onClick={submitSub} className="px-3 rounded-lg border border-line bg-fill hover:bg-fill-strong text-secondary text-sm">Add</button>
                 </div>
               ) : t.subtasks.length === 0 && (
-                <div className="text-xs text-white/30 italic">No checklist items.</div>
+                <div className="text-xs text-faint italic">No checklist items.</div>
               )}
             </div>
           </div>
 
           <Attachments taskId={t.id} canEdit={canEditTask} />
 
-          <div className="pt-4 border-t border-white/5 text-[11px] text-white/30 flex flex-wrap gap-x-4 gap-y-1">
+          <div className="pt-4 border-t border-line-subtle text-meta text-faint flex flex-wrap gap-x-4 gap-y-1">
             <span>Created {new Date(t.createdAt).toLocaleDateString()}</span>
             <span>Updated {new Date(t.updatedAt).toLocaleDateString()}</span>
             {t.completedAt && <span>Completed {new Date(t.completedAt).toLocaleDateString()}</span>}
@@ -2123,16 +2130,16 @@ function SelectPill({ label, value, options, onChange, color, disabled = false }
   const current = options.find(([v]) => v === value);
   const currentLabel = current ? current[1] : value;
   return (
-    <div className={cx('relative inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 h-8 text-xs text-white/85 transition-colors',
-      disabled ? 'opacity-60' : 'hover:bg-white/10 cursor-pointer')}>
+    <div className={cx('relative inline-flex items-center gap-1.5 rounded-full border border-line bg-fill px-3 h-8 text-xs text-primary transition-colors',
+      disabled ? 'opacity-60' : 'hover:bg-fill-strong cursor-pointer')}>
       {color && <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />}
-      <span className="text-white/40">{label}:</span>
-      <span className="text-white/95 font-medium">{currentLabel}</span>
-      {!disabled && <ChevronDown className="w-3 h-3 text-white/40" />}
+      <span className="text-faint">{label}:</span>
+      <span className="text-primary font-medium">{currentLabel}</span>
+      {!disabled && <ChevronDown className="w-3 h-3 text-faint" />}
       <select value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
         aria-label={label}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-default">
-        {options.map(([v,l]) => <option key={v} value={v} className="bg-[#0f1017] text-white">{l}</option>)}
+        {options.map(([v,l]) => <option key={v} value={v} className="bg-surface-raised text-primary">{l}</option>)}
       </select>
     </div>
   );
@@ -2197,33 +2204,33 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field', di
   }, [open, place]);
 
   const triggerCls = variant === 'filter'
-    ? 'relative inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] px-2.5 h-9 text-xs cursor-pointer transition-colors shrink-0'
-    : 'relative inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 px-3 h-8 text-xs cursor-pointer transition-colors';
+    ? 'relative inline-flex items-center gap-1.5 rounded-lg border border-line bg-fill-subtle hover:bg-fill px-2.5 h-9 text-xs cursor-pointer transition-colors shrink-0'
+    : 'relative inline-flex items-center gap-1.5 rounded-full border border-line bg-fill hover:bg-fill-strong px-3 h-8 text-xs cursor-pointer transition-colors';
 
   return (
     <>
       <button type="button" ref={btnRef} disabled={disabled} onClick={() => (open ? close() : openMenu())} aria-haspopup="listbox" aria-expanded={open} className={cx(triggerCls, disabled && 'opacity-60 !cursor-default')}>
-        {variant === 'filter' && <Filter className="w-3 h-3 text-white/40 shrink-0" />}
+        {variant === 'filter' && <Filter className="w-3 h-3 text-faint shrink-0" />}
         {curAv && !curAv.all && <Avatar name={curAv.unassigned || !curAv.known ? '' : (current ? current[1] : '')} userId={curAv.id} photoUrl={curAv.avatarUrl} size={16} />}
-        <span className="text-white/40 shrink-0">{label}:</span>
-        <span className="text-white/95 font-medium truncate max-w-[140px]">{current ? current[1] : (value || '')}</span>
-        <ChevronDown className={cx('w-3 h-3 text-white/40 shrink-0 transition-transform', open && 'rotate-180')} />
+        <span className="text-faint shrink-0">{label}:</span>
+        <span className="text-primary font-medium truncate max-w-[140px]">{current ? current[1] : (value || '')}</span>
+        <ChevronDown className={cx('w-3 h-3 text-faint shrink-0 transition-transform', open && 'rotate-180')} />
       </button>
       {open && pos && createPortal(
         <>
           <div className="fixed inset-0 z-[70]" onClick={close} />
           <div role="listbox" aria-label={label}
-            className={cx('fixed z-[71] rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl overflow-hidden flex flex-col transition-all duration-150 ease-out',
+            className={cx('fixed z-[71] rounded-xl border border-line bg-surface-raised shadow-2xl overflow-hidden flex flex-col transition-all duration-150 ease-out',
               shown ? 'opacity-100 translate-y-0' : cx('opacity-0', pos.up ? 'translate-y-1' : '-translate-y-1'))}
             style={{ left: pos.left, width: pos.width, ...(pos.up ? { bottom: pos.bottom } : { top: pos.top }) }}>
-            <div className="p-1.5 border-b border-white/5">
+            <div className="p-1.5 border-b border-line-subtle">
               <input autoFocus value={query} onChange={e => { setQuery(e.target.value); setActive(0); }} onKeyDown={onSearchKey}
                 placeholder="Search people…"
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 h-8 text-xs text-white/90 placeholder-white/40 outline-none focus:border-violet-400/50" />
+                className="w-full bg-fill border border-line rounded-lg px-2.5 h-8 text-xs text-primary placeholder-faint outline-none focus:border-brand-hover/50" />
             </div>
             <div ref={listRef} className="max-h-60 overflow-y-auto py-1">
               {filtered.length === 0 ? (
-                <div className="px-3 py-3 text-center text-[11px] text-white/40">No one found</div>
+                <div className="px-3 py-3 text-center text-meta text-faint">No one found</div>
               ) : filtered.map((o, i) => {
                 const av = avatarFor(o[0], o[1]);
                 const isSel = o[0] === value;
@@ -2231,9 +2238,9 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field', di
                   <button key={String(o[0]) || 'unassigned'} type="button" role="option" aria-selected={isSel}
                     onMouseEnter={() => setActive(i)} onClick={() => choose(o)}
                     className={cx('w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-left transition-colors',
-                      i === active ? 'bg-violet-500/25 text-white' : 'text-white/85 hover:bg-white/5')}>
+                      i === active ? 'bg-brand/25 text-primary' : 'text-primary hover:bg-fill')}>
                     {av.all ? (
-                      <span className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 bg-white/10 text-white/60"><Users className="w-3 h-3" /></span>
+                      <span className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 bg-fill-strong text-muted"><Users className="w-3 h-3" /></span>
                     ) : (
                       // Avatar, not a hand-rolled circle: it already does photo -> initials -> silhouette
                       // AND the light-mode swap that used to be duplicated inline right here.
@@ -2244,7 +2251,7 @@ function AssigneeSelect({ label, value, options, onChange, variant = 'field', di
                       {variant !== 'filter' && av.statusEmoji && <span className="mr-1">{av.statusEmoji}</span>}
                       {o[1]}
                     </span>
-                    {isSel && <Check className="w-3.5 h-3.5 text-violet-300 shrink-0" />}
+                    {isSel && <Check className="w-3.5 h-3.5 text-brand-text shrink-0" />}
                   </button>
                 );
               })}
@@ -2261,7 +2268,7 @@ function ToggleChip({ active, onClick, icon: Icon, label, color, disabled = fals
   return (
     <button onClick={onClick} disabled={disabled}
       className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-default',
-        active ? 'text-white' : cx('text-white/50 border-white/10 bg-white/5', !disabled && 'hover:bg-white/10'))}
+        active ? 'text-primary' : cx('text-muted border-line bg-fill', !disabled && 'hover:bg-fill-strong'))}
       style={active ? { background: `${color}22`, borderColor: `${color}55`, color } : {}}>
       <Icon className="w-3.5 h-3.5" />{label}
     </button>
@@ -2326,27 +2333,27 @@ function QuickAdd() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-24 px-4 animate-[fadeIn_.15s_ease]" onClick={() => setQuickAddOpen(false)}>
-      <div onClick={e => e.stopPropagation()} className="w-full max-w-xl rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl overflow-hidden">
-        <div className="p-4 border-b border-white/5 flex items-center gap-3">
-          <Sparkles className="w-4 h-4 text-violet-400" />
+    <div className="fixed inset-0 z-50 bg-overlay backdrop-blur-sm flex items-start justify-center pt-24 px-4 animate-[fadeIn_.15s_ease]" onClick={() => setQuickAddOpen(false)}>
+      <div onClick={e => e.stopPropagation()} className="w-full max-w-xl rounded-2xl border border-line bg-surface-raised shadow-2xl overflow-hidden">
+        <div className="p-4 border-b border-line-subtle flex items-center gap-3">
+          <Sparkles className="w-4 h-4 text-brand-text" />
           <input ref={inputRef} value={title} onChange={e => setTitle(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') submit(); }}
             placeholder="What needs to get done?" maxLength={500}
-            className="flex-1 bg-transparent text-lg text-white outline-none placeholder-white/30 font-display" />
-          <kbd className="text-[10px] text-white/30 bg-white/5 border border-white/10 rounded px-1.5 py-0.5">Enter</kbd>
+            className="flex-1 bg-transparent text-lg text-primary outline-none placeholder-faint font-display" />
+          <kbd className="text-micro text-faint bg-fill border border-line rounded px-1.5 py-0.5">Enter</kbd>
         </div>
         <div className="p-4 space-y-3">
           <div className="flex flex-wrap gap-2">
             <AssigneeSelect label="Assignee" value={assigneeId ?? ''}
               options={[['', 'Unassigned'], ...(meId ? [[meId, 'Me']] : []), ...members.filter(m => m.userId !== meId).map(m => [m.userId, m.displayName || m.email])]}
               onChange={v => setAssigneeId(v || null)} />
-            <div className="w-px h-6 bg-white/10 self-center mx-1" />
-            <span className="self-center text-[11px] font-medium text-white/40">Visibility</span>
+            <div className="w-px h-6 bg-fill-strong self-center mx-1" />
+            <span className="self-center text-meta font-medium text-faint">Visibility</span>
             <button onClick={() => setPrivacy(privacy === 'private' ? 'workspace' : 'private')}
               className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
-                privacy === 'private' ? 'text-white' : 'text-white/50 border-white/10 bg-white/5')}
-              style={privacy === 'private' ? { background: 'rgba(167,139,250,0.14)', borderColor: '#a78bfa55', color: '#a78bfa' } : {}}>
+                privacy === 'private' ? 'text-primary' : 'text-muted border-line bg-fill')}
+              style={privacy === 'private' ? { background: 'rgba(124,140,255,0.14)', borderColor: '#7c8cff55', color: '#7c8cff' } : {}}>
               <Lock className="w-3 h-3" />{privacy === 'private' ? 'Private' : 'Shared'}
             </button>
           </div>
@@ -2354,7 +2361,7 @@ function QuickAdd() {
             {Object.values(PRIORITIES).map(p => (
               <button key={p.id} onClick={() => setPriority(p.id)}
                 className={cx('inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all',
-                  priority === p.id ? 'text-white' : 'text-white/50 border-white/10 bg-white/5')}
+                  priority === p.id ? 'text-primary' : 'text-muted border-line bg-fill')}
                 style={priority === p.id ? { background: p.bg, borderColor: p.ring, color: p.hex } : {}}>
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: p.hex, boxShadow: `0 0 8px ${p.glow}` }} />{p.label}
               </button>
@@ -2362,16 +2369,16 @@ function QuickAdd() {
           </div>
           <div className="flex flex-wrap gap-2">
             <select value={project} onChange={e => setProject(e.target.value)} aria-label="Project"
-              className="bg-white/5 border border-white/10 rounded-full px-3 h-8 text-xs text-white/80 outline-none cursor-pointer">
-              {projects.map(p => <option key={p.id} value={p.id} className="bg-[#0f1017]">{p.icon} {p.name}</option>)}
+              className="bg-fill border border-line rounded-full px-3 h-8 text-xs text-secondary outline-none cursor-pointer">
+              {projects.map(p => <option key={p.id} value={p.id} className="bg-surface-raised">{p.icon} {p.name}</option>)}
             </select>
             <div className="flex-1" />
             <button onClick={submit} disabled={!title.trim()}
-              className="inline-flex items-center gap-1.5 rounded-full px-4 h-8 text-xs font-semibold bg-white text-black hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity">
+              className="inline-flex items-center gap-1.5 rounded-full px-4 h-8 text-xs font-semibold bg-inverse text-inverse-fg hover:bg-inverse/90 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity">
               <Plus className="w-3.5 h-3.5" />Add task
             </button>
           </div>
-          <div className="text-[11px] text-white/50">Tip: press <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded text-white/70">{shortcutLabel('N')}</kbd> or <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded text-white/70">N</kbd> anywhere to capture.</div>
+          <div className="text-meta text-muted">Tip: press <kbd className="px-1 py-0.5 bg-fill border border-line rounded text-secondary">{shortcutLabel('N')}</kbd> or <kbd className="px-1 py-0.5 bg-fill border border-line rounded text-secondary">N</kbd> anywhere to capture.</div>
         </div>
       </div>
     </div>
@@ -2432,7 +2439,7 @@ function CommandPalette() {
 
   const commands = useMemo(() => { const all = [
     { id: 'new-task', label: 'New task', icon: Plus, run: () => { setPaletteOpen(false); setQuickAddOpen(true); } },
-    { id: 'v-dash', label: 'Go to Dashboard', icon: LayoutDashboard, run: () => { setView('dashboard'); setPaletteOpen(false); } },
+    { id: 'v-dash', label: 'Go to Home', icon: LayoutDashboard, run: () => { setView('dashboard'); setPaletteOpen(false); } },
     { id: 'v-kan', label: 'Go to Kanban', icon: KanbanSquare, run: () => { setView('kanban'); setPaletteOpen(false); } },
     { id: 'v-mat', label: 'Go to Priority Matrix', icon: Grid3x3, run: () => { setView('matrix'); setPaletteOpen(false); } },
     { id: 'v-proj', label: 'Go to Projects', icon: FolderKanban, run: () => { setView('projects'); setPaletteOpen(false); } },
@@ -2488,25 +2495,25 @@ function CommandPalette() {
   if (!paletteOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-24 px-4 animate-[fadeIn_.15s_ease]" onClick={() => setPaletteOpen(false)}>
-      <div onClick={e => e.stopPropagation()} className="w-full max-w-xl rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl overflow-hidden">
-        <div className="p-4 border-b border-white/5 flex items-center gap-3">
-          <Command className="w-4 h-4 text-white/40" />
+    <div className="fixed inset-0 z-50 bg-overlay backdrop-blur-sm flex items-start justify-center pt-24 px-4 animate-[fadeIn_.15s_ease]" onClick={() => setPaletteOpen(false)}>
+      <div onClick={e => e.stopPropagation()} className="w-full max-w-xl rounded-2xl border border-line bg-surface-raised shadow-2xl overflow-hidden">
+        <div className="p-4 border-b border-line-subtle flex items-center gap-3">
+          <Command className="w-4 h-4 text-faint" />
           <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)} onKeyDown={handleKey}
             placeholder="Search tasks, messages, or run a command…"
-            className="flex-1 bg-transparent text-base text-white outline-none placeholder-white/30" />
-          <kbd className="text-[10px] text-white/30 bg-white/5 border border-white/10 rounded px-1.5 py-0.5">Esc</kbd>
+            className="flex-1 bg-transparent text-base text-primary outline-none placeholder-faint" />
+          <kbd className="text-micro text-faint bg-fill border border-line rounded px-1.5 py-0.5">Esc</kbd>
         </div>
         <div className="max-h-96 overflow-y-auto py-2">
           {results.cmds.length > 0 && (
             <div className="px-2">
-              <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-white/30">Commands</div>
+              <div className="px-3 py-1.5 text-micro font-medium uppercase tracking-widest text-faint">Commands</div>
               {results.cmds.map((c, i) => {
                 const active = i === idx;
                 return (
                   <button key={c.id} onClick={c.run} onMouseEnter={() => setIdx(i)}
                     className={cx('w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm transition-colors',
-                      active ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5')}>
+                      active ? 'bg-fill-strong text-primary' : 'text-secondary hover:bg-fill')}>
                     <c.icon className="w-4 h-4" />{c.label}
                   </button>
                 );
@@ -2515,14 +2522,14 @@ function CommandPalette() {
           )}
           {results.tasks.length > 0 && (
             <div className="px-2 pt-2">
-              <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-white/30">Tasks</div>
+              <div className="px-3 py-1.5 text-micro font-medium uppercase tracking-widest text-faint">Tasks</div>
               {results.tasks.map((t, i) => {
                 const ii = results.cmds.length + i;
                 const active = ii === idx;
                 return (
                   <button key={t.id} onClick={() => { setEditingTask(t); setPaletteOpen(false); }} onMouseEnter={() => setIdx(ii)}
                     className={cx('w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm transition-colors',
-                      active ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5')}>
+                      active ? 'bg-fill-strong text-primary' : 'text-secondary hover:bg-fill')}>
                     <PriorityDot priority={t.priority} />
                     <span className="flex-1 truncate">{t.title}</span>
                     <AssigneeChip assigneeId={t.assigneeId} showLabel={false} />
@@ -2533,7 +2540,7 @@ function CommandPalette() {
           )}
           {results.msgs.length > 0 && (
             <div className="px-2 pt-2">
-              <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-white/30">Messages</div>
+              <div className="px-3 py-1.5 text-micro font-medium uppercase tracking-widest text-faint">Messages</div>
               {results.msgs.map((m, i) => {
                 const ii = results.cmds.length + results.tasks.length + i;
                 const active = ii === idx;
@@ -2543,11 +2550,11 @@ function CommandPalette() {
                 return (
                   <button key={`${m.kind}-${m.id}`} onClick={() => openMessage(m)} onMouseEnter={() => setIdx(ii)}
                     className={cx('w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm transition-colors',
-                      active ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5')}>
+                      active ? 'bg-fill-strong text-primary' : 'text-secondary hover:bg-fill')}>
                     {/* The face says who; the DM/Team glyph stays as the small kind marker. */}
                     <Avatar name={sender.known ? who : ''} userId={m.senderId} photoUrl={sender.avatarUrl} size={20} />
                     <span className="flex-1 min-w-0 truncate">{m.body}</span>
-                    <span className="text-[10px] text-white/30 shrink-0 inline-flex items-center gap-1">
+                    <span className="text-micro text-faint shrink-0 inline-flex items-center gap-1">
                       <Icon className="w-3 h-3" />{who} · {m.kind === 'dm' ? 'DM' : 'Team'}
                     </span>
                   </button>
@@ -2555,7 +2562,7 @@ function CommandPalette() {
               })}
             </div>
           )}
-          {flat.length === 0 && <div className="px-4 py-8 text-center text-white/40 text-sm">No matches</div>}
+          {flat.length === 0 && <div className="px-4 py-8 text-center text-faint text-sm">No matches</div>}
         </div>
       </div>
     </div>
@@ -2582,25 +2589,25 @@ function Sidebar() {
   const item = (id, icon, label, badge) => (
     <button onClick={() => setView(id)}
       className={cx('w-full flex items-center gap-3 px-3 h-10 rounded-xl text-sm transition-all',
-        view === id ? 'bg-white/[0.08] text-white border border-white/10' : 'text-white/55 hover:text-white hover:bg-white/[0.04] border border-transparent')}>
+        view === id ? 'bg-fill-strong text-primary border border-line' : 'text-muted hover:text-primary hover:bg-fill border border-transparent')}>
       {React.createElement(icon, { className: 'w-4 h-4' })}
       <span className="flex-1 text-left font-medium">{label}</span>
       {badge != null && badge > 0 && (
-        <span className="text-[10px] font-semibold text-white/50 bg-white/5 border border-white/10 rounded-md px-1.5 h-5 flex items-center">{badge}</span>
+        <span className="text-micro font-semibold text-muted bg-fill border border-line rounded-md px-1.5 h-5 flex items-center">{badge}</span>
       )}
     </button>
   );
 
   return (
-    <aside className="hidden lg:flex flex-col w-64 shrink-0 border-r border-white/5 bg-[#0a0b11]">
-      <div className="px-5 pt-6 pb-5 border-b border-white/5">
+    <aside className="hidden lg:flex flex-col w-64 shrink-0 border-r border-line-subtle bg-surface">
+      <div className="px-5 pt-6 pb-5 border-b border-line-subtle">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/20">
-            <Sparkles className="w-4 h-4 text-white" />
+          <div className="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand/10">
+            <Sparkles className="w-4 h-4 text-brand-fg" />
           </div>
           <div className="leading-tight">
-            <div className="text-[15px] font-semibold text-white font-display tracking-tight">Command Center</div>
-            <div className="text-[10px] text-white/40 uppercase tracking-widest">Visual task management</div>
+            <div className="text-[15px] font-semibold text-primary font-brand tracking-tight">Corlyvo</div>
+            <div className="text-micro text-faint uppercase tracking-widest">Visual task management</div>
           </div>
         </div>
       </div>
@@ -2615,8 +2622,8 @@ function Sidebar() {
           </>
         ) : (
           <>
-            <div className="px-3 pb-2 text-[10px] font-medium uppercase tracking-widest text-white/30">Team</div>
-            {item('dashboard', LayoutDashboard, 'Dashboard')}
+            <div className="px-3 pb-2 text-micro font-medium uppercase tracking-widest text-faint">Team</div>
+            {item('dashboard', LayoutDashboard, 'Home')}
             {item('kanban', KanbanSquare, 'Kanban', counts.all)}
             {item('matrix', Grid3x3, 'Priority Matrix')}
             {item('projects', FolderKanban, 'Projects')}
@@ -2625,22 +2632,22 @@ function Sidebar() {
             {item('dms', MessagesSquare, 'Direct messages', dmUnread)}
             {canManageMembers && item('members', Users, 'Members')}
 
-            <div className="px-3 pt-5 pb-2 text-[10px] font-medium uppercase tracking-widest text-white/30">My views</div>
+            <div className="px-3 pt-5 pb-2 text-micro font-medium uppercase tracking-widest text-faint">My views</div>
             {item('mine', UserCog, 'My Tasks', counts.mine)}
             {item('private', Lock, 'Private tasks', counts.private)}
           </>
         )}
       </div>
 
-      <div className="p-3 border-t border-white/5">
-        <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3">
-          <div className="text-[10px] uppercase tracking-widest text-white/30 mb-1.5">Overview</div>
+      <div className="p-3 border-t border-line-subtle">
+        <div className="rounded-xl border border-line-subtle bg-fill-subtle p-3">
+          <div className="text-micro uppercase tracking-widest text-faint mb-1.5">Overview</div>
           <div className="flex items-baseline gap-2">
-            <div className="text-2xl font-semibold text-white font-display">{counts.all}</div>
-            <div className="text-[11px] text-white/40">open tasks</div>
+            <div className="text-2xl font-semibold text-primary font-display">{counts.all}</div>
+            <div className="text-meta text-faint">open tasks</div>
           </div>
           {counts.overdue > 0 && (
-            <div className="mt-2 text-[11px] text-rose-300 flex items-center gap-1">
+            <div className="mt-2 text-meta text-danger-text flex items-center gap-1">
               <Flame className="w-3 h-3" />{counts.overdue} overdue
             </div>
           )}
@@ -2650,14 +2657,14 @@ function Sidebar() {
             `me` is null until the roster loads; render nothing rather than a flash of placeholder identity. */}
         {me && (
           <button onClick={() => openProfile(meId)} title="Your profile"
-            className="mt-2 w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-left border border-transparent hover:bg-white/[0.04]">
+            className="mt-2 w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-left border border-transparent hover:bg-fill">
             <Avatar name={me.name} userId={meId} photoUrl={me.avatarUrl} size={30} />
             <div className="min-w-0 leading-tight">
-              <div className="text-[12px] font-medium text-white/85 truncate flex items-center gap-1">
+              <div className="text-note font-medium text-primary truncate flex items-center gap-1">
                 {me.statusEmoji && <span aria-hidden="true">{me.statusEmoji}</span>}
                 <span className="truncate">{me.name}</span>
               </div>
-              <div className="text-[10px] text-white/35 truncate">{me.statusText || 'View your profile'}</div>
+              <div className="text-micro text-faint truncate">{me.statusText || 'View your profile'}</div>
             </div>
           </button>
         )}
@@ -2703,19 +2710,19 @@ function MobileTabs() {
     <>
       {moreOpen && createPortal(
         <div className="lg:hidden fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label="More destinations">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setMoreOpen(false)} />
-          <div className="absolute bottom-0 left-0 right-0 rounded-t-2xl border-t border-white/10 bg-[#0f1017] pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-2xl" style={{ animation: 'slideUp .18s ease' }}>
-            <div className="mx-auto mb-1 h-1 w-9 rounded-full bg-white/15" />
-            <div className="px-4 py-2 text-[10px] font-medium uppercase tracking-widest text-white/35">More</div>
+          <div className="absolute inset-0 bg-overlay backdrop-blur-sm" onClick={() => setMoreOpen(false)} />
+          <div className="absolute bottom-0 left-0 right-0 rounded-t-2xl border-t border-line bg-surface-raised pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-2xl" style={{ animation: 'slideUp .18s ease' }}>
+            <div className="mx-auto mb-1 h-1 w-9 rounded-full bg-fill-strong" />
+            <div className="px-4 py-2 text-micro font-medium uppercase tracking-widest text-faint">More</div>
             <div className="px-2 pb-1">
               {more.map(it => (
                 <button key={it.id} onClick={() => go(it.id)}
                   className={cx('w-full flex items-center gap-3 px-3 h-12 rounded-xl text-left transition-colors',
-                    view === it.id ? 'bg-white/[0.08] text-white' : 'text-white/70 hover:bg-white/[0.04]')}>
+                    view === it.id ? 'bg-fill-strong text-primary' : 'text-secondary hover:bg-fill')}>
                   <it.icon className="w-4 h-4 shrink-0" />
                   <span className="flex-1 text-sm font-medium">{it.label}</span>
                   {it.badge > 0 && (
-                    <span className="min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-rose-50 text-[9px] font-bold leading-none flex items-center justify-center">{it.badge > 9 ? '9+' : it.badge}</span>
+                    <span className="min-w-[16px] h-4 px-1 rounded-full bg-danger text-brand-fg text-[9px] font-bold leading-none flex items-center justify-center">{it.badge > 9 ? '9+' : it.badge}</span>
                   )}
                 </button>
               ))}
@@ -2725,15 +2732,15 @@ function MobileTabs() {
         document.body
       )}
 
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 border-t border-white/5 bg-[#0a0b11]/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 border-t border-line-subtle bg-surface/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
         <div className="flex">
           {primary.map(it => (
             <button key={it.id} onClick={() => go(it.id)}
               className={cx('relative flex-1 min-w-0 py-2.5 flex flex-col items-center justify-center gap-0.5 transition-colors',
-                view === it.id ? 'text-white' : 'text-white/40')}>
+                view === it.id ? 'text-primary' : 'text-faint')}>
               <it.icon className="w-5 h-5" />
               {it.badge > 0 && (
-                <span className="absolute top-1.5 left-1/2 translate-x-2 min-w-[14px] h-3.5 px-1 rounded-full bg-rose-500 text-rose-50 text-[8px] font-bold leading-none flex items-center justify-center">{it.badge > 9 ? '9+' : it.badge}</span>
+                <span className="absolute top-1.5 left-1/2 translate-x-2 min-w-[14px] h-3.5 px-1 rounded-full bg-danger text-brand-fg text-[8px] font-bold leading-none flex items-center justify-center">{it.badge > 9 ? '9+' : it.badge}</span>
               )}
               <span className="text-[9px] font-medium tracking-wide">{it.label}</span>
             </button>
@@ -2741,9 +2748,9 @@ function MobileTabs() {
           {more.length > 0 && (
             <button onClick={() => setMoreOpen(o => !o)} aria-label="More destinations" aria-expanded={moreOpen}
               className={cx('relative flex-1 min-w-0 py-2.5 flex flex-col items-center justify-center gap-0.5 transition-colors',
-                moreActive || moreOpen ? 'text-white' : 'text-white/40')}>
+                moreActive || moreOpen ? 'text-primary' : 'text-faint')}>
               <MoreHorizontal className="w-5 h-5" />
-              {moreBadge > 0 && <span className="absolute top-1.5 left-1/2 translate-x-2 w-2 h-2 rounded-full bg-rose-500" />}
+              {moreBadge > 0 && <span className="absolute top-1.5 left-1/2 translate-x-2 w-2 h-2 rounded-full bg-danger" />}
               <span className="text-[9px] font-medium tracking-wide">More</span>
             </button>
           )}
@@ -2766,7 +2773,7 @@ function MobileTabs() {
 function notifVisual(type, light) {
   if (type === 'overdue')  return { Icon: AlertCircle, hex: '#f43f5e' };
   if (type === 'due_soon') return { Icon: Clock,       hex: '#fb923c' };
-  return { Icon: Bell, hex: light ? '#6d28d9' : '#c4b5fd' };
+  return { Icon: Bell, hex: light ? '#4650d6' : '#9aa3ff' };
 }
 
 function NotificationToast({ n, light, onOpen, onDismiss }) {
@@ -2785,7 +2792,7 @@ function NotificationToast({ n, light, onOpen, onDismiss }) {
   }, [id, onDismiss]);
   return (
     <button onClick={() => onOpen(n)}
-      className={cx('pointer-events-auto flex items-start gap-2.5 w-full text-left px-3.5 py-3 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl hover:border-white/20 transition-colors',
+      className={cx('pointer-events-auto flex items-start gap-2.5 w-full text-left px-3.5 py-3 rounded-xl border border-line bg-surface-raised shadow-2xl hover:border-line-strong transition-colors',
         leaving ? 'animate-[fadeSlideOut_.18s_ease_forwards]' : 'animate-[slideUp_.2s_ease]')}>
       <span className="mt-0.5 shrink-0 relative">
         {actor
@@ -2796,14 +2803,14 @@ function NotificationToast({ n, light, onOpen, onDismiss }) {
             </span>}
         {actor && (
           <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center border"
-            style={{ background: light ? '#ffffff' : '#0f1017', borderColor: light ? '#d1d5db' : 'rgba(255,255,255,0.12)' }}>
+            style={{ background: light ? '#ffffff' : '#191f35', borderColor: light ? '#d1d5db' : 'rgba(255,255,255,0.12)' }}>
             <tv.Icon className="w-2 h-2" style={{ color: tv.hex }} />
           </span>
         )}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-[11px] font-semibold text-white/90">{n.title || 'New notification'}</span>
-        <span className="block text-xs text-white/60 leading-snug">{n.message}</span>
+        <span className="block text-meta font-semibold text-primary">{n.title || 'New notification'}</span>
+        <span className="block text-xs text-muted leading-snug">{n.message}</span>
       </span>
     </button>
   );
@@ -3001,29 +3008,29 @@ function NotificationBell() {
       <div className="relative">
         <IconButton icon={Bell} label="Notifications" active={open} onClick={() => setOpen(o => !o)} />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-rose-50 text-[9px] font-bold leading-none flex items-center justify-center pointer-events-none shadow-[0_0_8px_rgba(244,63,94,0.5)]">
+          <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-danger text-brand-fg text-[9px] font-bold leading-none flex items-center justify-center pointer-events-none shadow-[0_0_8px_rgba(244,63,94,0.5)]">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
         {open && (
           <>
             <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-            <div className="absolute right-0 top-11 z-40 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl overflow-hidden">
-              <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/5">
-                <div className="text-xs font-semibold text-white/90">
+            <div className="absolute right-0 top-11 z-40 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-line bg-surface-raised shadow-2xl overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2.5 border-b border-line-subtle">
+                <div className="text-xs font-semibold text-primary">
                   Notifications
-                  {unreadCount > 0 && <span className="ml-1.5 text-[10px] font-medium text-white/40">{unreadCount} new</span>}
+                  {unreadCount > 0 && <span className="ml-1.5 text-micro font-medium text-faint">{unreadCount} new</span>}
                 </div>
                 <div className="flex items-center gap-3">
                   {unreadCount > 0 && (
                     <button onClick={markAll}
-                      className="inline-flex items-center gap-1 text-[10px] font-medium text-white/50 hover:text-white/90 transition-colors">
+                      className="inline-flex items-center gap-1 text-micro font-medium text-muted hover:text-primary transition-colors">
                       <Check className="w-3 h-3" />Mark all read
                     </button>
                   )}
                   {items.length > 0 && (
                     <button onClick={() => setConfirmClear(true)}
-                      className="inline-flex items-center gap-1 text-[10px] font-medium text-white/40 hover:text-rose-300 transition-colors">
+                      className="inline-flex items-center gap-1 text-micro font-medium text-faint hover:text-danger-text transition-colors">
                       <Trash2 className="w-3 h-3" />Clear all
                     </button>
                   )}
@@ -3031,17 +3038,17 @@ function NotificationBell() {
               </div>
               <div className="max-h-[70vh] overflow-y-auto no-scrollbar">
                 {loading ? (
-                  <div className="px-3 py-6 text-center text-[11px] text-white/40">Loading…</div>
+                  <div className="px-3 py-6 text-center text-meta text-faint">Loading…</div>
                 ) : items.length === 0 ? (
                   <div className="px-3 py-8 text-center">
-                    <Bell className="w-5 h-5 text-white/20 mx-auto mb-2" />
-                    <div className="text-[11px] text-white/40">You're all caught up</div>
+                    <Bell className="w-5 h-5 text-faint mx-auto mb-2" />
+                    <div className="text-meta text-faint">You're all caught up</div>
                   </div>
                 ) : (
                   items.map(n => (
                     <div key={n.id}
-                      className={cx('group relative flex items-stretch border-b border-white/5 last:border-b-0 transition-colors hover:bg-white/5',
-                        !n.read && 'bg-white/[0.03]',
+                      className={cx('group relative flex items-stretch border-b border-line-subtle last:border-b-0 transition-colors hover:bg-fill',
+                        !n.read && 'bg-fill-subtle',
                         exitingNotifIds.has(n.id) && 'animate-[fadeSlideOut_.18s_ease_forwards]')}>
                       <button onClick={() => handleOpen(n)}
                         className="min-w-0 flex-1 text-left flex items-start gap-2.5 pl-3 pr-1 py-2.5">
@@ -3059,20 +3066,20 @@ function NotificationBell() {
                                 </span>}
                             {actor && (
                               <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center border"
-                                style={{ background: light ? '#ffffff' : '#0f1017', borderColor: light ? '#d1d5db' : 'rgba(255,255,255,0.12)' }}>
+                                style={{ background: light ? '#ffffff' : '#191f35', borderColor: light ? '#d1d5db' : 'rgba(255,255,255,0.12)' }}>
                                 <tv.Icon className="w-2 h-2" style={{ color: tv.hex }} />
                               </span>
                             )}
-                            {!n.read && <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full" style={{ background: light ? '#7c3aed' : '#a78bfa', boxShadow: `0 0 6px ${light ? 'rgba(124,58,237,0.45)' : 'rgba(167,139,250,0.7)'}` }} />}
+                            {!n.read && <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full" style={{ background: light ? '#4650d6' : '#7c8cff', boxShadow: `0 0 6px ${light ? 'rgba(70,80,214,0.45)' : 'rgba(124,140,255,0.7)'}` }} />}
                           </span>
                           ); })()}
                         <span className="min-w-0 flex-1">
-                          <span className={cx('block text-xs leading-snug', n.read ? 'text-white/55' : 'text-white/90')}>{n.message}</span>
-                          <span className="block mt-0.5 text-[10px] text-white/35">{timeAgo(n.createdAt)}</span>
+                          <span className={cx('block text-xs leading-snug', n.read ? 'text-muted' : 'text-primary')}>{n.message}</span>
+                          <span className="block mt-0.5 text-micro text-faint">{timeAgo(n.createdAt)}</span>
                         </span>
                       </button>
                       <button onClick={() => deleteNotif(n.id)} aria-label="Delete notification"
-                        className="shrink-0 px-2.5 flex items-center text-white/30 hover:text-rose-300 focus:text-rose-300 transition-all opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100">
+                        className="shrink-0 px-2.5 flex items-center text-faint hover:text-danger-text focus:text-danger-text transition-all opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100">
                         <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -3137,7 +3144,7 @@ function CreateWorkspaceForm({ onCreated, submitLabel = 'Create workspace', auto
       <div className="au-in" style={{ animationDelay: '.2s' }}>
         <input value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus={autoFocus}
           placeholder="e.g. Acme Marketing"
-          className="w-full bg-black/30 border border-white/10 rounded-xl px-3 h-11 text-sm text-white placeholder-white/30 outline-none focus:border-violet-400/60 focus:bg-black/40 focus:ring-2 focus:ring-violet-500/20 transition-colors" />
+          className="w-full bg-input border border-line rounded-xl px-3 h-11 text-sm text-primary placeholder-faint outline-none focus:border-brand-hover/60 focus:bg-input-focus focus:ring-2 focus:ring-brand/20 transition-colors" />
       </div>
       {error && <AuthBanner tone="error">{error}</AuthBanner>}
       <div className="au-in" style={{ animationDelay: '.26s' }}>
@@ -3161,22 +3168,22 @@ function ConfirmModal({ open, title, message, confirmLabel = 'Delete', confirmDi
   if (!open) return null;
   return createPortal(
     <>
-      <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[60] bg-overlay backdrop-blur-sm" onClick={onClose} />
       <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
         <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title}
-          className="pointer-events-auto w-full max-w-sm rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5 outline-none"
+          className="pointer-events-auto w-full max-w-sm rounded-2xl border border-line bg-surface-raised shadow-2xl p-5 outline-none"
           style={{ animation: 'slideUp .2s ease' }}
           onClick={e => e.stopPropagation()}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}>
-          <h2 className="text-base font-semibold text-white mb-1">{title}</h2>
-          {message && <p className="text-xs text-white/55 mb-4 break-words">{message}</p>}
+          <h2 className="text-base font-semibold text-primary mb-1">{title}</h2>
+          {message && <p className="text-xs text-muted mb-4 break-words">{message}</p>}
           <div className="flex items-center justify-end gap-2">
             <button onClick={onClose}
-              className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">Cancel</button>
+              className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">Cancel</button>
             <button ref={btnRef} onClick={onConfirm} disabled={confirmDisabled}
-              className={cx('h-9 px-4 rounded-xl text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
-                confirmDisabled ? 'bg-rose-500/40 text-white/60 cursor-not-allowed'
-                  : tone === 'danger' ? 'bg-rose-500 hover:bg-rose-400' : 'bg-violet-500 hover:bg-violet-400')}>
+              className={cx('h-9 px-4 rounded-xl text-brand-fg text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
+                confirmDisabled ? 'bg-danger/40 text-muted cursor-not-allowed'
+                  : tone === 'danger' ? 'bg-danger hover:bg-danger-hover' : 'bg-brand hover:bg-brand-hover')}>
               <Icon className="w-3.5 h-3.5" />{confirmLabel}
             </button>
           </div>
@@ -3232,44 +3239,44 @@ function ProjectDeleteModal({ open, project, projects, taskCount, isOwner, onCan
 
   return createPortal(
     <>
-      <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={handleCancel} />
+      <div className="fixed inset-0 z-[60] bg-overlay backdrop-blur-sm" onClick={handleCancel} />
       <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
         <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Delete ${project.name}`}
-          className="pointer-events-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5 outline-none"
+          className="pointer-events-auto w-full max-w-md rounded-2xl border border-line bg-surface-raised shadow-2xl p-5 outline-none"
           style={{ animation: 'slideUp .2s ease' }}
           onClick={e => e.stopPropagation()}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); handleCancel(); } }}>
-          <h2 className="text-base font-semibold text-white mb-1 break-words">Delete “{project.name}”?</h2>
+          <h2 className="text-base font-semibold text-primary mb-1 break-words">Delete “{project.name}”?</h2>
 
-          {checking && <p className="text-xs text-white/55 mb-4">Checking for tasks…</p>}
-          {errored && <p className="text-xs text-rose-300 mb-4">Couldn't check this project's tasks. Please try again.</p>}
+          {checking && <p className="text-xs text-muted mb-4">Checking for tasks…</p>}
+          {errored && <p className="text-xs text-danger-text mb-4">Couldn't check this project's tasks. Please try again.</p>}
           {!checking && !errored && count === 0 && (
-            <p className="text-xs text-white/55 mb-4">This project has no tasks. It will be permanently deleted.</p>
+            <p className="text-xs text-muted mb-4">This project has no tasks. It will be permanently deleted.</p>
           )}
 
           {!checking && !errored && count > 0 && (
             <div className="space-y-2 mb-4">
-              <p className="text-xs text-white/55">“{project.name}” has {count} task{count === 1 ? '' : 's'}. Choose what happens to them:</p>
+              <p className="text-xs text-muted">“{project.name}” has {count} task{count === 1 ? '' : 's'}. Choose what happens to them:</p>
               <label className={cx('flex items-start gap-2.5 p-2.5 rounded-xl border transition-colors',
-                noDestination ? 'border-white/10 opacity-50 cursor-not-allowed'
-                  : cx('cursor-pointer', mode === 'unassign' ? 'border-violet-400/50 bg-violet-500/10' : 'border-white/10 hover:bg-white/5'))}>
+                noDestination ? 'border-line opacity-50 cursor-not-allowed'
+                  : cx('cursor-pointer', mode === 'unassign' ? 'border-brand-hover/50 bg-brand/10' : 'border-line hover:bg-fill'))}>
                 <input type="radio" name="pdmode" checked={mode === 'unassign'} disabled={noDestination}
                   onChange={() => setMode('unassign')} className="mt-0.5" />
-                <span className="text-xs text-white/80 min-w-0 flex-1">
-                  <span className="font-medium text-white">Keep the tasks</span>
+                <span className="text-xs text-secondary min-w-0 flex-1">
+                  <span className="font-medium text-primary">Keep the tasks</span>
                   {noDestination
                     ? <> — unavailable: this is the only project, so there is nowhere to move them.</>
                     : <> — move them to another project, then delete “{project.name}”.</>}
                   {!noDestination && (
                     <span className="mt-2 flex items-center gap-2">
-                      <span className="text-[11px] text-white/50 shrink-0">Move to</span>
+                      <span className="text-meta text-muted shrink-0">Move to</span>
                       {/* A real picker over the workspace's REAL projects. Rendering it inside the label
                           is fine — a <select> is not a nested button — but stopPropagation keeps a click
                           on the dropdown from also toggling the radio underneath it. */}
                       <select value={destId} onChange={e => { setDest(e.target.value); setMode('unassign'); }}
                         onClick={e => e.stopPropagation()}
                         aria-label="Destination project for the kept tasks"
-                        className="flex-1 min-w-0 h-8 px-2 rounded-lg bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-violet-400/50">
+                        className="flex-1 min-w-0 h-8 px-2 rounded-lg bg-fill border border-line text-xs text-primary outline-none focus:border-brand-hover/50">
                         {candidates.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                       </select>
                     </span>
@@ -3278,16 +3285,16 @@ function ProjectDeleteModal({ open, project, projects, taskCount, isOwner, onCan
               </label>
               {isOwner && (
                 <label className={cx('flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-colors',
-                  mode === 'cascade' ? 'border-rose-400/50 bg-rose-500/10' : 'border-white/10 hover:bg-white/5')}>
+                  mode === 'cascade' ? 'border-danger-hover/50 bg-danger/10' : 'border-line hover:bg-fill')}>
                   <input type="radio" name="pdmode" checked={mode === 'cascade'} onChange={() => setMode('cascade')} className="mt-0.5" />
-                  <span className="text-xs text-white/80"><span className="font-medium text-rose-200">Delete the tasks too</span> — permanently removes the project and its {count} task{count === 1 ? '' : 's'}. Can't be undone.</span>
+                  <span className="text-xs text-secondary"><span className="font-medium text-danger-text">Delete the tasks too</span> — permanently removes the project and its {count} task{count === 1 ? '' : 's'}. Can't be undone.</span>
                 </label>
               )}
               {mode === 'cascade' && (
                 <div className="pt-1">
-                  <p className="text-[11px] text-white/50 mb-1.5">Type <span className="text-white/80 font-medium">{project.name}</span> to confirm:</p>
+                  <p className="text-meta text-muted mb-1.5">Type <span className="text-secondary font-medium">{project.name}</span> to confirm:</p>
                   <input autoFocus value={confirmText} onChange={e => setConfirmText(e.target.value)}
-                    className="w-full h-9 px-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-rose-400/50"
+                    className="w-full h-9 px-3 rounded-xl bg-fill border border-line text-xs text-primary outline-none focus:border-danger-hover/50"
                     placeholder={project.name} aria-label="Type the project name to confirm deletion" />
                 </div>
               )}
@@ -3296,11 +3303,11 @@ function ProjectDeleteModal({ open, project, projects, taskCount, isOwner, onCan
 
           <div className="flex items-center justify-end gap-2">
             <button onClick={handleCancel}
-              className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">Cancel</button>
+              className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">Cancel</button>
             <button onClick={doConfirm} disabled={!canConfirm}
-              className={cx('h-9 px-4 rounded-xl text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
-                !canConfirm ? 'bg-white/10 text-white/40 cursor-not-allowed'
-                  : mode === 'cascade' ? 'bg-rose-500 hover:bg-rose-400' : 'bg-violet-500 hover:bg-violet-400')}>
+              className={cx('h-9 px-4 rounded-xl text-brand-fg text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
+                !canConfirm ? 'bg-fill-strong text-faint cursor-not-allowed'
+                  : mode === 'cascade' ? 'bg-danger hover:bg-danger-hover' : 'bg-brand hover:bg-brand-hover')}>
               <Trash2 className="w-3.5 h-3.5" />
               {/* Name the DESTINATION in the button, so the irreversible action states where the tasks
                   are actually going rather than leaving it to the radio label above. */}
@@ -3330,29 +3337,29 @@ function UpgradeModal() {
   const go = (path) => { dismissUpgrade(); navigate(path); };
   return createPortal(
     <>
-      <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={dismissUpgrade} />
+      <div className="fixed inset-0 z-[60] bg-overlay backdrop-blur-sm" onClick={dismissUpgrade} />
       <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
-        <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5"
+        <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-line bg-surface-raised shadow-2xl p-5"
           style={{ animation: 'slideUp .2s ease' }}
           onClick={e => e.stopPropagation()}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); dismissUpgrade(); } }}>
           <div className="flex items-center gap-2 mb-3">
-            <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0 shadow-lg shadow-fuchsia-500/25">
-              <Sparkles className="w-4 h-4 text-white" />
+            <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-brand to-brand-alt flex items-center justify-center shrink-0 shadow-lg shadow-brand/15">
+              <Sparkles className="w-4 h-4 text-brand-fg" />
             </span>
-            <div className="text-[10px] font-semibold uppercase tracking-widest text-violet-300/80">{tier.name} feature</div>
-            <button onClick={dismissUpgrade} aria-label="Close" className="ml-auto text-white/40 hover:text-white/80 transition-colors"><X className="w-4 h-4" /></button>
+            <div className="text-micro font-semibold uppercase tracking-widest text-brand-text/80">{tier.name} feature</div>
+            <button onClick={dismissUpgrade} aria-label="Close" className="ml-auto text-faint hover:text-secondary transition-colors"><X className="w-4 h-4" /></button>
           </div>
-          <h2 className="text-base font-semibold text-white mb-1">{meta.isLimit ? meta.label : `Unlock ${meta.label}`}</h2>
-          {meta.blurb && <p className="text-xs text-white/55 mb-4 leading-relaxed">{meta.blurb}</p>}
-          <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 mb-4 text-[12px] text-white/60">
-            Included on <span className="font-semibold text-white/85">{tier.name}</span> and up.
+          <h2 className="text-base font-semibold text-primary mb-1">{meta.isLimit ? meta.label : `Unlock ${meta.label}`}</h2>
+          {meta.blurb && <p className="text-xs text-muted mb-4 leading-relaxed">{meta.blurb}</p>}
+          <div className="rounded-xl border border-line bg-fill-subtle px-3 py-2.5 mb-4 text-note text-muted">
+            Included on <span className="font-semibold text-primary">{tier.name}</span> and up.
           </div>
           <div className="flex items-center justify-end gap-2">
             <button onClick={() => go('/pricing')}
-              className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">See all plans</button>
+              className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">See all plans</button>
             <button onClick={() => go(`/checkout?plan=${tier.id}`)}
-              className="h-9 px-4 rounded-xl text-white text-xs font-semibold bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:shadow-lg hover:shadow-fuchsia-500/30 transition-all inline-flex items-center gap-1.5">
+              className="h-9 px-4 rounded-xl text-brand-fg text-xs font-semibold bg-brand-gradient-cta hover:shadow-lg hover:shadow-brand/15 transition-all inline-flex items-center gap-1.5">
               Upgrade to {tier.name}<ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -3375,10 +3382,10 @@ function PlanPreviewBanner() {
   };
   return (
     <div className="fixed bottom-20 lg:bottom-3 inset-x-0 lg:inset-x-auto lg:right-3 z-[55] flex justify-center lg:justify-end px-3 pointer-events-none">
-      <div className="pointer-events-auto inline-flex items-center gap-2 px-3 h-9 rounded-full border border-amber-400/30 bg-amber-500/15 backdrop-blur text-[11px] text-amber-100 shadow-lg">
-        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+      <div className="pointer-events-auto inline-flex items-center gap-2 px-3 h-9 rounded-full border border-warning-hover/30 bg-warning/15 backdrop-blur text-meta text-warning-text shadow-lg">
+        <span className="w-1.5 h-1.5 rounded-full bg-warning-hover shrink-0" />
         Previewing the <span className="font-semibold">{entitlements.plan.name}</span> plan
-        <button onClick={exit} className="ml-1 font-semibold text-amber-200 hover:text-white underline underline-offset-2 transition-colors">Exit</button>
+        <button onClick={exit} className="ml-1 font-semibold text-warning-text hover:text-primary underline underline-offset-2 transition-colors">Exit</button>
       </div>
     </div>
   );
@@ -3434,55 +3441,55 @@ function ProjectModal({ open, onClose, project }) {
 
   return (
     <>
-      <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[60] bg-overlay backdrop-blur-sm" onClick={onClose} />
       <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 pointer-events-none">
         <form onSubmit={submit}
-          className="pointer-events-auto w-full max-w-sm rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5"
+          className="pointer-events-auto w-full max-w-sm rounded-2xl border border-line bg-surface-raised shadow-2xl p-5"
           style={{ animation: 'slideUp .2s ease' }}
           onClick={e => e.stopPropagation()}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-semibold text-white">{editing ? 'Edit project' : 'New project'}</h2>
-            <button type="button" onClick={onClose} className="text-white/40 hover:text-white/80 transition-colors"><X className="w-4 h-4" /></button>
+            <h2 className="text-base font-semibold text-primary">{editing ? 'Edit project' : 'New project'}</h2>
+            <button type="button" onClick={onClose} className="text-faint hover:text-secondary transition-colors"><X className="w-4 h-4" /></button>
           </div>
 
-          <label className="block text-[11px] font-medium text-white/50 mb-1">Name</label>
+          <label className="block text-meta font-medium text-muted mb-1">Name</label>
           <input autoFocus value={name} onChange={e => setName(e.target.value)} maxLength={80} placeholder="e.g. Marketing"
-            className="w-full h-9 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white/90 outline-none focus:border-white/25 transition-colors mb-4" />
+            className="w-full h-9 px-3 rounded-xl bg-fill border border-line text-sm text-primary outline-none focus:border-line-strong transition-colors mb-4" />
 
           <div className="flex items-start gap-3 mb-3">
             <div className="flex-1">
-              <label className="block text-[11px] font-medium text-white/50 mb-1.5">Color</label>
+              <label className="block text-meta font-medium text-muted mb-1.5">Color</label>
               <div className="flex flex-wrap gap-1.5">
                 {PROJECT_PALETTE.map(c => (
                   <button key={c} type="button" onClick={() => setColor(c)} aria-label={`Use color ${c}`}
-                    className={cx('w-6 h-6 rounded-lg transition-transform', color === c ? 'ring-2 ring-white/70 scale-110' : 'hover:scale-105')}
+                    className={cx('w-6 h-6 rounded-lg transition-transform', color === c ? 'ring-2 ring-primary/70 scale-110' : 'hover:scale-105')}
                     style={{ background: c }} />
                 ))}
               </div>
             </div>
             <div>
-              <label className="block text-[11px] font-medium text-white/50 mb-1.5">Preview</label>
+              <label className="block text-meta font-medium text-muted mb-1.5">Preview</label>
               <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold"
                 style={{ background: color + '22', color, border: `1px solid ${color}44` }}>{icon || '◇'}</div>
             </div>
           </div>
 
-          <label className="block text-[11px] font-medium text-white/50 mb-1.5">Icon</label>
+          <label className="block text-meta font-medium text-muted mb-1.5">Icon</label>
           <div className="flex flex-wrap gap-1.5 mb-4">
             {PROJECT_ICONS.map(ic => (
               <button key={ic} type="button" onClick={() => setIcon(ic)}
                 className={cx('w-7 h-7 rounded-lg text-sm flex items-center justify-center transition-colors',
-                  icon === ic ? 'bg-white/15 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10')}>{ic}</button>
+                  icon === ic ? 'bg-fill-strong text-primary' : 'bg-fill text-muted hover:bg-fill-strong')}>{ic}</button>
             ))}
           </div>
 
-          {err && <p className="text-[11px] text-rose-300 mb-3">{err}</p>}
+          {err && <p className="text-meta text-danger-text mb-3">{err}</p>}
           <div className="flex items-center justify-end gap-2">
             <button type="button" onClick={onClose}
-              className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">Cancel</button>
+              className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">Cancel</button>
             <button type="submit" disabled={busy}
-              className={cx('h-9 px-4 rounded-xl text-xs font-semibold text-white transition-colors', busy ? 'bg-violet-500/40 cursor-not-allowed' : 'bg-violet-500 hover:bg-violet-400')}>
+              className={cx('h-9 px-4 rounded-xl text-xs font-semibold text-brand-fg transition-colors', busy ? 'bg-brand/40 cursor-not-allowed' : 'bg-brand hover:bg-brand-hover')}>
               {editing ? 'Save changes' : 'Create project'}
             </button>
           </div>
@@ -3497,15 +3504,15 @@ function CreateWorkspaceModal({ open, onClose }) {
   if (!open) return null;
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-50 bg-overlay backdrop-blur-sm" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-6 pointer-events-none">
-        <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5"
+        <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-line bg-surface-raised shadow-2xl p-5"
           style={{ animation: 'slideUp .2s ease' }} onClick={e => e.stopPropagation()}>
           <div className="flex items-center justify-between mb-1">
-            <h2 className="text-base font-semibold text-white">Create workspace</h2>
-            <button onClick={onClose} className="text-white/40 hover:text-white/80 transition-colors"><X className="w-4 h-4" /></button>
+            <h2 className="text-base font-semibold text-primary">Create workspace</h2>
+            <button onClick={onClose} className="text-faint hover:text-secondary transition-colors"><X className="w-4 h-4" /></button>
           </div>
-          <p className="text-xs text-white/45 mb-4">A fresh space for a team's tasks, projects, and chat. You'll be its owner.</p>
+          <p className="text-xs text-faint mb-4">A fresh space for a team's tasks, projects, and chat. You'll be its owner.</p>
           <CreateWorkspaceForm submitLabel="Create workspace" onCreated={onClose} />
         </div>
       </div>
@@ -3522,46 +3529,46 @@ function WorkspaceSwitcher() {
   const [createOpen, setCreateOpen] = useState(false);
   const current = workspaces.find(w => w.id === currentWorkspaceId);
   if (!current) return null;
-  const badgeCls = 'w-4 h-4 rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-[8px] font-bold text-white shrink-0';
+  const badgeCls = 'w-4 h-4 rounded-md bg-brand flex items-center justify-center text-[8px] font-bold text-brand-fg shrink-0';
   const initial = (name) => (name || 'W').slice(0, 1).toUpperCase();
   return (
     <div className="relative shrink-0">
       <button onClick={() => setOpen(o => !o)} title="Switch or create workspace"
-        className="inline-flex items-center gap-1.5 h-9 px-2.5 rounded-xl border border-white/10 bg-white/[0.03] text-xs hover:bg-white/[0.06] cursor-pointer transition-colors">
+        className="inline-flex items-center gap-1.5 h-9 px-2.5 rounded-xl border border-line bg-fill-subtle text-xs hover:bg-fill cursor-pointer transition-colors">
         <span className={badgeCls}>{initial(current.name)}</span>
-        <span className="font-medium text-white/90 max-w-[90px] sm:max-w-[140px] truncate">{current.name}</span>
-        <ChevronDown className="w-3 h-3 text-white/40 shrink-0" />
+        <span className="font-medium text-primary max-w-[90px] sm:max-w-[140px] truncate">{current.name}</span>
+        <ChevronDown className="w-3 h-3 text-faint shrink-0" />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-11 z-40 w-56 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1.5">
-            <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-white/35">Workspaces</div>
+          <div className="absolute left-0 top-11 z-40 w-56 rounded-xl border border-line bg-surface-raised shadow-2xl py-1.5">
+            <div className="px-3 py-1.5 text-micro font-medium uppercase tracking-widest text-faint">Workspaces</div>
             {workspaces.map(w => (
               <button key={w.id} onClick={() => { switchWorkspace(w.id); setOpen(false); }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/80 hover:bg-white/5 hover:text-white transition-colors">
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-fill hover:text-primary transition-colors">
                 <span className={badgeCls}>{initial(w.name)}</span>
                 <span className="flex-1 truncate text-left">{w.name}</span>
-                {w.id === currentWorkspaceId && <Check className="w-3.5 h-3.5 text-violet-400 shrink-0" />}
+                {w.id === currentWorkspaceId && <Check className="w-3.5 h-3.5 text-brand-text shrink-0" />}
               </button>
             ))}
             {pendingInvites.length > 0 && (
               <>
-                <div className="my-1 h-px bg-white/10" />
-                <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-white/35">Invitations</div>
+                <div className="my-1 h-px bg-fill-strong" />
+                <div className="px-3 py-1.5 text-micro font-medium uppercase tracking-widest text-faint">Invitations</div>
                 {pendingInvites.map(inv => (
                   <button key={inv.id} onClick={() => { setOpen(false); acceptInvitation(inv.token).catch(err => reportError(err, 'invitations.accept')); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/80 hover:bg-white/5 hover:text-white transition-colors">
-                    <span className="w-4 h-4 rounded-md bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center shrink-0"><UserPlus className="w-2.5 h-2.5 text-emerald-300" /></span>
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-fill hover:text-primary transition-colors">
+                    <span className="w-4 h-4 rounded-md bg-success/20 border border-success-hover/30 flex items-center justify-center shrink-0"><UserPlus className="w-2.5 h-2.5 text-success-text" /></span>
                     <span className="flex-1 text-left truncate">Join {inv.workspaceName}</span>
                   </button>
                 ))}
               </>
             )}
-            <div className="my-1 h-px bg-white/10" />
+            <div className="my-1 h-px bg-fill-strong" />
             <button onClick={() => { setOpen(false); if (entitlements.atWorkspaceLimit) requestUpgrade('workspaces'); else setCreateOpen(true); }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/80 hover:bg-white/5 hover:text-white transition-colors">
-              <span className="w-4 h-4 rounded-md border border-dashed border-white/30 flex items-center justify-center shrink-0"><Plus className="w-2.5 h-2.5" /></span>
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-fill hover:text-primary transition-colors">
+              <span className="w-4 h-4 rounded-md border border-dashed border-line-strong flex items-center justify-center shrink-0"><Plus className="w-2.5 h-2.5" /></span>
               <span className="flex-1 text-left">Create workspace</span>
             </button>
           </div>
@@ -3584,32 +3591,32 @@ function TopBar() {
   const showFilters = ['kanban', 'projects', 'schedule', 'matrix'].includes(view);
 
   const syncDot = {
-    live: 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]',
-    connecting: 'bg-amber-400 animate-pulse',
-    offline: 'bg-rose-400',
+    live: 'bg-success-hover shadow-[0_0_8px_rgba(52,211,153,0.6)]',
+    connecting: 'bg-warning-hover animate-pulse',
+    offline: 'bg-danger-hover',
   }[syncStatus];
   const syncLabel = { live: 'Synced', connecting: 'Connecting…', offline: 'Offline' }[syncStatus];
 
   return (
     <>
-    <header className="sticky top-0 z-20 border-b border-white/5 bg-[#0a0b11]/80 backdrop-blur-xl">
+    <header className="sticky top-0 z-20 border-b border-line-subtle bg-surface/80 backdrop-blur-xl">
       <div className="flex items-center gap-2 px-4 lg:px-6 h-14">
         <div className="lg:hidden flex items-center gap-2 mr-2">
-          <div className="w-7 h-7 rounded-md bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center">
-            <Sparkles className="w-3.5 h-3.5 text-white" />
+          <div className="w-7 h-7 rounded-md bg-brand-gradient flex items-center justify-center">
+            <Sparkles className="w-3.5 h-3.5 text-brand-fg" />
           </div>
         </div>
 
         <WorkspaceSwitcher />
 
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40 pointer-events-none" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-faint pointer-events-none" />
           <input id="global-search" value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
             placeholder="Search tasks… ( / )"
-            className="search-input w-full bg-black/30 border border-white/10 rounded-xl pl-9 pr-8 h-9 text-sm text-white placeholder-white/45 outline-none focus:border-violet-400/50 focus:bg-black/40 transition-colors" />
+            className="search-input w-full bg-input border border-line rounded-xl pl-9 pr-8 h-9 text-sm text-primary placeholder-faint outline-none focus:border-brand-hover/50 focus:bg-input-focus transition-colors" />
           {filters.search && (
             <button onClick={() => setFilters(f => ({ ...f, search: '' }))} aria-label="Clear search"
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-md flex items-center justify-center text-white/40 hover:text-white/80 hover:bg-white/10 transition-colors">
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-md flex items-center justify-center text-faint hover:text-secondary hover:bg-fill-strong transition-colors">
               <X className="w-3 h-3" />
             </button>
           )}
@@ -3625,9 +3632,9 @@ function TopBar() {
 
         <div className="flex-1" />
 
-        <div className="hidden md:flex items-center gap-1.5 px-2.5 h-8 rounded-lg border border-white/5 bg-white/[0.02]" title={syncLabel}>
+        <div className="hidden md:flex items-center gap-1.5 px-2.5 h-8 rounded-lg border border-line-subtle bg-fill-subtle" title={syncLabel}>
           <span className={cx('w-1.5 h-1.5 rounded-full transition-colors', syncDot)} />
-          <span className="text-[10px] font-medium text-white/50">{syncLabel}</span>
+          <span className="text-micro font-medium text-muted">{syncLabel}</span>
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -3636,31 +3643,31 @@ function TopBar() {
           )}
           <IconButton icon={Command} label={`Command palette (${shortcutLabel('K')})`} onClick={() => setPaletteOpen(true)} />
           <button onClick={() => setQuickAddOpen(true)}
-            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-white text-black text-xs font-semibold hover:bg-white/90 transition-colors">
-            <Plus className="w-3.5 h-3.5" />New<kbd className="hidden sm:inline text-[9px] text-black/50 bg-black/10 rounded px-1 py-0.5">N</kbd>
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-inverse text-inverse-fg text-xs font-semibold hover:bg-inverse/90 transition-colors">
+            <Plus className="w-3.5 h-3.5" />New<kbd className="hidden sm:inline text-[9px] text-inverse-fg/50 bg-inverse-fg/10 rounded px-1 py-0.5">N</kbd>
           </button>
           <NotificationBell />
           <div className="relative">
             {/* The account menu trigger IS your avatar (the near-universal convention). Nothing is lost:
                 settings, theme, export/import, plans and sign-out all still live inside this menu. */}
             <button onClick={() => setMenuOpen(o => !o)} aria-label="Account and settings" aria-expanded={menuOpen}
-              className="rounded-full focus:outline-none focus-visible:ring-1 focus-visible:ring-violet-400/60 hover:opacity-80 transition-opacity">
+              className="rounded-full focus:outline-none focus-visible:ring-1 focus-visible:ring-brand-hover/60 hover:opacity-80 transition-opacity">
               <Avatar name={currentMember?.display_name || currentMember?.email} userId={meId} photoUrl={currentMember?.avatar_url} size={28} />
             </button>
             {menuOpen && (
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setMenuOpen(false)} />
-                <div className="absolute right-0 top-11 z-40 w-64 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1.5">
+                <div className="absolute right-0 top-11 z-40 w-64 rounded-xl border border-line bg-surface-raised shadow-2xl py-1.5">
                   {currentMember && (
-                    <div className="px-3 py-2.5 border-b border-white/5 flex items-start gap-2.5">
+                    <div className="px-3 py-2.5 border-b border-line-subtle flex items-start gap-2.5">
                       <Avatar name={currentMember.display_name || currentMember.email} userId={meId} photoUrl={currentMember.avatar_url} size={32} />
                       <div className="min-w-0 flex-1">
-                        <div className="text-xs font-medium text-white/90 truncate">
+                        <div className="text-xs font-medium text-primary truncate">
                           {currentMember.status_emoji && <span className="mr-1">{currentMember.status_emoji}</span>}
                           {currentMember.display_name || currentMember.email}
                         </div>
-                        <div className="text-[10px] text-white/40 mt-0.5 capitalize truncate">{myRole || currentMember.role} · <span className="text-violet-300/80 normal-case">{entitlements.plan.name}</span></div>
-                        <div className="text-[10px] text-white/30 mt-0.5 truncate normal-case">{currentMember.status_text || currentMember.email}</div>
+                        <div className="text-micro text-faint mt-0.5 capitalize truncate">{myRole || currentMember.role} · <span className="text-brand-text/80 normal-case">{entitlements.plan.name}</span></div>
+                        <div className="text-micro text-faint mt-0.5 truncate normal-case">{currentMember.status_text || currentMember.email}</div>
                       </div>
                     </div>
                   )}
@@ -3675,13 +3682,13 @@ function TopBar() {
                   {membershipsLoaded && !isGuest && (
                     <MenuItem icon={Upload} onClick={() => { setMenuOpen(false); fileRef.current?.click(); }}>Import JSON</MenuItem>
                   )}
-                  <div className="h-px bg-white/5 my-1" />
+                  <div className="h-px bg-fill my-1" />
                   <MenuItem icon={Sparkles} onClick={() => { setMenuOpen(false); navigate('/pricing'); }}>Plans &amp; pricing</MenuItem>
                   <MenuItem icon={FileText} onClick={() => { setMenuOpen(false); navigate('/terms'); }}>Terms of Service</MenuItem>
                   <MenuItem icon={Shield} onClick={() => { setMenuOpen(false); navigate('/privacy'); }}>Privacy Policy</MenuItem>
                   <MenuItem icon={User} onClick={() => { setProfileOpen(true); setMenuOpen(false); }}>Edit profile</MenuItem>
                   <MenuItem icon={KeyRound} onClick={() => { setPasswordModalOpen(true); setMenuOpen(false); }}>Change password</MenuItem>
-                  <div className="h-px bg-white/5 my-1" />
+                  <div className="h-px bg-fill my-1" />
                   <MenuItem icon={LogOut} onClick={() => { onSignOut?.(); setMenuOpen(false); }}>Sign out</MenuItem>
                 </div>
                 <input ref={fileRef} type="file" accept=".json,application/json" className="hidden"
@@ -3798,75 +3805,75 @@ function ProfileModal({ onClose }) {
       {/* z-[80]: ProfileModal must layer ABOVE ProfileView (z-[70]) — "Edit profile" inside the profile
           card mounts this as a sibling body portal, and at the old z-[60] the editor painted invisibly
           BEHIND the card (clicking seemed to do nothing while focus sat in the hidden panel). */}
-      <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm" onClick={handleClose} />
+      <div className="fixed inset-0 z-[80] bg-overlay backdrop-blur-sm" onClick={handleClose} />
       <div className="fixed inset-0 z-[80] flex items-center justify-center p-6 pointer-events-none">
         <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Edit profile"
-          className="pointer-events-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5 outline-none max-h-[85vh] overflow-y-auto"
+          className="pointer-events-auto w-full max-w-md rounded-2xl border border-line bg-surface-raised shadow-2xl p-5 outline-none max-h-[85vh] overflow-y-auto"
           style={{ animation: 'slideUp .2s ease' }}
           onClick={e => e.stopPropagation()}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); handleClose(); } }}>
-          <h2 className="text-base font-semibold text-white mb-4">Edit profile</h2>
+          <h2 className="text-base font-semibold text-primary mb-4">Edit profile</h2>
 
           <div className="flex items-center gap-3 mb-4">
             <Avatar name={displayName || currentMember?.email} userId={currentMember?.id} photoUrl={preview || avatarPath} size={56} />
             <div className="flex flex-col gap-1.5">
               <button onClick={() => fileRef.current?.click()} disabled={busy}
-                className="h-8 px-3 rounded-lg bg-white/5 border border-white/10 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors disabled:opacity-50">
+                className="h-8 px-3 rounded-lg bg-fill border border-line text-xs font-medium text-secondary hover:bg-fill-strong transition-colors disabled:opacity-50">
                 {busy ? 'Working…' : 'Upload photo'}
               </button>
-              {(preview || avatarPath) && <button onClick={removePhoto} className="text-[11px] text-white/40 hover:text-rose-300 text-left">Remove photo</button>}
+              {(preview || avatarPath) && <button onClick={removePhoto} className="text-meta text-faint hover:text-danger-text text-left">Remove photo</button>}
               <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden"
                 onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; pickAvatar(f); }} />
             </div>
           </div>
 
-          <label className="block text-[11px] text-white/50 mb-1">Display name</label>
+          <label className="block text-meta text-muted mb-1">Display name</label>
           <input value={displayName} onChange={e => setDisplayName(e.target.value)} maxLength={60}
-            className="w-full h-9 px-3 mb-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-violet-400/50" />
+            className="w-full h-9 px-3 mb-3 rounded-xl bg-fill border border-line text-xs text-primary outline-none focus:border-brand-hover/50" />
 
-          <label className="block text-[11px] text-white/50 mb-1">Status</label>
+          <label className="block text-meta text-muted mb-1">Status</label>
           <div className="flex gap-2 mb-2">
             <button type="button" onClick={() => setEmojiOpen(o => !o)} aria-expanded={emojiOpen} aria-label="Pick a status emoji"
               className={cx('w-14 h-9 rounded-xl border flex items-center justify-center text-base transition-colors',
-                emojiOpen ? 'border-violet-400/50 bg-violet-500/20' : 'border-white/10 bg-white/5 hover:bg-white/10')}>
-              {statusEmoji || <Plus className="w-3.5 h-3.5 text-white/40" />}
+                emojiOpen ? 'border-brand-hover/50 bg-brand/20' : 'border-line bg-fill hover:bg-fill-strong')}>
+              {statusEmoji || <Plus className="w-3.5 h-3.5 text-faint" />}
             </button>
             <input value={statusText} onChange={e => setStatusText(e.target.value)} maxLength={80} placeholder="What are you up to?" aria-label="Status text"
-              className="flex-1 h-9 px-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-violet-400/50" />
+              className="flex-1 h-9 px-3 rounded-xl bg-fill border border-line text-xs text-primary outline-none focus:border-brand-hover/50" />
           </div>
           {/* An INLINE grid, not a floating popover: the modal panel is overflow-y-auto, which would clip an
               absolutely-positioned one. Picking is the only input path — the server accepts emoji only, so a
               free-text field was never a valid way to set this. */}
-          {/* Theme-aware like Avatar: bg-black/30 read as a dark slab once the light overrides turned
+          {/* Theme-aware like Avatar: bg-input read as a dark slab once the light overrides turned
               the modal panel white, and the white-alpha hover was invisible on it. */}
           {emojiOpen && (
-            <div className={cx('mb-3 p-2 rounded-xl border border-white/10', light ? 'bg-black/5' : 'bg-black/30')}>
+            <div className={cx('mb-3 p-2 rounded-xl border border-line', light ? 'bg-fill' : 'bg-input')}>
               <div className="grid grid-cols-8 gap-1">
                 {STATUS_EMOJIS.map(em => (
                   <button key={em} type="button" onClick={() => { setStatusEmoji(em); setEmojiOpen(false); }} aria-label={`Status emoji ${em}`}
-                    className={cx('h-8 rounded-lg text-base transition-colors', light ? 'hover:bg-black/10' : 'hover:bg-white/10',
-                      statusEmoji === em && 'bg-violet-500/20 ring-1 ring-violet-400/50')}>{em}</button>
+                    className={cx('h-8 rounded-lg text-base transition-colors', light ? 'hover:bg-fill-strong' : 'hover:bg-fill-strong',
+                      statusEmoji === em && 'bg-brand/20 ring-1 ring-brand-hover/50')}>{em}</button>
                 ))}
               </div>
               {statusEmoji && (
                 <button type="button" onClick={() => { setStatusEmoji(''); setEmojiOpen(false); }}
-                  className="mt-1.5 w-full h-7 rounded-lg text-[11px] text-white/50 hover:text-rose-300 hover:bg-white/5 transition-colors">Clear emoji</button>
+                  className="mt-1.5 w-full h-7 rounded-lg text-meta text-muted hover:text-danger-text hover:bg-fill transition-colors">Clear emoji</button>
               )}
             </div>
           )}
 
-          <label className="block text-[11px] text-white/50 mb-1">Bio</label>
+          <label className="block text-meta text-muted mb-1">Bio</label>
           <textarea value={bio} onChange={e => setBio(e.target.value)} maxLength={280} rows={3}
-            className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-white outline-none focus:border-violet-400/50 resize-none" />
-          <div className="text-[10px] text-white/30 text-right mb-3">{bio.length}/280</div>
+            className="w-full px-3 py-2 rounded-xl bg-fill border border-line text-xs text-primary outline-none focus:border-brand-hover/50 resize-none" />
+          <div className="text-micro text-faint text-right mb-3">{bio.length}/280</div>
 
-          {err && <p className="text-xs text-rose-300 mb-3 break-words">{err}</p>}
+          {err && <p className="text-xs text-danger-text mb-3 break-words">{err}</p>}
 
           <div className="flex items-center justify-end gap-2">
             <button onClick={handleClose}
-              className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">Cancel</button>
+              className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">Cancel</button>
             <button onClick={save} disabled={busy}
-              className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors disabled:opacity-50">Save</button>
+              className="h-9 px-4 rounded-xl bg-brand hover:bg-brand-hover text-brand-fg text-xs font-semibold transition-colors disabled:opacity-50">Save</button>
           </div>
         </div>
       </div>
@@ -3888,7 +3895,7 @@ function PersonButton({ personId, children, className, title }) {
   return (
     <button type="button" title={title || 'View profile'}
       onClick={e => { e.stopPropagation(); e.preventDefault(); openProfile(personId); }}
-      className={cx('inline-flex items-center rounded-md hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-violet-400/60 transition-opacity', className)}>
+      className={cx('inline-flex items-center rounded-md hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-brand-hover/60 transition-opacity', className)}>
       {children}
     </button>
   );
@@ -3906,9 +3913,10 @@ function PersonButton({ personId, children, className, title }) {
  * person has LEFT; for a GUEST the roster is row-scoped server-side (self + task co-participants + DM
  * peers), so an ACTIVE member can be absent — that gets the "limited" state, never a false "has left".
  *
- * Portaled to <body> — which does NOT keep it dark: data-theme is stamped on <html> and AppShell's
- * global [data-theme="light"] overrides match portaled nodes too, so in light mode this panel renders
- * LIGHT like every other modal. (An earlier comment here claimed the opposite; it was wrong.)
+ * Portaled to <body> — which does NOT keep it dark. data-theme is stamped on <html>, and the design
+ * tokens are declared there, so a portaled node inherits the light values like any other node: in
+ * light mode this panel renders LIGHT like every other modal. (An earlier comment claimed the
+ * opposite; it was wrong then, and it is wrong now for a different reason.)
  */
 function ProfileView() {
   const { profileUserId, closeProfile, personOf, startDm, isGuest } = useApp();
@@ -3943,10 +3951,10 @@ function ProfileView() {
 
   return createPortal(
     <>
-      <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm" onClick={close} />
+      <div className="fixed inset-0 z-[70] bg-overlay backdrop-blur-sm" onClick={close} />
       <div className="fixed inset-0 z-[70] flex items-center justify-center p-6 pointer-events-none">
         <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={p ? `${p.name} profile` : 'Profile'}
-          className="pointer-events-auto w-full max-w-sm rounded-2xl border border-white/10 bg-[#0f1017] shadow-2xl p-5 outline-none"
+          className="pointer-events-auto w-full max-w-sm rounded-2xl border border-line bg-surface-raised shadow-2xl p-5 outline-none"
           style={{ animation: 'slideUp .2s ease' }}
           onClick={e => e.stopPropagation()}
           onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } }}>
@@ -3956,8 +3964,8 @@ function ProfileView() {
                "no longer in this workspace" about an active admin was simply false. */
             <div className="text-center py-4">
               <Avatar name="" userId={profileUserId} size={72} className="mx-auto mb-3" />
-              <h2 className="text-base font-semibold text-white mb-1">{isGuest ? 'Profile unavailable' : 'No longer in this workspace'}</h2>
-              <p className="text-xs text-white/50">
+              <h2 className="text-base font-semibold text-primary mb-1">{isGuest ? 'Profile unavailable' : 'No longer in this workspace'}</h2>
+              <p className="text-xs text-muted">
                 {isGuest
                   ? 'As a guest you can see full profiles only for people on your tasks or in your direct messages.'
                   : "This person has left, so their profile isn't available here."}
@@ -3967,35 +3975,35 @@ function ProfileView() {
             <>
               <div className="flex flex-col items-center text-center">
                 <Avatar name={p.name} userId={p.id} photoUrl={p.avatarUrl} size={72} className="mb-3" />
-                <h2 className="text-base font-semibold text-white break-words">{p.name}{p.isSelf && <span className="text-white/40 font-normal"> (you)</span>}</h2>
+                <h2 className="text-base font-semibold text-primary break-words">{p.name}{p.isSelf && <span className="text-faint font-normal"> (you)</span>}</h2>
                 <div className="mt-1.5 flex items-center gap-2">
-                  <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full border border-white/10 bg-white/5 text-white/60">{p.role}</span>
+                  <span className="text-micro uppercase tracking-wide px-2 py-0.5 rounded-full border border-line bg-fill text-muted">{p.role}</span>
                 </div>
                 {(p.statusEmoji || p.statusText) && (
-                  <div className="mt-3 inline-flex items-center gap-1.5 max-w-full px-2.5 py-1 rounded-full bg-white/5 border border-white/10">
+                  <div className="mt-3 inline-flex items-center gap-1.5 max-w-full px-2.5 py-1 rounded-full bg-fill border border-line">
                     {p.statusEmoji && <span className="text-sm leading-none">{p.statusEmoji}</span>}
-                    {p.statusText && <span className="text-xs text-white/70 truncate">{p.statusText}</span>}
+                    {p.statusText && <span className="text-xs text-secondary truncate">{p.statusText}</span>}
                   </div>
                 )}
-                {p.bio && <p className="mt-3 text-xs text-white/60 leading-relaxed whitespace-pre-wrap break-words">{p.bio}</p>}
-                {p.email && <p className="mt-3 text-[11px] text-white/35 break-all">{p.email}</p>}
+                {p.bio && <p className="mt-3 text-xs text-muted leading-relaxed whitespace-pre-wrap break-words">{p.bio}</p>}
+                {p.email && <p className="mt-3 text-meta text-faint break-all">{p.email}</p>}
               </div>
 
-              {dmErr && <p className="mt-3 text-xs text-rose-300 text-center break-words">{dmErr}</p>}
+              {dmErr && <p className="mt-3 text-xs text-danger-text text-center break-words">{dmErr}</p>}
 
               <div className="flex items-center justify-end gap-2 mt-5">
                 <button onClick={close}
-                  className="h-9 px-4 rounded-xl border border-white/10 bg-white/5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">Close</button>
+                  className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">Close</button>
                 {p.isSelf ? (
                   <button onClick={() => setEditing(true)}
-                    className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5">
+                    className="h-9 px-4 rounded-xl bg-brand hover:bg-brand-hover text-brand-fg text-xs font-semibold transition-colors inline-flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5" />Edit profile
                   </button>
                 ) : (
                   /* Failure keeps the card OPEN with an inline error — the old handler closed
                      immediately and swallowed the rejection, so a failed start looked like a no-op. */
                   <button onClick={message} disabled={dmBusy}
-                    className="h-9 px-4 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
+                    className="h-9 px-4 rounded-xl bg-brand hover:bg-brand-hover text-brand-fg text-xs font-semibold transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
                     <MessageSquare className="w-3.5 h-3.5" />{dmBusy ? 'Opening…' : 'Message'}
                   </button>
                 )}
@@ -4010,7 +4018,7 @@ function ProfileView() {
   );
 }
 function MenuItem({ icon: Icon, children, onClick }) {
-  return <button onClick={onClick} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/80 hover:bg-white/5 hover:text-white transition-colors">
+  return <button onClick={onClick} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-fill hover:text-primary transition-colors">
     <Icon className="w-3.5 h-3.5" />{children}
   </button>;
 }
@@ -4018,15 +4026,15 @@ function FilterPill({ label, value, options, onChange }) {
   const current = options.find(([v]) => v === value);
   const currentLabel = current ? current[1] : value;
   return (
-    <div className="relative inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] px-2.5 h-9 text-xs cursor-pointer transition-colors shrink-0">
-      <Filter className="w-3 h-3 text-white/40 shrink-0" />
-      <span className="text-white/40 shrink-0">{label}:</span>
-      <span className="text-white/90 font-medium">{currentLabel}</span>
-      <ChevronDown className="w-3 h-3 text-white/40 shrink-0" />
+    <div className="relative inline-flex items-center gap-1.5 rounded-lg border border-line bg-fill-subtle hover:bg-fill px-2.5 h-9 text-xs cursor-pointer transition-colors shrink-0">
+      <Filter className="w-3 h-3 text-faint shrink-0" />
+      <span className="text-faint shrink-0">{label}:</span>
+      <span className="text-primary font-medium">{currentLabel}</span>
+      <ChevronDown className="w-3 h-3 text-faint shrink-0" />
       <select value={value} onChange={e => onChange(e.target.value)}
         aria-label={label}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
-        {options.map(([v,l]) => <option key={v} value={v} className="bg-[#0f1017] text-white">{l}</option>)}
+        {options.map(([v,l]) => <option key={v} value={v} className="bg-surface-raised text-primary">{l}</option>)}
       </select>
     </div>
   );
@@ -4039,23 +4047,23 @@ function ViewHeader({ title, subtitle, accent }) {
   return (
     <div className="mb-6 flex items-end justify-between gap-4">
       <div>
-        <h1 className="text-2xl lg:text-3xl font-semibold text-white font-display tracking-tight" style={{ letterSpacing: '-0.01em' }}>{title}</h1>
-        {subtitle && <p className="text-sm text-white/45 mt-1">{subtitle}</p>}
+        <h1 className="text-2xl lg:text-3xl font-semibold text-primary font-display tracking-tight" style={{ letterSpacing: '-0.01em' }}>{title}</h1>
+        {subtitle && <p className="text-sm text-faint mt-1">{subtitle}</p>}
       </div>
-      {accent && <div className="hidden sm:block text-[10px] uppercase tracking-widest text-white/30">{accent}</div>}
+      {accent && <div className="hidden sm:block text-micro uppercase tracking-widest text-faint">{accent}</div>}
     </div>
   );
 }
 
 function Card({ children, className, title, subtitle, action, accent }) {
   return (
-    <section className={cx('relative rounded-2xl border border-white/[0.06] bg-gradient-to-br from-white/[0.025] to-white/[0.005] overflow-hidden', className)}>
+    <section className={cx('relative rounded-2xl border border-line-subtle bg-gradient-to-br from-fill-subtle to-fill-subtle overflow-hidden', className)}>
       {accent && <div className="absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${accent}, transparent)` }} />}
       {(title || action) && (
         <div className="flex items-center justify-between px-5 pt-4 pb-3">
           <div>
-            {title && <h3 className="text-[13px] font-semibold text-white font-display tracking-tight">{title}</h3>}
-            {subtitle && <p className="text-[11px] text-white/40 mt-0.5">{subtitle}</p>}
+            {title && <h3 className="text-compact font-semibold text-primary font-display tracking-tight">{title}</h3>}
+            {subtitle && <p className="text-meta text-faint mt-0.5">{subtitle}</p>}
           </div>
           {action}
         </div>
@@ -4077,14 +4085,14 @@ function DashboardView() {
   if (tasks.length === 0) {
     return (
       <div className="space-y-6">
-        <ViewHeader title="Dashboard" subtitle="Your team's command center — tasks, priorities, and messages in one place." accent={new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric'})} />
+        <ViewHeader title="Home" subtitle="Your team's tasks, priorities, and messages in one place." accent={new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric'})} />
         <FirstRunPanel />
       </div>
     );
   }
 
   const open = tasks.filter(t => t.status !== 'done');
-  const ranked = [...open].map(t => ({ t, s: getNextBestScore(t) })).sort((a,b) => b.s - a.s);
+  const ranked = [...open].map(t => ({ t, s: getUpNextScore(t) })).sort((a,b) => b.s - a.s);
   const top3 = ranked.slice(0, 3);
   const myUpcoming = open.filter(t => t.assigneeId === meId && t.dueDate).sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 5);
   const othersUpcoming = open.filter(t => t.assigneeId && t.assigneeId !== meId && t.dueDate).sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 5);
@@ -4113,16 +4121,16 @@ function DashboardView() {
 
   return (
     <div className="space-y-6">
-      <ViewHeader title="Dashboard" subtitle="Today's ranked priorities, flagged blockers, and where your energy should go." accent={new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric'})} />
+      <ViewHeader title="Home" subtitle="Today's ranked priorities, flagged blockers, and where your energy should go." accent={new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric'})} />
 
-      <Card title="Top 3 priorities right now" subtitle="Auto-ranked by priority, due date, urgency, and blockers." accent="#a78bfa">
+      <Card title="Up next" subtitle="Auto-ranked by priority, due date, urgency, and blockers." accent="#7c8cff">
         {top3.length === 0 ? (
           <EmptyState icon={Sparkles} text="Nothing on fire. Beautiful." />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {top3.map((r, i) => (
               <div key={r.t.id} className="relative">
-                <div className="absolute -top-2 -left-2 z-10 w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white text-xs font-bold flex items-center justify-center shadow-lg shadow-fuchsia-500/30 font-display">
+                <div className="absolute -top-2 -left-2 z-10 w-7 h-7 rounded-full bg-brand text-brand-fg text-xs font-bold flex items-center justify-center shadow-lg shadow-brand/15 font-display">
                   {i + 1}
                 </div>
                 <Tooltip content={`Why: ${scoreRationale(r.t)}`} className="block w-full">
@@ -4135,10 +4143,10 @@ function DashboardView() {
       </Card>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="My tasks" value={counts.mine} color="#a78bfa" icon={<span className="w-2 h-2 rounded-full" style={{background:'#a78bfa'}} />} onClick={() => setView('mine')} />
+        <StatCard label="My tasks" value={counts.mine} color="#7c8cff" icon={<span className="w-2 h-2 rounded-full" style={{background:'#7c8cff'}} />} onClick={() => setView('mine')} />
         <StatCard label="Assigned to others" value={counts.others} color="#34d399" icon={<span className="w-2 h-2 rounded-full" style={{background:'#34d399'}} />} onClick={() => setView('kanban')} />
         <StatCard label="Unassigned" value={counts.unassigned} color={UNASSIGNED_STYLE.hex} icon={<span className="w-2 h-2 rounded-full" style={{background:UNASSIGNED_STYLE.hex}} />} onClick={() => setView('kanban')} />
-        <StatCard label="Completed this week" value={counts.doneWeek} color="#34d399" icon={<CheckCircle2 className="w-3 h-3 text-emerald-400" />} />
+        <StatCard label="Completed this week" value={counts.doneWeek} color="#34d399" icon={<CheckCircle2 className="w-3 h-3 text-success-text" />} />
       </div>
 
       <Card title="Priority distribution" subtitle="Open tasks by urgency level">
@@ -4151,12 +4159,12 @@ function DashboardView() {
               <div key={p} className="flex items-center gap-3">
                 <div className="w-20 flex items-center gap-2 text-xs">
                   <PriorityDot priority={p} size={6} />
-                  <span className="text-white/70 font-medium">{pr.label}</span>
+                  <span className="text-secondary font-medium">{pr.label}</span>
                 </div>
-                <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
+                <div className="flex-1 h-2 bg-fill rounded-full overflow-hidden">
                   <div className="h-full rounded-full transition-all" style={{ width: `${(c/max)*100}%`, background: pr.hex, boxShadow: `0 0 12px ${pr.glow}` }} />
                 </div>
-                <div className="w-8 text-right text-xs font-semibold text-white/80 tabular-nums">{c}</div>
+                <div className="w-8 text-right text-xs font-semibold text-secondary tabular-nums">{c}</div>
               </div>
             );
           })}
@@ -4164,11 +4172,11 @@ function DashboardView() {
       </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card title="My upcoming" subtitle="Tasks assigned to you, by due date" accent="#a78bfa" action={<button onClick={() => setView('mine')} className="text-[11px] text-white/40 hover:text-white/80 inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
+        <Card title="My upcoming" subtitle="Tasks assigned to you, by due date" accent="#7c8cff" action={<button onClick={() => setView('mine')} className="text-meta text-faint hover:text-secondary inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
           {myUpcoming.length === 0 ? <EmptyState icon={Calendar} text="No upcoming tasks. Nothing on your plate." /> :
             <div className="space-y-2">{myUpcoming.map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}</div>}
         </Card>
-        <Card title="Assigned to others" subtitle="What your teammates are working on" accent="#34d399" action={<button onClick={() => setView('kanban')} className="text-[11px] text-white/40 hover:text-white/80 inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
+        <Card title="Assigned to others" subtitle="What your teammates are working on" accent="#34d399" action={<button onClick={() => setView('kanban')} className="text-meta text-faint hover:text-secondary inline-flex items-center gap-0.5">See all <ChevronRight className="w-3 h-3" /></button>}>
           {othersUpcoming.length === 0 ? <EmptyState icon={UserCog} text="Nothing assigned to others." /> :
             <div className="space-y-2">{othersUpcoming.map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}</div>}
         </Card>
@@ -4199,17 +4207,19 @@ function DashboardView() {
         <div className="flex items-center gap-4">
           <div className="relative w-20 h-20 shrink-0">
             <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
-              <circle cx="18" cy="18" r="15" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="3" />
+              <circle cx="18" cy="18" r="15" fill="none" stroke="var(--color-fill-strong)" strokeWidth="3" />
               <circle cx="18" cy="18" r="15" fill="none" stroke="url(#g1)" strokeWidth="3" strokeLinecap="round"
                 strokeDasharray={`${(progress / 100) * 94.2478} 94.2478`} />
               <defs>
                 <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stopColor="#a78bfa" />
-                  <stop offset="100%" stopColor="#e879f9" />
+                  {/* Progress IS the sanctioned Flow Mint moment: brand blue resolving into mint
+                      as the ring completes. Not a decorative gradient — it carries the meaning. */}
+                  <stop offset="0%" stopColor="#5b67f1" />
+                  <stop offset="100%" stopColor="#3dd6b3" />
                 </linearGradient>
               </defs>
             </svg>
-            <div className="absolute inset-0 flex items-center justify-center text-lg font-semibold text-white font-display">{progress}%</div>
+            <div className="absolute inset-0 flex items-center justify-center text-lg font-semibold text-primary font-display">{progress}%</div>
           </div>
           <div className="flex-1 grid grid-cols-3 gap-3 text-center">
             <Metric label="Open" value={open.length} />
@@ -4225,21 +4235,21 @@ function DashboardView() {
 function StatCard({ label, value, color, icon, onClick }) {
   const Tag = onClick ? 'button' : 'div';
   return (
-    <Tag onClick={onClick} className={cx('relative text-left rounded-2xl border border-white/[0.06] bg-gradient-to-br from-white/[0.03] to-white/[0.005] p-4 overflow-hidden group transition-all w-full',
-      onClick && 'hover:border-white/15 hover:-translate-y-0.5 cursor-pointer')}>
+    <Tag onClick={onClick} className={cx('relative text-left rounded-2xl border border-line-subtle bg-gradient-to-br from-fill-subtle to-fill-subtle p-4 overflow-hidden group transition-all w-full',
+      onClick && 'hover:border-line hover:-translate-y-0.5 cursor-pointer')}>
       <div className="absolute top-0 right-0 w-24 h-24 rounded-full opacity-20 blur-2xl" style={{ background: color }} />
       <div className="relative">
-        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-white/40 mb-2">{icon}{label}</div>
-        <div className="text-3xl font-semibold text-white font-display tabular-nums" style={{ color }}>{value}</div>
+        <div className="flex items-center gap-1.5 text-micro uppercase tracking-widest text-faint mb-2">{icon}{label}</div>
+        <div className="text-3xl font-semibold text-primary font-display tabular-nums" style={{ color }}>{value}</div>
       </div>
     </Tag>
   );
 }
 function Metric({ label, value }) {
   return (
-    <div className="rounded-xl border border-white/5 bg-white/[0.02] py-2">
-      <div className="text-xl font-semibold text-white font-display tabular-nums">{value}</div>
-      <div className="text-[10px] uppercase tracking-widest text-white/40">{label}</div>
+    <div className="rounded-xl border border-line-subtle bg-fill-subtle py-2">
+      <div className="text-xl font-semibold text-primary font-display tabular-nums">{value}</div>
+      <div className="text-micro uppercase tracking-widest text-faint">{label}</div>
     </div>
   );
 }
@@ -4248,15 +4258,15 @@ function MiniRow({ task, onClick, showBlocked, showTime }) {
   const { projects } = useApp();
   const proj = projects.find(p => p.id === task.project);
   return (
-    <button onClick={onClick} className="w-full flex items-center gap-3 p-2 -mx-2 rounded-lg hover:bg-white/[0.04] text-left transition-colors group">
+    <button onClick={onClick} className="w-full flex items-center gap-3 p-2 -mx-2 rounded-lg hover:bg-fill text-left transition-colors group">
       <PriorityDot priority={task.priority} />
       <div className="flex-1 min-w-0">
-        <div className="text-[13px] text-white/90 font-medium truncate">{task.title}</div>
-        <div className="flex items-center gap-2 mt-0.5 text-[10px] text-white/40">
+        <div className="text-compact text-primary font-medium truncate">{task.title}</div>
+        <div className="flex items-center gap-2 mt-0.5 text-micro text-faint">
           <span style={{ color: proj?.color }}>{proj?.icon} {proj?.name}</span>
-          {due && <><span>·</span><span className={cx(due.tone==='overdue' && 'text-rose-400', due.tone==='today' && 'text-amber-300')}>{due.label}</span></>}
+          {due && <><span>·</span><span className={cx(due.tone==='overdue' && 'text-danger-text', due.tone==='today' && 'text-warning-text')}>{due.label}</span></>}
           {showTime && <><span>·</span><span>{new Date(task.updatedAt).toLocaleDateString(undefined, { month:'short', day:'numeric'})}</span></>}
-          {showBlocked && task.blocked && <><span>·</span><span className="text-rose-400">blocked</span></>}
+          {showBlocked && task.blocked && <><span>·</span><span className="text-danger-text">blocked</span></>}
         </div>
       </div>
       <AssigneeChip assigneeId={task.assigneeId} showLabel={false} />
@@ -4266,11 +4276,11 @@ function MiniRow({ task, onClick, showBlocked, showTime }) {
 function EmptyState({ icon: Icon, title, text, action }) {
   return (
     <div className="flex flex-col items-center justify-center py-6 text-center">
-      <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center mb-2">
-        <Icon className="w-4 h-4 text-white/40" />
+      <div className="w-10 h-10 rounded-full bg-fill flex items-center justify-center mb-2">
+        <Icon className="w-4 h-4 text-faint" />
       </div>
-      {title && <div className="text-sm font-medium text-white/80 mb-0.5">{title}</div>}
-      <div className="text-xs text-white/40">{text}</div>
+      {title && <div className="text-sm font-medium text-secondary mb-0.5">{title}</div>}
+      <div className="text-xs text-faint">{text}</div>
       {action && <div className="mt-3">{action}</div>}
     </div>
   );
@@ -4289,39 +4299,39 @@ function FirstRunPanel() {
     { icon: MessageSquare, label: 'Start a conversation', desc: 'Team chat and direct messages.', cta: 'Open chat', go: () => setView('chat') },
   ].filter(Boolean);
   return (
-    <div className="relative rounded-3xl border border-white/[0.07] bg-gradient-to-br from-violet-500/[0.10] via-fuchsia-500/[0.05] to-transparent p-6 sm:p-8 overflow-hidden">
-      <div className="absolute top-0 right-0 w-72 h-72 rounded-full bg-violet-500/10 blur-3xl pointer-events-none" />
+    <div className="relative rounded-3xl border border-line-subtle bg-gradient-to-br from-brand/[0.10] via-brand-alt/[0.05] to-transparent p-6 sm:p-8 overflow-hidden">
+      <div className="absolute top-0 right-0 w-72 h-72 rounded-full bg-brand/10 blur-3xl pointer-events-none" />
       <div className="relative max-w-xl">
-        <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/25 mb-4">
-          <Sparkles className="w-5 h-5 text-white" />
+        <div className="w-11 h-11 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand/15 mb-4">
+          <Sparkles className="w-5 h-5 text-brand-fg" />
         </div>
-        <h2 className="text-2xl font-semibold text-white font-display tracking-tight">Welcome to Command Center</h2>
-        <p className="mt-2 text-sm text-white/60 leading-relaxed">
+        <h2 className="text-2xl font-semibold text-primary font-display tracking-tight">Welcome to Corlyvo</h2>
+        <p className="mt-2 text-sm text-muted leading-relaxed">
           One shared place for who’s doing what — tasks, a board, and your schedule, plus team chat and
           direct messages. Start by adding your first task.
         </p>
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <button onClick={() => setQuickAddOpen(true)}
-            className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-white text-black text-sm font-semibold hover:bg-white/90 transition-colors">
+            className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-inverse text-inverse-fg text-sm font-semibold hover:bg-inverse/90 transition-colors">
             <Plus className="w-4 h-4" />Create your first task
           </button>
-          <span className="text-[11px] text-white/35">or press <kbd className="px-1.5 py-0.5 rounded bg-white/10 border border-white/10 font-medium text-white/55">N</kbd></span>
+          <span className="text-meta text-faint">or press <kbd className="px-1.5 py-0.5 rounded bg-fill-strong border border-line font-medium text-muted">N</kbd></span>
         </div>
 
         {!hintsOff && (
           <div className="mt-7">
             <div className="flex items-center justify-between mb-2.5">
-              <div className="text-[10px] font-medium uppercase tracking-widest text-white/35">A few things to try</div>
-              <button onClick={dismissHints} className="text-[11px] text-white/35 hover:text-white/70 transition-colors">Dismiss</button>
+              <div className="text-micro font-medium uppercase tracking-widest text-faint">A few things to try</div>
+              <button onClick={dismissHints} className="text-meta text-faint hover:text-secondary transition-colors">Dismiss</button>
             </div>
             <div className="grid sm:grid-cols-3 gap-2.5">
               {hints.map(h => (
                 <button key={h.label} onClick={h.go}
-                  className="text-left rounded-2xl border border-white/[0.07] bg-white/[0.02] p-3.5 hover:bg-white/[0.05] hover:border-white/15 transition-colors group">
-                  <h.icon className="w-4 h-4 text-violet-300 mb-2" />
-                  <div className="text-[13px] font-medium text-white/85">{h.label}</div>
-                  <div className="text-[11px] text-white/45 mt-0.5 leading-snug">{h.desc}</div>
-                  <div className="mt-2 text-[11px] font-medium text-violet-300/80 inline-flex items-center gap-0.5 group-hover:text-violet-200">{h.cta}<ChevronRight className="w-3 h-3" /></div>
+                  className="text-left rounded-2xl border border-line-subtle bg-fill-subtle p-3.5 hover:bg-fill hover:border-line transition-colors group">
+                  <h.icon className="w-4 h-4 text-brand-text mb-2" />
+                  <div className="text-compact font-medium text-primary">{h.label}</div>
+                  <div className="text-meta text-faint mt-0.5 leading-snug">{h.desc}</div>
+                  <div className="mt-2 text-meta font-medium text-brand-text/80 inline-flex items-center gap-0.5 group-hover:text-brand-text-hover-hover">{h.cta}<ChevronRight className="w-3 h-3" /></div>
                 </button>
               ))}
             </div>
@@ -4388,7 +4398,7 @@ function ColumnQuickAdd({ status }) {
   });
   return (
     <button onClick={add} type="button"
-      className="w-full flex items-center justify-center gap-1.5 py-2 text-[11px] text-white/40 hover:text-white/90 hover:bg-white/[0.04] border border-dashed border-white/10 hover:border-white/20 rounded-lg transition-colors">
+      className="w-full flex items-center justify-center gap-1.5 py-2 text-meta text-faint hover:text-primary hover:bg-fill border border-dashed border-line hover:border-line-strong rounded-lg transition-colors">
       <Plus className="w-3 h-3" /> Add task
     </button>
   );
@@ -4414,18 +4424,18 @@ function KanbanColumn({ column, tasks }) {
       onDragLeave={() => setOver(false)}
       onDrop={onDrop}
       className={cx('flex-1 min-w-[220px] snap-start rounded-2xl border transition-all duration-200',
-        over ? 'border-white/25 bg-white/[0.04]' : 'border-white/[0.06] bg-white/[0.015]')}>
-      <div className="px-4 pt-4 pb-3 border-b border-white/5 flex items-center justify-between">
+        over ? 'border-line-strong bg-fill' : 'border-line-subtle bg-fill-subtle')}>
+      <div className="px-4 pt-4 pb-3 border-b border-line-subtle flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="w-1.5 h-1.5 rounded-full" style={{ background: columnAccent, boxShadow: `0 0 8px ${columnAccent}99` }} />
-          <h4 className="text-sm font-semibold text-white font-display tracking-tight">{column.label}</h4>
-          <span className="text-[10px] text-white/40 bg-white/5 border border-white/10 rounded-md px-1.5 h-4 flex items-center">{tasks.length}</span>
+          <h4 className="text-sm font-semibold text-primary font-display tracking-tight">{column.label}</h4>
+          <span className="text-micro text-faint bg-fill border border-line rounded-md px-1.5 h-4 flex items-center">{tasks.length}</span>
         </div>
       </div>
       <div className="p-2 space-y-2 min-h-[120px] max-h-[calc(100vh-240px)] overflow-y-auto">
         {column.id !== 'done' && <ColumnQuickAdd status={column.id} />}
         {tasks.length === 0 ? (
-          <div className="text-center py-6 text-[11px] text-white/30">{column.hint}</div>
+          <div className="text-center py-6 text-meta text-faint">{column.hint}</div>
         ) : (
           tasks.map(t => <TaskCard key={t.id} task={t} compact={compact} onClick={() => setEditingTask(t)} />)
         )}
@@ -4452,18 +4462,18 @@ function PrivateView() {
 
   return (
     <div className="space-y-6">
-      <div className="relative rounded-3xl border border-white/5 bg-gradient-to-br from-[#1a1530] via-[#14101e] to-[#0a0b11] p-6 overflow-hidden">
-        <div className="absolute top-0 right-0 w-72 h-72 rounded-full bg-violet-500/10 blur-3xl" />
-        <div className="absolute bottom-0 left-20 w-64 h-64 rounded-full bg-fuchsia-500/5 blur-3xl" />
+      <div data-surface="inverted" className="relative rounded-3xl border border-line-subtle bg-hero-private p-6 overflow-hidden">
+        <div className="absolute top-0 right-0 w-72 h-72 rounded-full bg-brand/10 blur-3xl" />
+        <div className="absolute bottom-0 left-20 w-64 h-64 rounded-full bg-brand/[0.06] blur-3xl" />
         <div className="relative flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/30 backdrop-blur px-2.5 h-6 text-[10px] font-medium uppercase tracking-widest text-white/70 mb-3">
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-line bg-input backdrop-blur px-2.5 h-6 text-micro font-medium uppercase tracking-widest text-secondary mb-3">
               <Lock className="w-3 h-3" />Private · you + assignee
             </div>
-            <h1 className="text-3xl lg:text-4xl font-semibold text-white font-display tracking-tight" style={{letterSpacing:'-0.02em'}}>Private tasks</h1>
-            <p className="text-sm text-white/50 mt-2 max-w-md">Private tasks are visible only to you and anyone they're assigned to, never the whole workspace.</p>
+            <h1 className="text-3xl lg:text-4xl font-semibold text-primary font-display tracking-tight" style={{letterSpacing:'-0.02em'}}>Private tasks</h1>
+            <p className="text-sm text-muted mt-2 max-w-md">Private tasks are visible only to you and anyone they're assigned to, never the whole workspace.</p>
           </div>
-          <button onClick={() => setQuickAddOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-white text-black text-xs font-semibold hover:bg-white/90">
+          <button onClick={() => setQuickAddOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-inverse text-inverse-fg text-xs font-semibold hover:bg-inverse/90">
             <Plus className="w-3.5 h-3.5" />Add private task
           </button>
         </div>
@@ -4495,8 +4505,8 @@ function PrivateSection({ title, accent, tasks }) {
     <section>
       <div className="flex items-center gap-2 mb-3">
         <span className="w-1.5 h-1.5 rounded-full" style={{ background: accent, boxShadow: `0 0 8px ${accent}99` }} />
-        <h3 className="text-[11px] font-semibold uppercase tracking-widest text-white/50">{title}</h3>
-        <span className="text-[10px] text-white/30">{tasks.length}</span>
+        <h3 className="text-meta font-semibold uppercase tracking-widest text-muted">{title}</h3>
+        <span className="text-micro text-faint">{tasks.length}</span>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {tasks.map(t => <TaskCard key={t.id} task={t} onClick={() => setEditingTask(t)} />)}
@@ -4521,17 +4531,17 @@ function MyTasksView() {
 
   return (
     <div className="space-y-6">
-      <div className="relative rounded-3xl border border-white/5 bg-gradient-to-br from-[#0d2a20] via-[#0c1a18] to-[#0a0b11] p-6 overflow-hidden">
-        <div className="absolute top-0 right-0 w-72 h-72 rounded-full bg-emerald-500/10 blur-3xl" />
+      <div data-surface="inverted" className="relative rounded-3xl border border-line-subtle bg-hero-mine p-6 overflow-hidden">
+        <div className="absolute top-0 right-0 w-72 h-72 rounded-full bg-success/10 blur-3xl" />
         <div className="relative flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 h-6 text-[10px] font-medium uppercase tracking-widest text-emerald-300 mb-3">
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-success/20 bg-success/10 px-2.5 h-6 text-micro font-medium uppercase tracking-widest text-success-text mb-3">
               <UserCog className="w-3 h-3" />Assigned to me
             </div>
-            <h1 className="text-3xl lg:text-4xl font-semibold text-white font-display tracking-tight">My Tasks</h1>
-            <p className="text-sm text-white/50 mt-2">Everything assigned to you. Prioritize and get it done.</p>
+            <h1 className="text-3xl lg:text-4xl font-semibold text-primary font-display tracking-tight">My Tasks</h1>
+            <p className="text-sm text-muted mt-2">Everything assigned to you. Prioritize and get it done.</p>
           </div>
-          <button onClick={() => setQuickAddOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-emerald-500 text-black text-xs font-semibold hover:bg-emerald-400">
+          <button onClick={() => setQuickAddOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-success text-inverse-fg text-xs font-semibold hover:bg-success-hover">
             <Plus className="w-3.5 h-3.5" />Add task
           </button>
         </div>
@@ -4561,7 +4571,7 @@ function MyTasksView() {
             <div className="space-y-2">{byStatus.waiting.map(t => (
               <div key={t.id} className="relative">
                 <TaskCard task={t} compact onClick={() => setEditingTask(t)} />
-                {t.blockedReason && <div className="mt-1 ml-2 text-[11px] text-rose-300/80 italic">↳ {t.blockedReason}</div>}
+                {t.blockedReason && <div className="mt-1 ml-2 text-meta text-danger-text/80 italic">↳ {t.blockedReason}</div>}
               </div>
             ))}</div>}
         </Card>
@@ -4572,8 +4582,8 @@ function MyTasksView() {
 function VaStat({ label, value, tone = 'default' }) {
   const tones = { default: '#34d399', warning: '#facc15', danger: '#f43f5e', success: '#34d399' };
   return (
-    <div className="rounded-xl border border-white/10 bg-black/30 backdrop-blur p-3">
-      <div className="text-[10px] uppercase tracking-widest text-white/50 mb-1">{label}</div>
+    <div className="rounded-xl border border-line bg-input backdrop-blur p-3">
+      <div className="text-micro uppercase tracking-widest text-muted mb-1">{label}</div>
       <div className="text-2xl font-semibold font-display tabular-nums" style={{ color: tones[tone] }}>{value}</div>
     </div>
   );
@@ -4603,21 +4613,21 @@ function MatrixQuad({ id, title, subtitle, tasks, accent }) {
       onDragLeave={() => setOver(false)}
       onDrop={onDrop}
       className={cx('relative rounded-2xl border p-4 min-h-[280px] transition-all overflow-hidden',
-        over ? 'border-white/30 bg-white/[0.05]' : 'border-white/[0.06] bg-white/[0.015]')}>
+        over ? 'border-line-strong bg-fill' : 'border-line-subtle bg-fill-subtle')}>
       <div className="pointer-events-none absolute inset-x-6 -top-10 h-20 rounded-full opacity-40 blur-2xl" style={{ background: accent }} />
       <div className="relative flex items-start justify-between mb-3">
         <div>
-          <h4 className="text-sm font-semibold text-white font-display" style={{ color: accent }}>{title}</h4>
-          <p className="text-[11px] text-white/40 mt-0.5">{subtitle}</p>
+          <h4 className="text-sm font-semibold text-primary font-display" style={{ color: accent }}>{title}</h4>
+          <p className="text-meta text-faint mt-0.5">{subtitle}</p>
         </div>
-        <span className="text-[10px] text-white/40 bg-white/5 border border-white/10 rounded-md px-1.5 h-5 flex items-center">{tasks.length}</span>
+        <span className="text-micro text-faint bg-fill border border-line rounded-md px-1.5 h-5 flex items-center">{tasks.length}</span>
       </div>
       {tasks.length === 0 ? (
-        <div className="relative flex items-center justify-center h-40 text-[11px] text-white/30 italic">Drop tasks here</div>
+        <div className="relative flex items-center justify-center h-40 text-meta text-faint italic">Drop tasks here</div>
       ) : (
         <div className="relative space-y-2">
           {tasks.slice(0, 6).map(t => <TaskCard key={t.id} task={t} compact onClick={() => setEditingTask(t)} />)}
-          {tasks.length > 6 && <div className="text-[11px] text-white/40 pl-1">+ {tasks.length - 6} more</div>}
+          {tasks.length > 6 && <div className="text-meta text-faint pl-1">+ {tasks.length - 6} more</div>}
         </div>
       )}
     </div>
@@ -4646,30 +4656,30 @@ function MatrixView() {
     <div className="space-y-6">
       <ViewHeader title="Priority matrix" subtitle="Drag tasks into quadrants to reframe what actually matters." />
 
-      <div className="hidden md:flex items-center justify-center gap-2 text-[10px] font-semibold uppercase tracking-widest text-white/70 md:ml-10">
-        <Flame className="w-3.5 h-3.5 text-rose-400" />
+      <div className="hidden md:flex items-center justify-center gap-2 text-micro font-semibold uppercase tracking-widest text-secondary md:ml-10">
+        <Flame className="w-3.5 h-3.5 text-danger-text" />
         <span>More urgent →</span>
       </div>
 
       <div className="flex gap-3 md:gap-4">
         <div className="hidden md:flex items-center justify-center w-7 shrink-0" aria-hidden>
           <div
-            className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-widest text-white/70 whitespace-nowrap"
+            className="flex items-center gap-2 text-micro font-semibold uppercase tracking-widest text-secondary whitespace-nowrap"
             style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
-            <TrendingUp className="w-3.5 h-3.5 text-violet-400" />
+            <TrendingUp className="w-3.5 h-3.5 text-brand-text" />
             <span>More important →</span>
           </div>
         </div>
 
         <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 min-w-0">
           <MatrixQuad id="q1" title="Do first"  subtitle="Urgent + Important"          tasks={quadrants.q1} accent="#f43f5e" />
-          <MatrixQuad id="q2" title="Schedule"  subtitle="Important, not urgent"       tasks={quadrants.q2} accent="#a78bfa" />
+          <MatrixQuad id="q2" title="Schedule"  subtitle="Important, not urgent"       tasks={quadrants.q2} accent="#7c8cff" />
           <MatrixQuad id="q3" title="Delegate"  subtitle="Urgent, not important"       tasks={quadrants.q3} accent="#fb923c" />
           <MatrixQuad id="q4" title="Eliminate" subtitle="Consider dropping" tasks={quadrants.q4} accent="#64748b" />
         </div>
       </div>
 
-      <div className="flex items-center gap-2 text-[11px] text-white/40 justify-center text-center px-4">
+      <div className="flex items-center gap-2 text-meta text-faint justify-center text-center px-4">
         <Info className="w-3 h-3 shrink-0" />
         <span>Urgency and importance update automatically from priority + due date. Drag a task to override.</span>
       </div>
@@ -4718,10 +4728,10 @@ function ProjectsView() {
     <div className="space-y-6">
       <ViewHeader title="Projects" subtitle="Work grouped by where it lives." />
       <div className="flex items-center justify-between -mt-2">
-        <div className="text-[11px] text-white/40">{projects.length} project{projects.length === 1 ? '' : 's'}</div>
+        <div className="text-meta text-faint">{projects.length} project{projects.length === 1 ? '' : 's'}</div>
         {canManage && (
           <button onClick={() => setCreateOpen(true)}
-            className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-white/5 border border-white/10 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors">
+            className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-fill border border-line text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">
             <Plus className="w-3.5 h-3.5" /> New project
           </button>
         )}
@@ -4731,7 +4741,7 @@ function ProjectsView() {
           <EmptyState icon={FolderKanban} title="No projects yet"
             text="Projects group your tasks by where they live — a client, an area, a workstream."
             action={canManage ? (
-              <button onClick={() => setCreateOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-white text-black text-xs font-semibold hover:bg-white/90 transition-colors">
+              <button onClick={() => setCreateOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-inverse text-inverse-fg text-xs font-semibold hover:bg-inverse/90 transition-colors">
                 <Plus className="w-3.5 h-3.5" />New project
               </button>
             ) : null} />
@@ -4744,7 +4754,7 @@ function ProjectsView() {
           const done = pTasks.filter(t => t.status === 'done');
           const pct = pTasks.length ? Math.round((done.length / pTasks.length) * 100) : 0;
           return (
-            <section key={p.id} className={cx('group relative rounded-2xl border border-white/[0.06] bg-gradient-to-br from-white/[0.03] to-transparent p-5 overflow-hidden',
+            <section key={p.id} className={cx('group relative rounded-2xl border border-line-subtle bg-gradient-to-br from-fill-subtle to-transparent p-5 overflow-hidden',
               exitingProjectIds.has(p.id) && 'animate-[fadeSlideOut_.18s_ease_forwards]')}>
               <div className="absolute top-0 right-0 w-40 h-40 rounded-full blur-3xl opacity-20" style={{ background: p.color }} />
               <div className="relative">
@@ -4754,32 +4764,32 @@ function ProjectsView() {
                       {p.icon}
                     </div>
                     <div>
-                      <h3 className="text-base font-semibold text-white font-display">{p.name}</h3>
-                      <div className="text-[11px] text-white/40">{open.length} open · {done.length} done</div>
+                      <h3 className="text-base font-semibold text-primary font-display">{p.name}</h3>
+                      <div className="text-meta text-faint">{open.length} open · {done.length} done</div>
                     </div>
                   </div>
                   {canManage && (
                     <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                       <button onClick={() => setEditTarget(p)} aria-label={`Edit ${p.name}`}
-                        className="p-1.5 rounded-lg text-white/30 hover:text-white/80 hover:bg-white/5 transition-colors">
+                        className="p-1.5 rounded-lg text-faint hover:text-secondary hover:bg-fill transition-colors">
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
                       {(isOwner || isAdmin) && (
                         <button onClick={() => { setDeleteCount(null); setDeleteTarget(p); }} aria-label={`Delete ${p.name}`}
-                          className="p-1.5 rounded-lg text-white/30 hover:text-rose-300 hover:bg-white/5 transition-colors">
+                          className="p-1.5 rounded-lg text-faint hover:text-danger-text hover:bg-fill transition-colors">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       )}
                     </div>
                   )}
                 </div>
-                <div className="h-1.5 bg-white/5 rounded-full overflow-hidden mb-4">
+                <div className="h-1.5 bg-fill rounded-full overflow-hidden mb-4">
                   <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: p.color, boxShadow: `0 0 12px ${p.color}99` }} />
                 </div>
                 <div className="space-y-1.5 max-h-64 overflow-y-auto">
                   {open.slice(0, 5).map(t => <MiniRow key={t.id} task={t} onClick={() => setEditingTask(t)} />)}
-                  {open.length === 0 && <div className="text-[11px] text-white/30 italic py-4 text-center">No open tasks in {p.name}.</div>}
-                  {open.length > 5 && <div className="text-[11px] text-white/40 pl-1">+ {open.length - 5} more</div>}
+                  {open.length === 0 && <div className="text-meta text-faint italic py-4 text-center">No open tasks in {p.name}.</div>}
+                  {open.length > 5 && <div className="text-meta text-faint pl-1">+ {open.length - 5} more</div>}
                 </div>
               </div>
             </section>
@@ -4845,18 +4855,18 @@ function ScheduleView() {
           return (
             <div key={d.date.toISOString()}
               className={cx('grid grid-cols-[80px,1fr] gap-4 rounded-2xl border p-4 transition-colors',
-                d.isToday ? 'border-violet-500/30 bg-violet-500/[0.06]' :
-                d.isPast ? 'border-white/[0.04] bg-white/[0.01] opacity-70' :
-                'border-white/[0.06] bg-white/[0.015]')}>
+                d.isToday ? 'border-brand/30 bg-brand/[0.06]' :
+                d.isPast ? 'border-line-subtle bg-fill-subtle opacity-70' :
+                'border-line-subtle bg-fill-subtle')}>
               <div className="text-center">
-                <div className="text-[10px] uppercase tracking-widest text-white/40">{weekday}</div>
-                <div className={cx('text-2xl font-semibold font-display tabular-nums leading-none mt-1', d.isToday ? 'text-violet-300' : 'text-white')}>{dayNum}</div>
-                <div className="text-[10px] text-white/40 mt-0.5">{month}</div>
-                {d.isToday && <div className="inline-flex mt-2 text-[9px] font-semibold uppercase tracking-widest text-violet-300">Today</div>}
+                <div className="text-micro uppercase tracking-widest text-faint">{weekday}</div>
+                <div className={cx('text-2xl font-semibold font-display tabular-nums leading-none mt-1', d.isToday ? 'text-brand-text' : 'text-primary')}>{dayNum}</div>
+                <div className="text-micro text-faint mt-0.5">{month}</div>
+                {d.isToday && <div className="inline-flex mt-2 text-[9px] font-semibold uppercase tracking-widest text-brand-text">Today</div>}
               </div>
               <div className="min-w-0">
                 {d.tasks.length === 0 ? (
-                  <div className="h-full flex items-center text-[11px] text-white/25 italic">Nothing scheduled</div>
+                  <div className="h-full flex items-center text-meta text-faint italic">Nothing scheduled</div>
                 ) : (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
                     {d.tasks.map(t => <TaskCard key={t.id} task={t} compact onClick={() => setEditingTask(t)} />)}
@@ -4947,10 +4957,13 @@ const pickAudioMime = () => {
 let nowPlayingAudio = null;
 
 // Custom, theme-aware voice-note player: play/pause, seekable waveform, elapsed / total.
-// Colors are INLINE rather than Tailwind classes on purpose — light mode here is retrofitted via
-// `[data-theme="light"]` rules that live inside per-view <style> blocks, so a class-based fill only
-// gets themed while the view that declares the rule is mounted (which is why the old bar washed out
-// in a cold-loaded DM). Inline styles read `theme` straight from context and are correct everywhere.
+// Colors are INLINE rather than Tailwind classes. The original reason is now GONE: light mode used to
+// be retrofitted by `[data-theme="light"]` rules living inside per-view <style> blocks, so a
+// class-based fill was only themed while the view that declared the rule was mounted — which is why
+// the bar washed out in a cold-loaded DM. Design tokens are global, so a class-based fill would now
+// be correct everywhere too. Inline is retained because the waveform also needs per-bar computed
+// values; if you convert it, `bg-fill`/`bg-brand` are the right tokens and the cold-load bug cannot
+// return.
 function AudioPlayer({ url, duration, seed, pending }) {
   const { theme } = useApp();
   const light = theme === 'light';
@@ -4993,9 +5006,9 @@ function AudioPlayer({ url, duration, seed, pending }) {
   };
   const ratio = total ? Math.min(1, current / total) : 0;
 
-  if (failed) return <div className="mt-1 text-[11px] text-rose-300/70">Voice note unavailable</div>;
+  if (failed) return <div className="mt-1 text-meta text-danger-text/70">Voice note unavailable</div>;
 
-  const playedHex = light ? '#7c3aed' : '#a78bfa';
+  const playedHex = light ? '#4650d6' : '#7c8cff';
   const unplayedHex = light ? 'rgba(15,17,23,0.24)' : 'rgba(255,255,255,0.24)';
 
   return (
@@ -5011,20 +5024,20 @@ function AudioPlayer({ url, duration, seed, pending }) {
         onError={() => setFailed(true)} />
       <button onClick={toggle} disabled={pending} aria-label={playing ? 'Pause' : 'Play'}
         className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors disabled:cursor-default"
-        style={{ background: light ? 'rgba(124,58,237,0.14)' : 'rgba(139,92,246,0.25)', border: `1px solid ${playedHex}4d`, color: playedHex }}>
+        style={{ background: light ? 'rgba(70,80,214,0.14)' : 'rgba(91,103,241,0.25)', border: `1px solid ${playedHex}4d`, color: playedHex }}>
         {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
           : playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 translate-x-px" />}
       </button>
       <div ref={barRef} onClick={onBarClick} onKeyDown={onBarKey} role="slider" tabIndex={pending ? -1 : 0}
         aria-label="Seek" aria-valuemin={0} aria-valuemax={Math.round(total)} aria-valuenow={Math.round(current)}
-        className="flex-1 h-7 flex items-center gap-[2px] cursor-pointer rounded focus:outline-none focus:ring-2 focus:ring-violet-400/40">
+        className="flex-1 h-7 flex items-center gap-[2px] cursor-pointer rounded focus:outline-none focus:ring-2 focus:ring-brand-hover/40">
         {peaks.map((p, i) => (
           <span key={i} aria-hidden="true"
             className="flex-1 rounded-full transition-colors duration-75"
             style={{ height: `${Math.round(p * 100)}%`, minWidth: 2, background: (i / WAVEFORM_BARS) < ratio ? playedHex : unplayedHex }} />
         ))}
       </div>
-      <span className="shrink-0 text-[10px] tabular-nums" style={{ color: light ? 'rgba(15,17,23,0.5)' : 'rgba(255,255,255,0.45)' }}>
+      <span className="shrink-0 text-micro tabular-nums" style={{ color: light ? 'rgba(15,17,23,0.5)' : 'rgba(255,255,255,0.45)' }}>
         {fmtDur(playing || current ? current : total)}
       </span>
     </div>
@@ -5042,9 +5055,9 @@ function VoiceNote({ path, localUrl, duration, pending }) {
     messagesApi.signedUrl(path).then(u => { if (on) setUrl(u); }).catch(logCaught('messages.signedUrl', () => { if (on) setFailed(true); }));
     return () => { on = false; };
   }, [path, url]);
-  if (failed) return <div className="mt-1 text-[11px] text-rose-300/70">Voice note unavailable</div>;
+  if (failed) return <div className="mt-1 text-meta text-danger-text/70">Voice note unavailable</div>;
   if (!url) return (
-    <div className="mt-1 inline-flex items-center gap-2 px-1 py-1.5 text-[11px] text-white/40">
+    <div className="mt-1 inline-flex items-center gap-2 px-1 py-1.5 text-meta text-faint">
       <Loader2 className="w-3 h-3 animate-spin" />Loading…
     </div>
   );
@@ -5071,7 +5084,7 @@ const dayLabel = (iso) => {
 
 /** Shimmer placeholder block. */
 function Skeleton({ className }) {
-  return <div className={cx('animate-pulse rounded-md bg-white/[0.06]', className)} />;
+  return <div className={cx('animate-pulse rounded-md bg-fill', className)} />;
 }
 /** Loading state for a message thread — a few ghost bubbles. */
 function ChatSkeleton() {
@@ -5097,7 +5110,7 @@ function DayDivider({ label }) {
   const light = theme === 'light';
   return (
     <div className="sticky top-0 z-10 flex justify-center py-2 pointer-events-none">
-      <span className="px-2.5 h-6 inline-flex items-center rounded-full text-[10px] font-medium uppercase tracking-wider backdrop-blur-sm border"
+      <span className="px-2.5 h-6 inline-flex items-center rounded-full text-micro font-medium uppercase tracking-wider backdrop-blur-sm border"
         style={{ background: light ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.08)', color: light ? '#5a5d69' : 'rgba(255,255,255,0.5)', borderColor: light ? 'rgba(0,0,0,0.10)' : 'rgba(255,255,255,0.10)' }}>
         {label}
       </span>
@@ -5112,9 +5125,11 @@ function DayDivider({ label }) {
  *  tint built for dark surfaces, so `soft` background + `hex` text is unreadable on light. Light mode
  *  therefore swaps to a soft hex tint with near-black text (a solid `hex` fill was tried first and read
  *  as a wall of loud color discs). Doing it here — rather than per call site — is what lets every avatar
- *  in the app be light-safe at once. NB on mechanism: inline styles are unaffected by the global
- *  [data-theme="light"] override sheet either way, so theme is read from context — but do NOT repeat the
- *  old claim that light CSS "never reaches portaled modals"; AppShell's sheet matches portals too. */
+ *  in the app be light-safe at once. NB on mechanism: inline styles are unaffected by CSS theming
+ *  either way, so theme is read from context. Do NOT repeat the old claim that light CSS "never
+ *  reaches portaled modals" — tokens are declared on <html>, so portals inherit them like anything
+ *  else. (The per-user `hex`/`soft` pair is a CATEGORICAL identity palette, deliberately outside the
+ *  semantic token layer; see ASSIGNEE_PALETTE.) */
 function Avatar({ name, userId, photoUrl, size = 28, className }) {
   const { theme } = useApp();
   const { signed, requestSign } = useAvatarSign();
@@ -5355,7 +5370,7 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
     <>
       <button ref={btnRef} onClick={() => (menu ? setMenu(false) : openMenu())} aria-label="Message actions"
         aria-haspopup="true" aria-expanded={menu}
-        className={cx('absolute -top-2 w-6 h-6 rounded-full bg-[#0f1017] border border-white/10 flex items-center justify-center text-white/60 hover:text-white/80 transition-opacity',
+        className={cx('absolute -top-2 w-6 h-6 rounded-full bg-surface-raised border border-line flex items-center justify-center text-muted hover:text-secondary transition-opacity',
           // Always visible on touch (no hover there); hover-revealed on desktop. focus-visible keeps
           // it keyboard-reachable — without it the only delete path was mouse-only. The UA focus ring
           // is deliberately NOT suppressed: it is the only focus affordance here, and it stays
@@ -5371,25 +5386,25 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
               overflow would put the last row off-screen with no way to reach it. */}
           <div ref={menuRef} role="menu" aria-label="Message actions"
             onKeyDown={onMenuKeyDown} onBlur={onMenuBlur}
-            className="fixed z-[71] w-44 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1 overflow-y-auto"
+            className="fixed z-[71] w-44 rounded-xl border border-line bg-surface-raised shadow-2xl py-1 overflow-y-auto"
             style={{ top: pos.top, left: pos.left, maxHeight: 'calc(100vh - 16px)', animation: 'slideUp .12s ease' }}>
             {showEdit && (
-              <button onClick={startEdit} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5 whitespace-nowrap">
+              <button onClick={startEdit} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-note text-secondary hover:bg-fill whitespace-nowrap">
                 <Edit3 className="w-3.5 h-3.5" />Edit
               </button>
             )}
             {canCopy && (
-              <button onClick={copy} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5 whitespace-nowrap">
+              <button onClick={copy} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-note text-secondary hover:bg-fill whitespace-nowrap">
                 <Copy className="w-3.5 h-3.5" />Copy
               </button>
             )}
             {canHide && (
-              <button onClick={() => { setMenu(false); btnRef.current?.focus(); onHide?.(m); }} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-white/80 hover:bg-white/5 whitespace-nowrap">
+              <button onClick={() => { setMenu(false); btnRef.current?.focus(); onHide?.(m); }} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-note text-secondary hover:bg-fill whitespace-nowrap">
                 <EyeOff className="w-3.5 h-3.5" />Delete for me
               </button>
             )}
             {showDeleteAll && (
-              <button onClick={() => { setMenu(false); btnRef.current?.focus(); onDelete?.(m); }} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-rose-300 hover:bg-rose-500/10 whitespace-nowrap">
+              <button onClick={() => { setMenu(false); btnRef.current?.focus(); onDelete?.(m); }} data-menuitem role="menuitem" className="w-full flex items-center gap-2 px-3 py-2 text-note text-danger-text hover:bg-danger/10 whitespace-nowrap">
                 <Trash2 className="w-3.5 h-3.5" />Delete for everyone
               </button>
             )}
@@ -5400,7 +5415,7 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
                 case where the menu would otherwise be empty. (It is never empty: menuBtn requires
                 one of canCopy/canHide/(mine && !deleted), and the last of those implies this hint.) */}
             {mine && !deleted && !actable && (
-              <div className="px-3 py-2 text-[11px] text-white/40 leading-snug">
+              <div className="px-3 py-2 text-meta text-faint leading-snug">
                 Edit and delete-for-everyone expire 10 minutes after sending.
               </div>
             )}
@@ -5415,7 +5430,7 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
   // carries the actions menu so it can be cleared from your own view ("delete for me", DMs).
   if (deleted) {
     return (
-      <div className={cx('group/bubble relative max-w-full rounded-2xl px-3 py-2 border text-[13px] italic text-white/40 bg-white/[0.03] border-white/10',
+      <div className={cx('group/bubble relative max-w-full rounded-2xl px-3 py-2 border text-compact italic text-faint bg-fill-subtle border-line',
         mine ? 'rounded-tr-sm' : 'rounded-tl-sm')}>
         This message was deleted
         {actions}
@@ -5427,17 +5442,17 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
   if (editing) {
     return (
       <div className={cx('max-w-full rounded-2xl px-3 py-2 border',
-        mine ? 'bg-violet-500/20 border-violet-500/25 rounded-tr-sm' : 'bg-white/[0.05] border-white/10 rounded-tl-sm')}>
+        mine ? 'bg-brand/20 border-brand/25 rounded-tr-sm' : 'bg-fill border-line rounded-tl-sm')}>
         <textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(); }
             else if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }
           }}
           rows={Math.min(6, Math.max(1, (draft.match(/\n/g)?.length || 0) + 1))}
-          className="w-full bg-transparent text-sm text-white/90 leading-relaxed outline-none resize-none" />
-        <div className="mt-1 flex items-center justify-end gap-3 text-[11px]">
-          <button onClick={() => setEditing(false)} className="text-white/45 hover:text-white/70">Cancel</button>
-          <button onClick={saveEdit} className="font-medium text-violet-300 hover:text-violet-200">Save</button>
+          className="w-full bg-transparent text-sm text-primary leading-relaxed outline-none resize-none" />
+        <div className="mt-1 flex items-center justify-end gap-3 text-meta">
+          <button onClick={() => setEditing(false)} className="text-faint hover:text-secondary">Cancel</button>
+          <button onClick={saveEdit} className="font-medium text-brand-text hover:text-brand-text-hover">Save</button>
         </div>
       </div>
     );
@@ -5445,11 +5460,11 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
 
   return (
     <div className={cx('group/bubble relative max-w-full rounded-2xl px-3 py-2 border',
-      mine ? 'bg-violet-500/20 border-violet-500/25 rounded-tr-sm' : 'bg-white/[0.05] border-white/10 rounded-tl-sm')}>
+      mine ? 'bg-brand/20 border-brand/25 rounded-tr-sm' : 'bg-fill border-line rounded-tl-sm')}>
       {m.body && (
-        <div className="text-sm text-white/85 leading-relaxed whitespace-pre-wrap break-words" title={absoluteTime(m.createdAt)}>
+        <div className="text-sm text-primary leading-relaxed whitespace-pre-wrap break-words" title={absoluteTime(m.createdAt)}>
           <MentionText text={m.body} mentions={m.mentions} />
-          {edited && <span className="ml-1.5 text-[10px] text-white/35 not-italic">(edited)</span>}
+          {edited && <span className="ml-1.5 text-micro text-faint not-italic">(edited)</span>}
         </div>
       )}
       {(m.audioPath || m.localUrl) && (
@@ -5525,7 +5540,7 @@ function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelet
         {hasMore && (
           <div className="flex justify-center pb-2">
             <button onClick={handleLoadOlder} disabled={loadingOlder}
-              className="text-[11px] px-3 h-7 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 text-white/60 disabled:opacity-50 transition-colors">
+              className="text-meta px-3 h-7 rounded-full bg-fill border border-line hover:bg-fill-strong text-muted disabled:opacity-50 transition-colors">
               {loadingOlder ? 'Loading…' : 'Load older messages'}
             </button>
           </div>
@@ -5546,11 +5561,11 @@ function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelet
                     {firstOfGroup && (
                       <div className={cx('flex items-baseline gap-2 mb-1 px-0.5', mine && 'flex-row-reverse')}>
                         {!mine && (
-                          <PersonButton personId={m.senderId} className="text-[12px] font-semibold text-white/80 hover:text-white">
+                          <PersonButton personId={m.senderId} className="text-note font-semibold text-secondary hover:text-primary">
                             {nameOf(m.senderId)}
                           </PersonButton>
                         )}
-                        <span className="text-[10px] text-white/35 tabular-nums">{clockTime(m.createdAt)}</span>
+                        <span className="text-micro text-faint tabular-nums">{clockTime(m.createdAt)}</span>
                       </div>
                     )}
                     <MsgBubble m={m} mine={mine} onDelete={onDelete} onEdit={onEdit} onHide={onHide} />
@@ -5571,7 +5586,7 @@ function MessageList({ items, userId, nameOf, avatarFor, loading, empty, onDelet
       </div>
       {showJump && (
         <button onClick={jump} aria-label="Jump to latest"
-          className="absolute bottom-3 right-3 z-10 w-9 h-9 rounded-full bg-[#0f1017] border border-white/15 shadow-xl flex items-center justify-center text-white/70 hover:text-white hover:border-white/25">
+          className="absolute bottom-3 right-3 z-10 w-9 h-9 rounded-full bg-surface-raised border border-line shadow-xl flex items-center justify-center text-secondary hover:text-primary hover:border-line-strong">
           <ChevronDown className="w-4 h-4" />
         </button>
       )}
@@ -5606,11 +5621,11 @@ function usePresence(channelKey, userId, name) {
 function TypingStrip({ label }) {
   if (!label) return null;
   return (
-    <div className="px-4 py-1.5 text-[11px] text-white/45 border-t border-white/5 shrink-0 flex items-center gap-1.5">
+    <div className="px-4 py-1.5 text-meta text-faint border-t border-line-subtle shrink-0 flex items-center gap-1.5">
       <span className="flex gap-0.5">
-        <span className="w-1 h-1 rounded-full bg-violet-400/70 animate-bounce" style={{ animationDelay: '0ms' }} />
-        <span className="w-1 h-1 rounded-full bg-violet-400/70 animate-bounce" style={{ animationDelay: '150ms' }} />
-        <span className="w-1 h-1 rounded-full bg-violet-400/70 animate-bounce" style={{ animationDelay: '300ms' }} />
+        <span className="w-1 h-1 rounded-full bg-brand-hover/70 animate-bounce" style={{ animationDelay: '0ms' }} />
+        <span className="w-1 h-1 rounded-full bg-brand-hover/70 animate-bounce" style={{ animationDelay: '150ms' }} />
+        <span className="w-1 h-1 rounded-full bg-brand-hover/70 animate-bounce" style={{ animationDelay: '300ms' }} />
       </span>
       {label}
     </div>
@@ -5645,27 +5660,27 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
   const retry = () => { const body = failedBody, mns = failedMentions; setFailedBody(''); setFailedMentions([]); doSend(body, mns); };
 
   return (
-    <div className="border-t border-white/10 shrink-0">
+    <div className="border-t border-line shrink-0">
       {failedBody && (
-        <div className="px-4 py-1.5 flex items-center gap-2 text-[11px] text-rose-300/90 border-b border-white/5">
+        <div className="px-4 py-1.5 flex items-center gap-2 text-meta text-danger-text/90 border-b border-line-subtle">
           <AlertCircle className="w-3.5 h-3.5 shrink-0" />
           <span className="flex-1 truncate">Couldn’t send “{failedBody}”.</span>
-          <button onClick={retry} className="font-semibold underline underline-offset-2 hover:text-rose-200">Retry</button>
-          <button onClick={() => setFailedBody('')} aria-label="Dismiss" className="text-white/40 hover:text-white/70"><X className="w-3.5 h-3.5" /></button>
+          <button onClick={retry} className="font-semibold underline underline-offset-2 hover:text-danger-text">Retry</button>
+          <button onClick={() => setFailedBody('')} aria-label="Dismiss" className="text-faint hover:text-secondary"><X className="w-3.5 h-3.5" /></button>
         </div>
       )}
       <div className="p-3">
         {recording ? (
           <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-2 text-xs text-rose-300">
-              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" /> Recording {fmtDur(seconds)}
+            <span className="inline-flex items-center gap-2 text-xs text-danger-text">
+              <span className="w-2 h-2 rounded-full bg-danger animate-pulse" /> Recording {fmtDur(seconds)}
             </span>
             <span className="flex items-end gap-0.5 h-4" aria-hidden="true">
-              {[0, 1, 2, 3, 4].map(i => <span key={i} className="w-0.5 rounded-full bg-rose-400/70 animate-pulse" style={{ height: `${6 + ((i * 7 + seconds * 5) % 10)}px`, animationDelay: `${i * 120}ms` }} />)}
+              {[0, 1, 2, 3, 4].map(i => <span key={i} className="w-0.5 rounded-full bg-danger-hover/70 animate-pulse" style={{ height: `${6 + ((i * 7 + seconds * 5) % 10)}px`, animationDelay: `${i * 120}ms` }} />)}
             </span>
             <div className="flex-1" />
-            <button onClick={() => onStopRecording(true)} className="text-xs text-white/50 hover:text-white/80">Cancel</button>
-            <button onClick={() => onStopRecording(false)} className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90">
+            <button onClick={() => onStopRecording(true)} className="text-xs text-muted hover:text-secondary">Cancel</button>
+            <button onClick={() => onStopRecording(false)} className="inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-xs font-semibold bg-inverse text-inverse-fg hover:bg-inverse/90">
               <Square className="w-3 h-3" />Stop &amp; send
             </button>
           </div>
@@ -5677,7 +5692,7 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
             <MentionTextarea textareaRef={taRef} value={text} onChange={setText} onMentionsChange={setMentions}
               members={mentionMembers} meId={meId} onEnter={submit} onTyping={onTyping} onBlur={() => onStopTyping?.()} rows={1}
               placeholder={placeholder}
-              className="max-h-[140px] bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white/90 placeholder-white/30 outline-none focus:border-violet-400/50 resize-none overflow-y-hidden leading-relaxed" />
+              className="max-h-[140px] bg-fill border border-line rounded-xl px-3 py-2 text-sm text-primary placeholder-faint outline-none focus:border-brand-hover/50 resize-none overflow-y-hidden leading-relaxed" />
             {/* focus-visible RING, not just the border tint. `focus:outline-none` suppressed the UA
                 ring and the only replacement was a 1px border going white/10 -> violet-400/50: a
                 1.92:1 state change in dark and 2.23:1 in light — effectively invisible, and well under
@@ -5686,16 +5701,16 @@ function Composer({ onSubmitText, onTyping, onStopTyping, recording, seconds, on
             <button onClick={() => canVoice ? onStartRecording() : onUpgradeVoice?.()} disabled={sending}
               aria-label={canVoice ? 'Record a voice note' : 'Upgrade to unlock voice notes'}
               title={canVoice ? 'Record a voice note' : 'Upgrade to unlock voice notes'}
-              className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white/90 hover:border-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70 focus:border-violet-400/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 shrink-0">
+              className="inline-flex items-center justify-center w-9 h-9 rounded-xl border border-line bg-fill text-secondary hover:bg-fill-strong hover:text-primary hover:border-line-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-hover/70 focus:border-brand-hover/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 shrink-0">
               {canVoice ? <Mic className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}
             </button>
             <button onClick={submit} disabled={!text.trim() || sending}
-              className="inline-flex items-center gap-1.5 rounded-xl px-4 h-9 text-xs font-semibold bg-white text-black hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed shrink-0">
+              className="inline-flex items-center gap-1.5 rounded-xl px-4 h-9 text-xs font-semibold bg-inverse text-inverse-fg hover:bg-inverse/90 disabled:opacity-30 disabled:cursor-not-allowed shrink-0">
               <Send className="w-3.5 h-3.5" />Send
             </button>
           </div>
         )}
-        {micError && <div className="mt-1.5 text-[11px] text-rose-300/80">{micError}</div>}
+        {micError && <div className="mt-1.5 text-meta text-danger-text/80">{micError}</div>}
       </div>
     </div>
   );
@@ -6034,31 +6049,19 @@ function ChatView() {
         ))}
         {/* aria-hidden: the sr-only summary above already names these people in full. */}
         {readers.length > shown.length && (
-          <span aria-hidden="true" className="text-[10px] text-white/40 tabular-nums pl-0.5">+{readers.length - shown.length}</span>
+          <span aria-hidden="true" className="text-micro text-faint tabular-nums pl-0.5">+{readers.length - shown.length}</span>
         )}
       </div>
     );
   }, [receiptsByMessage, nameOf, people]);
 
   return (
-    <div className="cc-chat flex flex-col h-[calc(100dvh-9rem)] rounded-2xl border border-white/10 bg-[#0a0b11] overflow-hidden">
-      <style>{`
-        [data-theme="light"] .cc-chat .bg-violet-500\\/20 { background: #ede9fe !important; }
-        [data-theme="light"] .cc-chat .border-violet-500\\/25 { border-color: #c4b5fd !important; }
-        [data-theme="light"] .cc-chat .bg-violet-500\\/25 { background: rgba(124,58,237,0.16) !important; }
-        [data-theme="light"] .cc-chat .border-violet-400\\/30 { border-color: rgba(124,58,237,0.4) !important; }
-        [data-theme="light"] .cc-chat .bg-violet-500\\/10 { background: #f3e8ff !important; }
-        [data-theme="light"] .cc-chat .border-violet-500\\/20 { border-color: #e9d5ff !important; }
-        [data-theme="light"] .cc-chat .text-violet-300\\/70 { color: #7c3aed !important; }
-        [data-theme="light"] .cc-chat .bg-violet-400 { background: #7c3aed !important; }
-        [data-theme="light"] .cc-chat .bg-violet-400\\/70 { background: #7c3aed !important; }
-        [data-theme="light"] .cc-chat .bg-white\\/\\[0\\.05\\] { background: rgba(0,0,0,0.06) !important; }
-      `}</style>
-      <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2.5 shrink-0">
-        <span className="w-7 h-7 rounded-lg bg-violet-500/15 border border-violet-500/25 flex items-center justify-center text-violet-300 text-sm font-semibold shrink-0">#</span>
+    <div className="cc-chat flex flex-col h-[calc(100dvh-9rem)] rounded-2xl border border-line bg-surface overflow-hidden">
+      <div className="px-4 py-3 border-b border-line-subtle flex items-center gap-2.5 shrink-0">
+        <span className="w-7 h-7 rounded-lg bg-brand/15 border border-brand/25 flex items-center justify-center text-brand-text text-sm font-semibold shrink-0">#</span>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold text-white/90 leading-tight">Team chat</div>
-          <div className="text-[10px] text-white/35 leading-tight">Everyone in this workspace</div>
+          <div className="text-sm font-semibold text-primary leading-tight">Team chat</div>
+          <div className="text-micro text-faint leading-tight">Everyone in this workspace</div>
         </div>
         {/* Hidden-message escape hatch. Without this, "Delete for me" is a one-way door the moment the
             undo toast expires: the message is gone from every read path (thread, search, unread), so
@@ -6067,7 +6070,7 @@ function ChatView() {
         {hiddenCount > 0 && (
           <button onClick={restoreAllHidden} type="button"
             title={`You have hidden ${hiddenCount} message${hiddenCount === 1 ? '' : 's'} in this channel. Restore them?`}
-            className="shrink-0 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-white/10 bg-white/5 text-[11px] text-white/60 hover:text-white/90 hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70 transition-colors">
+            className="shrink-0 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-line bg-fill text-meta text-muted hover:text-primary hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-hover/70 transition-colors">
             <EyeOff className="w-3 h-3" />
             {hiddenCount} hidden — restore
           </button>
@@ -6083,7 +6086,7 @@ function ChatView() {
               </PersonButton>
             ))}
             {members.length > 4 && (
-              <span className="-ml-2 w-6 h-6 rounded-full bg-white/10 border border-white/10 text-[9px] font-semibold text-white/60 flex items-center justify-center">
+              <span className="-ml-2 w-6 h-6 rounded-full bg-fill-strong border border-line text-[9px] font-semibold text-muted flex items-center justify-center">
                 +{members.length - 4}
               </span>
             )}
@@ -6107,11 +6110,11 @@ function ChatView() {
         receiptFor={receiptFor}
         empty={(
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-10">
-            <div className="w-12 h-12 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
-              <MessageSquare className="w-5 h-5 text-violet-300/70" />
+            <div className="w-12 h-12 rounded-2xl bg-brand/10 border border-brand/20 flex items-center justify-center">
+              <MessageSquare className="w-5 h-5 text-brand-text/70" />
             </div>
-            <div className="text-sm font-medium text-white/70">No messages yet</div>
-            <div className="text-[12px] text-white/40">Start the conversation with your team 👋</div>
+            <div className="text-sm font-medium text-secondary">No messages yet</div>
+            <div className="text-note text-faint">Start the conversation with your team 👋</div>
           </div>
         )}
       />
@@ -6164,25 +6167,25 @@ function DirectMessagesView() {
 
   const ConversationList = (
     <div className="flex flex-col h-full">
-      <div className="px-3 py-3 border-b border-white/5 flex items-center justify-between gap-2 shrink-0">
+      <div className="px-3 py-3 border-b border-line-subtle flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-2">
-          <MessagesSquare className="w-4 h-4 text-white/50" />
-          <div className="text-sm font-semibold text-white/90">Direct messages</div>
+          <MessagesSquare className="w-4 h-4 text-muted" />
+          <div className="text-sm font-semibold text-primary">Direct messages</div>
         </div>
         <div className="relative">
           <button onClick={() => setPicking(p => !p)} disabled={peers.length === 0}
-            className="inline-flex items-center gap-1 text-[11px] px-2 h-7 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+            className="inline-flex items-center gap-1 text-meta px-2 h-7 rounded-lg bg-fill border border-line hover:bg-fill-strong disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
             <Plus className="w-3 h-3" />New
           </button>
           {picking && (
             <>
               <div className="fixed inset-0 z-30" onClick={() => setPicking(false)} />
-              <div className="absolute right-0 top-9 z-40 w-56 rounded-xl border border-white/10 bg-[#0f1017] shadow-2xl py-1.5" style={{ animation: 'slideUp .15s ease' }}>
-                <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-white/35">Message someone</div>
+              <div className="absolute right-0 top-9 z-40 w-56 rounded-xl border border-line bg-surface-raised shadow-2xl py-1.5" style={{ animation: 'slideUp .15s ease' }}>
+                <div className="px-3 py-1.5 text-micro font-medium uppercase tracking-widest text-faint">Message someone</div>
                 {peers.map(m => {
                   return (
                     <button key={m.userId} onClick={() => onPick(m.userId)}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/80 hover:bg-white/5 hover:text-white transition-colors">
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-fill hover:text-primary transition-colors">
                       {/* Deliberately NOT a PersonButton: this row's job is "start a DM" and it is already
                           a <button>. A profile button inside it would be invalid DOM and fight the picker. */}
                       <Avatar name={m.displayName || m.email} userId={m.userId} photoUrl={m.avatarUrl} size={20} />
@@ -6198,10 +6201,10 @@ function DirectMessagesView() {
           )}
         </div>
       </div>
-      {startErr && <div className="px-3 py-1.5 text-[11px] text-rose-300/80 border-b border-white/5 shrink-0">{startErr}</div>}
+      {startErr && <div className="px-3 py-1.5 text-meta text-danger-text/80 border-b border-line-subtle shrink-0">{startErr}</div>}
       <div className="flex-1 min-h-0 overflow-y-auto py-1">
         {dmConversations.length === 0 ? (
-          <div className="px-4 py-10 text-center text-[12px] text-white/40">
+          <div className="px-4 py-10 text-center text-note text-faint">
             {peers.length === 0 ? 'No one else is in this workspace yet.' : 'No conversations yet. Start one with “New”.'}
           </div>
         ) : dmConversations.map(c => {
@@ -6213,22 +6216,22 @@ function DirectMessagesView() {
                invalid DOM). Same restructure Bundle 2 used for the notification rows. */
             <div key={c.id}
               className={cx('w-full flex items-center gap-2.5 px-3 py-2.5 transition-colors',
-                selected ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]')}>
+                selected ? 'bg-fill' : 'hover:bg-fill-subtle')}>
               <PersonButton personId={c.peerId} className="shrink-0" title={a.label === 'Me' ? 'Your profile' : `View ${a.label}'s profile`}>
                 <Avatar name={a.known ? (a.label === 'Me' ? 'You' : a.label) : ''} userId={c.peerId} photoUrl={a.avatarUrl} size={32} />
               </PersonButton>
               <button onClick={() => setDmActiveConv(c.id)} className="flex-1 min-w-0 text-left">
                 <span className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-medium text-white/85 truncate">
+                  <span className="text-sm font-medium text-primary truncate">
                     {a.statusEmoji && <span className="mr-1">{a.statusEmoji}</span>}
                     {a.label === 'Me' ? 'You' : a.label}
                   </span>
-                  <span className="text-[10px] text-white/35 shrink-0">{c.preview ? timeAgo(c.lastAt) : ''}</span>
+                  <span className="text-micro text-faint shrink-0">{c.preview ? timeAgo(c.lastAt) : ''}</span>
                 </span>
                 <span className="flex items-center justify-between gap-2">
-                  <span className={cx('text-[12px] truncate', c.unread > 0 ? 'text-white/70' : 'text-white/40')}>{preview(c.preview)}</span>
+                  <span className={cx('text-note truncate', c.unread > 0 ? 'text-secondary' : 'text-faint')}>{preview(c.preview)}</span>
                   {c.unread > 0 && (
-                    <span className="shrink-0 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-rose-50 text-[9px] font-bold leading-none flex items-center justify-center">{c.unread > 9 ? '9+' : c.unread}</span>
+                    <span className="shrink-0 min-w-[16px] h-4 px-1 rounded-full bg-danger text-brand-fg text-[9px] font-bold leading-none flex items-center justify-center">{c.unread > 9 ? '9+' : c.unread}</span>
                   )}
                 </span>
               </button>
@@ -6240,17 +6243,9 @@ function DirectMessagesView() {
   );
 
   return (
-    <div className="cc-chat h-[calc(100dvh-9rem)] rounded-2xl border border-white/10 bg-[#0a0b11] overflow-hidden flex">
-      <style>{`
-        [data-theme="light"] .cc-chat .bg-violet-500\\/20 { background: #ede9fe !important; }
-        [data-theme="light"] .cc-chat .border-violet-500\\/25 { border-color: #c4b5fd !important; }
-        [data-theme="light"] .cc-chat .bg-violet-500\\/25 { background: rgba(124,58,237,0.16) !important; }
-        [data-theme="light"] .cc-chat .border-violet-400\\/30 { border-color: rgba(124,58,237,0.4) !important; }
-        [data-theme="light"] .cc-chat .bg-white\\/\\[0\\.05\\] { background: rgba(0,0,0,0.06) !important; }
-        [data-theme="light"] .cc-chat .bg-violet-400\\/70 { background: #7c3aed !important; }
-      `}</style>
+    <div className="cc-chat h-[calc(100dvh-9rem)] rounded-2xl border border-line bg-surface overflow-hidden flex">
       {/* List: always shown on lg; on small screens shown only when no thread is open */}
-      <aside className={cx('w-full lg:w-80 lg:shrink-0 lg:border-r border-white/5 h-full', active ? 'hidden lg:flex lg:flex-col' : 'flex flex-col')}>
+      <aside className={cx('w-full lg:w-80 lg:shrink-0 lg:border-r border-line-subtle h-full', active ? 'hidden lg:flex lg:flex-col' : 'flex flex-col')}>
         {ConversationList}
       </aside>
       <section className={cx('flex-1 min-w-0 h-full', active ? 'flex flex-col' : 'hidden lg:flex lg:flex-col')}>
@@ -6258,11 +6253,11 @@ function DirectMessagesView() {
           <DmThread key={active.id} conversationId={active.id} peerId={active.peerId} onBack={() => setDmActiveConv(null)} />
         ) : (
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 px-6">
-            <div className="w-12 h-12 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
-              <MessagesSquare className="w-5 h-5 text-violet-300/70" />
+            <div className="w-12 h-12 rounded-2xl bg-brand/10 border border-brand/20 flex items-center justify-center">
+              <MessagesSquare className="w-5 h-5 text-brand-text/70" />
             </div>
-            <div className="text-sm font-medium text-white/70">Your conversations</div>
-            <div className="text-[12px] text-white/40">Pick a conversation, or start a new one.</div>
+            <div className="text-sm font-medium text-secondary">Your conversations</div>
+            <div className="text-note text-faint">Pick a conversation, or start a new one.</div>
           </div>
         )}
       </section>
@@ -6406,12 +6401,12 @@ function DmThread({ conversationId, peerId, onBack }) {
     if (m.id !== lastOwnId) return null;
     const seen = isSeen(m.createdAt);
     return (
-      <div className="mt-0.5 px-1 flex items-center gap-1 text-[10px]" title={seen ? 'Seen' : 'Sent'}>
+      <div className="mt-0.5 px-1 flex items-center gap-1 text-micro" title={seen ? 'Seen' : 'Sent'}>
         {/* Seen shows the peer's face (the Messenger convention) — it reads faster than a tick and it's
             unambiguous about WHO saw it. Sent keeps the plain tick: nobody has seen it yet. */}
         {seen
-          ? <><Avatar name={peer.known ? peerName : ''} userId={peerId} photoUrl={peer.avatarUrl} size={14} /><span className="text-violet-400/80">Seen</span></>
-          : <><Check className="w-3 h-3 text-white/35" /><span className="text-white/35">Sent</span></>}
+          ? <><Avatar name={peer.known ? peerName : ''} userId={peerId} photoUrl={peer.avatarUrl} size={14} /><span className="text-brand-text/80">Seen</span></>
+          : <><Check className="w-3 h-3 text-faint" /><span className="text-faint">Sent</span></>}
       </div>
     );
   };
@@ -6574,14 +6569,14 @@ function DmThread({ conversationId, peerId, onBack }) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2.5 shrink-0">
-        <button onClick={onBack} className="lg:hidden text-white/50 hover:text-white/80 -ml-1"><ChevronRight className="w-4 h-4 rotate-180" /></button>
+      <div className="px-4 py-3 border-b border-line-subtle flex items-center gap-2.5 shrink-0">
+        <button onClick={onBack} className="lg:hidden text-muted hover:text-secondary -ml-1"><ChevronRight className="w-4 h-4 rotate-180" /></button>
         <PersonButton personId={peerId} className="gap-2.5 min-w-0 flex-1" title={isSelf ? 'Your profile' : `View ${peerName}'s profile`}>
           <MsgAvatar name={peer.known ? peerName : ''} userId={peerId} photoUrl={peer.avatarUrl} size={32} />
           <div className="min-w-0 text-left">
-            <div className="text-sm font-semibold text-white/90 leading-tight truncate">{isSelf ? 'You' : peerName}</div>
+            <div className="text-sm font-semibold text-primary leading-tight truncate">{isSelf ? 'You' : peerName}</div>
             {/* The subtitle was a static string; the peer's live status is far more useful here. */}
-            <div className="text-[10px] text-white/35 leading-tight truncate">
+            <div className="text-micro text-faint leading-tight truncate">
               {isSelf ? 'Notes to self'
                 : (peer.statusText || peer.statusEmoji)
                   ? <>{peer.statusEmoji && <span className="mr-1">{peer.statusEmoji}</span>}{peer.statusText || 'Direct message'}</>
@@ -6594,7 +6589,7 @@ function DmThread({ conversationId, peerId, onBack }) {
         {hiddenCount > 0 && (
           <button onClick={restoreAllHidden} type="button"
             title={`You have hidden ${hiddenCount} message${hiddenCount === 1 ? '' : 's'} in this thread. Restore them?`}
-            className="shrink-0 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-white/10 bg-white/5 text-[11px] text-white/60 hover:text-white/90 hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70 transition-colors">
+            className="shrink-0 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-line bg-fill text-meta text-muted hover:text-primary hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-hover/70 transition-colors">
             <EyeOff className="w-3 h-3" />
             {hiddenCount} hidden — restore
           </button>
@@ -6618,8 +6613,8 @@ function DmThread({ conversationId, peerId, onBack }) {
         empty={(
           <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-10">
             <MsgAvatar name={peer.known ? peerName : ''} userId={peerId} photoUrl={peer.avatarUrl} size={48} />
-            <div className="text-sm font-medium text-white/70">{isSelf ? 'Notes to self' : peerName}</div>
-            <div className="text-[12px] text-white/40">{isSelf ? 'Jot down anything you want to remember.' : 'Say hello 👋'}</div>
+            <div className="text-sm font-medium text-secondary">{isSelf ? 'Notes to self' : peerName}</div>
+            <div className="text-note text-faint">{isSelf ? 'Jot down anything you want to remember.' : 'Say hello 👋'}</div>
           </div>
         )}
       />
@@ -6649,9 +6644,10 @@ function DmThread({ conversationId, peerId, onBack }) {
  *  Creation is the path today; joining by invitation comes in a later phase. */
 function OnboardingScreen({ onSignOut }) {
   const { pendingInvites, acceptInvitation } = useApp();
-  // Deliberately dark-only on AuthShell, like the rest of the pre-app funnel: this route renders
-  // with no app chrome, so it carries no data-theme — the app's light-mode overrides can't reach
-  // it, and it stays coherent whichever theme the app is in.
+  // Deliberately dark-only on AuthShell, like the rest of the pre-app funnel. This used to work by
+  // accident (the route renders with no app chrome, so the app's light-mode <style> was unmounted).
+  // Tokens are global, so the intent is now DECLARED: AuthShell's root carries data-surface="dark",
+  // which re-declares the dark palette for its subtree whatever <html data-theme> says.
   return (
     <AuthShell
       icon={FolderKanban}
@@ -6659,14 +6655,14 @@ function OnboardingScreen({ onSignOut }) {
       tagline="A workspace is where your team's tasks, projects, and chat live. Name it to get started. You'll be its owner."
       footnote={null}
       beforeCard={pendingInvites.length > 0 ? (
-        <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/[0.06] p-5 shadow-2xl mb-4">
-          <div className="text-[11px] font-medium uppercase tracking-widest text-emerald-300/70 mb-2">You've been invited</div>
+        <div className="rounded-2xl border border-success-hover/20 bg-success/[0.06] p-5 shadow-2xl mb-4">
+          <div className="text-meta font-medium uppercase tracking-widest text-success-text/70 mb-2">You've been invited</div>
           <div className="space-y-2">
             {pendingInvites.map(inv => (
               <div key={inv.id} className="flex items-center justify-between gap-2">
-                <div className="text-sm text-white/90 truncate">Join <span className="font-semibold">{inv.workspaceName}</span></div>
+                <div className="text-sm text-primary truncate">Join <span className="font-semibold">{inv.workspaceName}</span></div>
                 <button onClick={() => acceptInvitation(inv.token).catch(err => reportError(err, 'invitations.accept'))}
-                  className="shrink-0 h-8 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-semibold active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">Accept</button>
+                  className="shrink-0 h-8 px-3 rounded-lg bg-success hover:bg-success-hover text-brand-fg text-xs font-semibold active:scale-[.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-success-text">Accept</button>
               </div>
             ))}
           </div>
@@ -6674,13 +6670,13 @@ function OnboardingScreen({ onSignOut }) {
       ) : null}
       footer={
         <button onClick={() => onSignOut?.()}
-          className="mx-auto block text-[11px] text-white/35 hover:text-white/60 transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+          className="mx-auto block text-meta text-faint hover:text-muted transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
           Sign out
         </button>
       }
     >
-      {pendingInvites.length > 0 && <div className="text-[11px] text-white/40 mb-3 text-center">Or create your own workspace</div>}
-      <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">Workspace name</label>
+      {pendingInvites.length > 0 && <div className="text-meta text-faint mb-3 text-center">Or create your own workspace</div>}
+      <label className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5 block">Workspace name</label>
       <CreateWorkspaceForm submitLabel="Create workspace & continue" />
     </AuthShell>
   );
@@ -6718,7 +6714,7 @@ function MembersView() {
     return (
       <div className="space-y-6">
         <ViewHeader title="Members" subtitle="People in this workspace." />
-        <div className="text-sm text-white/50">Only an owner or admin can manage members and invitations.</div>
+        <div className="text-sm text-muted">Only an owner or admin can manage members and invitations.</div>
       </div>
     );
   }
@@ -6786,48 +6782,48 @@ function MembersView() {
       <Card title="Invite a teammate" subtitle="Pick whether they join as a full member or a limited guest. No email is sent automatically — copy the invite link below and share it with them.">
         {entitlements.atSeatLimit && (
           <button type="button" onClick={() => requestUpgrade('seats')}
-            className="w-full mb-3 flex items-center gap-2 px-3 py-2.5 rounded-xl border border-violet-400/30 bg-violet-500/10 text-left hover:bg-violet-500/15 transition-colors">
-            <Lock className="w-3.5 h-3.5 text-violet-300 shrink-0" />
-            <span className="text-[12px] text-violet-100/90 flex-1">You've reached your plan's member limit ({entitlements.limits.seats}). Upgrade to add more.</span>
-            <span className="text-[11px] font-semibold text-violet-200 shrink-0">See plans</span>
+            className="w-full mb-3 flex items-center gap-2 px-3 py-2.5 rounded-xl border border-brand-hover/30 bg-brand/10 text-left hover:bg-brand/15 transition-colors">
+            <Lock className="w-3.5 h-3.5 text-brand-text shrink-0" />
+            <span className="text-note text-brand-text/90 flex-1">You've reached your plan's member limit ({entitlements.limits.seats}). Upgrade to add more.</span>
+            <span className="text-meta font-semibold text-brand-text shrink-0">See plans</span>
           </button>
         )}
         <form onSubmit={submit} className="flex flex-col sm:flex-row gap-2">
           <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="teammate@example.com"
-            className="flex-1 h-9 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white/90 outline-none focus:border-violet-400/50 transition-colors" />
-          <div className="inline-flex shrink-0 rounded-xl border border-white/10 bg-white/5 p-0.5" role="radiogroup" aria-label="Invite as role">
+            className="flex-1 h-9 px-3 rounded-xl bg-fill border border-line text-sm text-primary outline-none focus:border-brand-hover/50 transition-colors" />
+          <div className="inline-flex shrink-0 rounded-xl border border-line bg-fill p-0.5" role="radiogroup" aria-label="Invite as role">
             {['member', 'guest'].map(r => (
               <button key={r} type="button" role="radio" aria-checked={inviteRole === r} onClick={() => setInviteRole(r)}
                 className={cx('px-3 h-8 rounded-lg text-xs font-medium capitalize transition-colors',
-                  inviteRole === r ? 'bg-white/10 text-white' : 'text-white/50 hover:text-white/80')}>
+                  inviteRole === r ? 'bg-fill-strong text-primary' : 'text-muted hover:text-secondary')}>
                 {r}
               </button>
             ))}
           </div>
           <button type="submit" disabled={busy || !email.trim()}
-            className={cx('h-9 px-4 rounded-xl text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors', (busy || !email.trim()) ? 'bg-violet-500/40 cursor-not-allowed' : 'bg-violet-500 hover:bg-violet-400')}>
+            className={cx('h-9 px-4 rounded-xl text-brand-fg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors', (busy || !email.trim()) ? 'bg-brand/40 cursor-not-allowed' : 'bg-brand hover:bg-brand-hover')}>
             <Mail className="w-3.5 h-3.5" />Create invite link
           </button>
         </form>
-        <p className="text-[11px] text-white/40 mt-2">
+        <p className="text-meta text-faint mt-2">
           {inviteRole === 'guest'
             ? 'Guests only see tasks assigned to them + direct messages — good for clients or freelancers. You can change their role later.'
             : 'Members get full access to this workspace (tasks, chat, projects). You can change their role later.'}
         </p>
-        {err && <p className="text-[11px] text-rose-300 mt-2">{err}</p>}
+        {err && <p className="text-meta text-danger-text mt-2">{err}</p>}
         {lastLink && (
-          <div className="mt-3 p-3 rounded-xl border border-white/10 bg-white/[0.03]">
-            <div className="text-[11px] text-white/50 mb-1.5">{copied ? 'Link copied. ' : ''}Send this to {lastLink.email} — joins as <span className="capitalize text-white/70">{lastLink.role || 'member'}</span>:</div>
+          <div className="mt-3 p-3 rounded-xl border border-line bg-fill-subtle">
+            <div className="text-meta text-muted mb-1.5">{copied ? 'Link copied. ' : ''}Send this to {lastLink.email} — joins as <span className="capitalize text-secondary">{lastLink.role || 'member'}</span>:</div>
             <div className="flex items-center gap-2">
-              <code className="flex-1 truncate text-[11px] text-white/70">{lastLink.url}</code>
-              <button onClick={() => copy(lastLink.url)} className="shrink-0 text-[11px] px-2 h-7 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">Copy</button>
+              <code className="flex-1 truncate text-meta text-secondary">{lastLink.url}</code>
+              <button onClick={() => copy(lastLink.url)} className="shrink-0 text-meta px-2 h-7 rounded-lg bg-fill border border-line hover:bg-fill-strong transition-colors">Copy</button>
             </div>
           </div>
         )}
       </Card>
 
       <Card title="Current members" subtitle={`${members.length} in this workspace`}>
-        {roleErr && <p className="text-[11px] text-rose-300 mb-2">{roleErr}</p>}
+        {roleErr && <p className="text-meta text-danger-text mb-2">{roleErr}</p>}
         <div className="space-y-1.5">
           {members.map(m => {
             const targetRank = ROLE_RANK[m.role] ?? -1;
@@ -6837,40 +6833,40 @@ function MembersView() {
             // admin -> members/guests only. The server RPC enforces this regardless of the UI.
             const canModify = !isSelf && !isLastOwner && (myRank >= 3 ? true : (myRank >= 2 ? targetRank < 2 : false));
             return (
-              <div key={m.userId} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/[0.02]">
+              <div key={m.userId} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-fill-subtle">
                 <PersonButton personId={m.userId} className="min-w-0 gap-2.5 flex-1" title={isSelf ? 'Your profile' : `View ${m.displayName || m.email}'s profile`}>
                   <Avatar name={m.displayName || m.email} userId={m.userId} photoUrl={m.avatarUrl} size={32} />
                   <div className="min-w-0 text-left">
-                    <div className="text-sm text-white/90 truncate">
+                    <div className="text-sm text-primary truncate">
                       {m.statusEmoji && <span className="mr-1">{m.statusEmoji}</span>}
-                      {m.displayName || m.email}{isSelf && <span className="text-white/40"> (you)</span>}
+                      {m.displayName || m.email}{isSelf && <span className="text-faint"> (you)</span>}
                     </div>
                     {/* status when they've set one, else the email — the profile view carries both anyway */}
-                    <div className="text-[11px] text-white/40 truncate">{m.statusText || m.email}</div>
+                    <div className="text-meta text-faint truncate">{m.statusText || m.email}</div>
                   </div>
                 </PersonButton>
                 <div className="shrink-0 flex items-center gap-2">
                   {!isSelf && (
                     <button onClick={() => startDm(m.userId).catch(logCaught('dms.start from members'))} title={`Message ${m.displayName || m.email}`}
-                      className="text-[11px] px-2 h-7 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 inline-flex items-center gap-1 transition-colors">
+                      className="text-meta px-2 h-7 rounded-lg bg-fill border border-line hover:bg-fill-strong inline-flex items-center gap-1 transition-colors">
                       <MessagesSquare className="w-3 h-3" />Message
                     </button>
                   )}
                   {canModify ? (
                     <div className="relative">
                       <select value={m.role} onChange={(e) => changeRole(m.userId, e.target.value)} aria-label={`Role for ${m.displayName || m.email}`}
-                        className="appearance-none text-[11px] h-7 rounded-lg bg-white/5 border border-white/10 text-white/80 pl-2.5 pr-6 outline-none focus:border-white/25 hover:bg-white/10 hover:border-white/20 cursor-pointer transition-colors">
-                        {settableRoles.map(r => <option key={r} value={r} className="bg-[#0f1017]">{ROLE_LABELS[r]}</option>)}
+                        className="appearance-none text-meta h-7 rounded-lg bg-fill border border-line text-secondary pl-2.5 pr-6 outline-none focus:border-line-strong hover:bg-fill-strong hover:border-line-strong cursor-pointer transition-colors">
+                        {settableRoles.map(r => <option key={r} value={r} className="bg-surface-raised">{ROLE_LABELS[r]}</option>)}
                       </select>
-                      <ChevronDown className="w-3 h-3 text-white/45 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <ChevronDown className="w-3 h-3 text-faint absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                     </div>
                   ) : (
                     <span title={isLastOwner ? 'The last owner — promote another owner first to change this' : undefined}
-                      className="text-[10px] uppercase tracking-wide text-white/40 bg-white/5 border border-white/10 rounded-md px-1.5 h-5 flex items-center">{ROLE_LABELS[m.role] || m.role}</span>
+                      className="text-micro uppercase tracking-wide text-faint bg-fill border border-line rounded-md px-1.5 h-5 flex items-center">{ROLE_LABELS[m.role] || m.role}</span>
                   )}
                   {canModify && (
                     <button onClick={() => setRemoveTarget(m)} aria-label={`Remove ${m.displayName || m.email}`}
-                      className="text-white/40 hover:text-rose-300 hover:bg-white/5 p-1.5 rounded-lg transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                      className="text-faint hover:text-danger-text hover:bg-fill p-1.5 rounded-lg transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
                   )}
                 </div>
               </div>
@@ -6881,18 +6877,18 @@ function MembersView() {
 
       <Card title="Pending invitations" subtitle={pending.length ? `${pending.length} awaiting acceptance` : 'None yet'}>
         {pending.length === 0 ? (
-          <div className="text-[11px] text-white/40">No pending invitations.</div>
+          <div className="text-meta text-faint">No pending invitations.</div>
         ) : (
           <div className="space-y-1.5">
             {pending.map(i => (
-              <div key={i.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/[0.02]">
+              <div key={i.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-fill-subtle">
                 <div className="min-w-0">
-                  <div className="text-sm text-white/85 truncate">{i.email}</div>
-                  <div className="text-[11px] text-white/40">invited {timeAgo(i.created_at)}</div>
+                  <div className="text-sm text-primary truncate">{i.email}</div>
+                  <div className="text-meta text-faint">invited {timeAgo(i.created_at)}</div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <button onClick={() => copy(inviteUrl(i.token))} className="text-[11px] px-2 h-7 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 inline-flex items-center gap-1 transition-colors"><Link2 className="w-3 h-3" />Copy link</button>
-                  <button onClick={() => revoke(i.id)} aria-label="Revoke invitation" className="text-[11px] px-2 h-7 rounded-lg text-white/50 hover:text-rose-300 hover:bg-white/5 inline-flex items-center gap-1 transition-colors"><X className="w-3 h-3" />Revoke</button>
+                  <button onClick={() => copy(inviteUrl(i.token))} className="text-meta px-2 h-7 rounded-lg bg-fill border border-line hover:bg-fill-strong inline-flex items-center gap-1 transition-colors"><Link2 className="w-3 h-3" />Copy link</button>
+                  <button onClick={() => revoke(i.id)} aria-label="Revoke invitation" className="text-meta px-2 h-7 rounded-lg text-muted hover:text-danger-text hover:bg-fill inline-flex items-center gap-1 transition-colors"><X className="w-3 h-3" />Revoke</button>
                 </div>
               </div>
             ))}
@@ -6903,7 +6899,8 @@ function MembersView() {
   );
 }
 
-/** Redirect old /va-desk links to /my-tasks, preserving the ?ws= workspace query param. */
+/** Redirect the legacy /va-desk path to /my-tasks, preserving the ?ws= workspace query param.
+ *  The ROUTE must stay even though the label is long gone — old bookmarks and links still hit it. */
 function RedirectToMyTasks() {
   const location = useLocation();
   return <Navigate to={`/my-tasks${location.search}`} replace />;
@@ -6917,15 +6914,13 @@ function AppShell() {
   // flashes the wrong role while memberships load (same gating discipline as workspace resolution).
   if (loading || (currentWorkspaceId && !membershipsLoaded)) {
     return (
-      <div className="min-h-screen bg-[#070810] text-white flex items-center justify-center">
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
-          body { font-family: 'Outfit', sans-serif; background: #070810; }
-          .font-display { font-family: 'Fraunces', serif; }`}</style>
+      <div data-surface="dark" className="min-h-screen bg-canvas text-primary flex items-center justify-center">
+        
         <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-2xl shadow-fuchsia-500/30 animate-pulse">
-            <Sparkles className="w-6 h-6 text-white" />
+          <div className="w-12 h-12 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-2xl shadow-brand/15 animate-pulse">
+            <Sparkles className="w-6 h-6 text-brand-fg" />
           </div>
-          <div className="text-sm text-white/50">Loading your workspace…</div>
+          <div className="text-sm text-muted">Loading your workspace…</div>
         </div>
       </div>
     );
@@ -6949,120 +6944,7 @@ function AppShell() {
   }
 
   return (
-    <div className="min-h-screen flex bg-[#070810] text-white" data-theme={theme}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
-        body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; font-feature-settings: "ss01","cv11"; background: #070810; }
-        .font-display { font-family: 'Fraunces', ui-serif, serif; font-optical-sizing: auto; font-weight: 500; }
-        .tabular-nums { font-variant-numeric: tabular-nums; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes fadeSlideOut { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(-6px) scale(0.97); } }
-        ::-webkit-scrollbar { width: 10px; height: 10px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
-        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.12); border: 2px solid transparent; background-clip: padding-box; }
-        .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        select option { color: white; background: #0f1017; }
-        kbd { font-family: 'Outfit', sans-serif; }
-        :root:not([data-theme="light"]) input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.6); cursor: pointer; }
-        [data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.6; }
-        [data-theme="light"] { color-scheme: light; }
-        [data-theme="light"] body, [data-theme="light"] { background: #f6f5f2 !important; color: #17181c !important; }
-        [data-theme="light"] .bg-\\[\\#070810\\] { background: #f6f5f2 !important; }
-        [data-theme="light"] .bg-\\[\\#0a0b11\\] { background: #fbfaf7 !important; border-color: rgba(0,0,0,0.06) !important; }
-        [data-theme="light"] .bg-\\[\\#0a0b11\\]\\/80 { background: rgba(251,250,247,0.9) !important; }
-        [data-theme="light"] .bg-\\[\\#0a0b11\\]\\/95 { background: rgba(251,250,247,0.95) !important; }
-        [data-theme="light"] .bg-\\[\\#0f1017\\] { background: #ffffff !important; color: #17181c !important; }
-        [data-theme="light"] .text-white, [data-theme="light"] .text-white\\/95, [data-theme="light"] .text-white\\/90, [data-theme="light"] .text-white\\/85 { color: #17181c !important; }
-        [data-theme="light"] .text-white\\/70, [data-theme="light"] .text-white\\/80 { color: #3a3c44 !important; }
-        [data-theme="light"] .text-white\\/60, [data-theme="light"] .text-white\\/55, [data-theme="light"] .text-white\\/50 { color: #5a5d69 !important; }
-        [data-theme="light"] .text-white\\/45, [data-theme="light"] .text-white\\/40, [data-theme="light"] .text-white\\/35 { color: #6a6d79 !important; }
-        [data-theme="light"] .text-white\\/30, [data-theme="light"] .text-white\\/25, [data-theme="light"] .text-white\\/20 { color: #6f7280 !important; }
-        [data-theme="light"] [class*="placeholder-white"]::placeholder { color: rgba(0,0,0,0.45) !important; }
-        [data-theme="light"] .border-white\\/15, [data-theme="light"] .border-white\\/20 { border-color: rgba(0,0,0,0.14) !important; }
-        [data-theme="light"] select option { color: #17181c !important; background: #ffffff !important; }
-        /* Accent TEXT: dark-mode accents are bright (readable on dark) but wash out on light-tinted
-           surfaces — mention pills, the recurrence preview chip, badges, links, the DM "Seen" tick,
-           and error text. Darken them for light mode (the heroes are re-exempted below). */
-        [data-theme="light"] .text-violet-100, [data-theme="light"] .text-violet-200, [data-theme="light"] .text-violet-300, [data-theme="light"] .text-violet-400, [data-theme="light"] .text-violet-400\\/80, [data-theme="light"] .text-violet-300\\/70, [data-theme="light"] .text-violet-300\\/80, [data-theme="light"] .text-violet-200\\/90, [data-theme="light"] .text-violet-200\\/80, [data-theme="light"] .text-violet-100\\/90 { color: #6d28d9 !important; }
-        [data-theme="light"] .text-emerald-200, [data-theme="light"] .text-emerald-300, [data-theme="light"] .text-emerald-400, [data-theme="light"] .text-emerald-300\\/80 { color: #047857 !important; }
-        [data-theme="light"] .text-amber-100, [data-theme="light"] .text-amber-200, [data-theme="light"] .text-amber-300 { color: #b45309 !important; }
-        [data-theme="light"] .text-sky-300, [data-theme="light"] .text-sky-400 { color: #0369a1 !important; }
-        [data-theme="light"] .text-rose-200, [data-theme="light"] .text-rose-300, [data-theme="light"] .text-rose-400, [data-theme="light"] .text-rose-300\\/70, [data-theme="light"] .text-rose-300\\/80, [data-theme="light"] .text-rose-300\\/90, [data-theme="light"] .text-rose-100\\/90 { color: #be123c !important; }
-        [data-theme="light"] .hover\\:text-violet-200:hover { color: #6d28d9 !important; }
-        [data-theme="light"] .hover\\:text-rose-200:hover, [data-theme="light"] .hover\\:text-rose-300:hover, [data-theme="light"] .hover\\:text-rose-400:hover { color: #be123c !important; }
-        /* EXCEPTION: the Private + My Tasks heroes stay DARK in light mode, so their accent eyebrows
-           must stay BRIGHT (and a touch brighter, since "ASSIGNED TO ME" read weak). Higher specificity
-           than the global accent rules above, so these win inside the heroes. */
-        [data-theme="light"] .from-\\[\\#0d2a20\\] .text-emerald-200, [data-theme="light"] .from-\\[\\#0d2a20\\] .text-emerald-300, [data-theme="light"] .from-\\[\\#0d2a20\\] .text-emerald-400 { color: #a7f3d0 !important; }
-        [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-200, [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-300, [data-theme="light"] .from-\\[\\#1a1530\\] .text-violet-400 { color: #c4b5fd !important; }
-        [data-theme="light"] .border-white\\/5, [data-theme="light"] .border-white\\/10, [data-theme="light"] .border-white\\/\\[0\\.06\\], [data-theme="light"] .border-white\\/\\[0\\.08\\] { border-color: rgba(0,0,0,0.08) !important; }
-        [data-theme="light"] .bg-white\\/\\[0\\.03\\], [data-theme="light"] .bg-white\\/\\[0\\.02\\], [data-theme="light"] .bg-white\\/\\[0\\.015\\], [data-theme="light"] .bg-white\\/\\[0\\.01\\], [data-theme="light"] .bg-white\\/\\[0\\.005\\], [data-theme="light"] .bg-white\\/5 { background: rgba(0,0,0,0.025) !important; }
-        /* [0.04] lives in the STRONGER group on purpose: it's the Kanban drag-over fill, and mapping it
-           to the same value as the idle [0.015] made the drop-target highlight literally zero-delta. */
-        [data-theme="light"] .bg-white\\/\\[0\\.08\\], [data-theme="light"] .bg-white\\/\\[0\\.06\\], [data-theme="light"] .bg-white\\/\\[0\\.05\\], [data-theme="light"] .bg-white\\/\\[0\\.04\\], [data-theme="light"] .bg-white\\/10, [data-theme="light"] .bg-white\\/15 { background: rgba(0,0,0,0.06) !important; }
-        /* Dropdown active-row + mention-pill accent: a legible violet in light mode (the plain white-alpha wash was near-invisible). */
-        [data-theme="light"] .bg-violet-500\\/25, [data-theme="light"] .bg-violet-500\\/20 { background: rgba(124,58,237,0.16) !important; }
-        [data-theme="light"] .search-input { background: #ffffff !important; border-color: rgba(0,0,0,0.12) !important; color: #17181c !important; }
-        [data-theme="light"] .search-input::placeholder { color: rgba(0,0,0,0.4) !important; }
-        [data-theme="light"] .hover\\:bg-white\\/5:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.03\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.04\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.06\\]:hover, [data-theme="light"] .hover\\:bg-white\\/\\[0\\.07\\]:hover, [data-theme="light"] .hover\\:bg-white\\/10:hover { background: rgba(0,0,0,0.04) !important; }
-        /* Post-merge light gaps (2026-07-18): the @mention pill's hover had no light rule (the !important
-           base swallowed it — hover did nothing); the selected-emoji ring was a washed-out pale violet;
-           and hover:text-white(/80) hovers were dead because only their base classes were remapped. */
-        [data-theme="light"] .hover\\:bg-violet-500\\/30:hover { background: rgba(124,58,237,0.3) !important; }
-        [data-theme="light"] .ring-violet-400\\/50 { --tw-ring-color: rgba(109,40,217,0.55) !important; }
-        [data-theme="light"] .hover\\:text-white\\/80:hover { color: #17181c !important; }
-        [data-theme="light"] .hover\\:text-white:hover { color: #17181c !important; }
-        /* Verified-sweep additions (2026-07-18): remaining unmapped dark-only tokens found by the
-           post-fix audit — surfaces (toast/tooltip), accent-button text, focus affordances, input
-           wells, scrollbars, drag targets, selection states, and alpha steps the base lists missed. */
-        [data-theme="light"] .bg-\\[\\#0f1017\\]\\/90 { background: rgba(255,255,255,0.92) !important; }
-        [data-theme="light"] .bg-black\\/90 { background: #17181c !important; color: #ffffff !important; border-color: rgba(255,255,255,0.15) !important; }
-        [data-theme="light"] .bg-violet-500, [data-theme="light"] .bg-violet-500 .text-white, [data-theme="light"] .bg-rose-500, [data-theme="light"] .bg-rose-500 .text-white, [data-theme="light"] .bg-emerald-500, [data-theme="light"] .bg-emerald-500 .text-white, [data-theme="light"] .from-violet-500, [data-theme="light"] .from-violet-500 .text-white, [data-theme="light"] .from-rose-500, [data-theme="light"] .from-rose-500 .text-white { color: #ffffff !important; }
-        [data-theme="light"] .focus\\:border-violet-400\\/60:focus, [data-theme="light"] .focus\\:border-violet-400\\/50:focus, [data-theme="light"] .focus\\:border-violet-400\\/40:focus { border-color: rgba(109,40,217,0.55) !important; }
-        [data-theme="light"] .focus\\:border-rose-400\\/50:focus { border-color: rgba(190,18,60,0.55) !important; }
-        [data-theme="light"] .focus\\:border-white\\/25:focus { border-color: rgba(0,0,0,0.3) !important; }
-        [data-theme="light"] .bg-black\\/30 { background: rgba(0,0,0,0.05) !important; }
-        [data-theme="light"] .focus\\:bg-black\\/40:focus { background: rgba(0,0,0,0.08) !important; }
-        [data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border: 2px solid transparent; background-clip: padding-box; }
-        [data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); border: 2px solid transparent; background-clip: padding-box; }
-        [data-theme="light"] .border-white\\/25, [data-theme="light"] .border-white\\/30 { border-color: rgba(0,0,0,0.3) !important; }
-        [data-theme="light"] .border-white\\/\\[0\\.04\\], [data-theme="light"] .border-white\\/\\[0\\.07\\] { border-color: rgba(0,0,0,0.08) !important; }
-        [data-theme="light"] .ring-white\\/70 { --tw-ring-color: rgba(0,0,0,0.45) !important; }
-        [data-theme="light"] .hover\\:text-white\\/90:hover { color: #17181c !important; }
-        [data-theme="light"] .hover\\:text-white\\/70:hover { color: #3a3c44 !important; }
-        [data-theme="light"] .focus\\:text-rose-300:focus { color: #be123c !important; }
-        [data-theme="light"] .group:hover .group-hover\\:text-violet-200 { color: #6d28d9 !important; }
-        [data-theme="light"] .hover\\:border-white\\/10:hover, [data-theme="light"] .hover\\:border-white\\/15:hover, [data-theme="light"] .hover\\:border-white\\/20:hover, [data-theme="light"] .hover\\:border-white\\/25:hover { border-color: rgba(0,0,0,0.18) !important; }
-        [data-theme="light"] .hover\\:bg-white\\/\\[0\\.05\\]:hover { background: rgba(0,0,0,0.04) !important; }
-
-        /* Action buttons — keep dark-on-light for "New" button */
-        [data-theme="light"] .bg-white { background: #17181c !important; color: #ffffff !important; }
-        [data-theme="light"] .text-black { color: #ffffff !important; }
-        [data-theme="light"] .hover\\:bg-white\\/90:hover { background: #000 !important; }
-        [data-theme="light"] kbd { background: rgba(255,255,255,0.15) !important; color: rgba(255,255,255,0.7) !important; }
-
-        /* Hero sections (Private + VA) — keep them dark for visual contrast */
-        [data-theme="light"] .from-\\[\\#1a1530\\] { --tw-gradient-from: #2a2245 !important; }
-        [data-theme="light"] .via-\\[\\#14101e\\] { --tw-gradient-via: #1f1a30 !important; }
-        [data-theme="light"] .from-\\[\\#0d2a20\\] { --tw-gradient-from: #134032 !important; }
-        [data-theme="light"] .via-\\[\\#0c1a18\\] { --tw-gradient-via: #0f2820 !important; }
-        [data-theme="light"] .to-\\[\\#0a0b11\\] { --tw-gradient-to: #1a1d28 !important; }
-
-        /* Hero text stays white (since hero bg stays dark) */
-        [data-theme="light"] .from-\\[\\#1a1530\\] *, [data-theme="light"] .from-\\[\\#0d2a20\\] * { color: inherit; }
-        [data-theme="light"] .from-\\[\\#1a1530\\] h1, [data-theme="light"] .from-\\[\\#0d2a20\\] h1 { color: #ffffff !important; }
-        [data-theme="light"] .from-\\[\\#1a1530\\] p, [data-theme="light"] .from-\\[\\#0d2a20\\] p { color: rgba(255,255,255,0.7) !important; }
-        [data-theme="light"] .from-\\[\\#1a1530\\] .bg-black\\/30, [data-theme="light"] .from-\\[\\#0d2a20\\] .bg-black\\/30 { background: rgba(0,0,0,0.3) !important; }
-        [data-theme="light"] .from-\\[\\#1a1530\\] .bg-white, [data-theme="light"] .from-\\[\\#0d2a20\\] .bg-white { background: #ffffff !important; color: #17181c !important; }
-        [data-theme="light"] .from-\\[\\#1a1530\\] .bg-white .text-black, [data-theme="light"] .from-\\[\\#0d2a20\\] .bg-white .text-black { color: #17181c !important; }
-        [data-theme="light"] .from-\\[\\#0d2a20\\] .bg-emerald-500 { background: #10b981 !important; color: #ffffff !important; }
-        [data-theme="light"] .from-\\[\\#0d2a20\\] .bg-emerald-500 .text-black { color: #ffffff !important; }
-        [data-theme="light"] .from-\\[\\#0d2a20\\] .text-white\\/50 { color: rgba(255,255,255,0.6) !important; }
-        [data-theme="light"] .from-\\[\\#1a1530\\] .text-white\\/50 { color: rgba(255,255,255,0.6) !important; }
-        [data-theme="light"] .from-\\[\\#0d2a20\\] .text-white\\/70, [data-theme="light"] .from-\\[\\#1a1530\\] .text-white\\/70 { color: rgba(255,255,255,0.85) !important; }`}</style>
+    <div className="min-h-screen flex bg-canvas text-primary" data-theme={theme}>
 
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0">

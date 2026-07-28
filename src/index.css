@@ -1,3 +1,10 @@
-@tailwind base; 
-@tailwind components; 
+/* Tokens FIRST. A CSS `@import` must precede every other rule, and Vite inlines
+ * it at build time, so the variables exist before Tailwind's generated utilities
+ * reference them. Utilities are single-class selectors, so they still outrank the
+ * element-level rules tokens.css sets on html/body — order here does not put the
+ * base styles above the utilities. */
+@import './styles/tokens.css';
+
+@tailwind base;
+@tailwind components;
 @tailwind utilities;

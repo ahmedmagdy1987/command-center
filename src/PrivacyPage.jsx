@@ -5,7 +5,7 @@ import { SiteHeader, SiteFooter } from './SiteChrome';
  * it is NOT legal advice and must be reviewed by a qualified professional before real use.
  */
 const SECTIONS = [
-  { h: 'Overview', b: 'This Privacy Policy explains what information Command Center (the "Service") collects, how it is used, and the choices you have. By using the Service, you agree to the practices described here.' },
+  { h: 'Overview', b: 'This Privacy Policy explains what information Corlyvo (the "Service") collects, how it is used, and the choices you have. By using the Service, you agree to the practices described here.' },
   { h: 'Information we collect', b: 'We collect the information you provide directly, such as your name, email address, and the content you create in the Service. We also collect basic technical information, such as device and usage data, that is generated as you use the Service.' },
   { h: 'How we use information', b: 'We use information to provide, secure, and improve the Service, to authenticate accounts, to enable collaboration features, to communicate with you about the Service, and to comply with legal obligations.' },
   { h: 'How we share information', b: 'We do not sell your personal information. We share it only with service providers that help us operate the Service, with other members of your workspace as required for collaboration, or when required by law.' },
@@ -19,21 +19,17 @@ const SECTIONS = [
 
 export default function PrivacyPage({ session }) {
   return (
-    <div className="min-h-screen bg-[#070810] text-white flex flex-col">
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Outfit:wght@300..700&display=swap');
-        body { font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif; background: #070810; }
-        .font-display { font-family: 'Fraunces', ui-serif, serif; font-optical-sizing: auto; font-weight: 500; }
-      `}</style>
+    <div data-surface="dark" className="min-h-screen bg-canvas text-primary flex flex-col">
+      
       <SiteHeader session={session} />
       <main className="flex-1 w-full max-w-3xl mx-auto px-5 lg:px-8 py-12">
-        <h1 className="text-3xl lg:text-4xl font-semibold font-display tracking-tight">Privacy Policy</h1>
-        <p className="mt-2 text-sm text-white/40">Last updated: June 2026</p>
+        <h1 className="text-3xl lg:text-4xl font-semibold font-brand tracking-tight">Privacy Policy</h1>
+        <p className="mt-2 text-sm text-faint">Last updated: June 2026</p>
         <div className="mt-8 space-y-7">
           {SECTIONS.map(s => (
             <section key={s.h}>
-              <h2 className="text-base font-semibold text-white/90">{s.h}</h2>
-              <p className="mt-1.5 text-sm text-white/55 leading-relaxed">{s.b}</p>
+              <h2 className="text-base font-semibold text-primary">{s.h}</h2>
+              <p className="mt-1.5 text-sm text-muted leading-relaxed">{s.b}</p>
             </section>
           ))}
         </div>

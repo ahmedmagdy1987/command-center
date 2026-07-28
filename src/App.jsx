@@ -16,13 +16,10 @@ import { supabase } from './lib/supabase';
 
 function FullScreenSpinner() {
   return (
-    <div className="min-h-screen bg-[#070810] text-white flex items-center justify-center">
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300..700&display=swap');
-        body { font-family: 'Outfit', sans-serif; background: #070810; }
-      `}</style>
-      <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-2xl shadow-fuchsia-500/30 animate-pulse">
-        <Sparkles className="w-6 h-6 text-white" />
+    <div data-surface="dark" className="min-h-screen bg-canvas text-primary flex items-center justify-center">
+      
+      <div className="w-12 h-12 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-2xl shadow-brand/15 animate-pulse">
+        <Sparkles className="w-6 h-6 text-brand-fg" />
       </div>
     </div>
   );

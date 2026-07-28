@@ -45,16 +45,15 @@ export function Magnetic({ children, className = '' }) {
 
 /** Gradient hairline — the marketing pages' section divider. */
 export const Hairline = ({ className = '' }) => (
-  <div aria-hidden="true" className={`h-px bg-gradient-to-r from-transparent via-violet-400/25 to-transparent ${className}`} />
+  <div aria-hidden="true" className={`h-px bg-gradient-to-r from-transparent via-brand-hover/25 to-transparent ${className}`} />
 );
-
 
 /** Text nav link with an animated gradient underline (transform-only scale-x). */
 function NavTextLink({ to, className = '', children }) {
   return (
     <Link
       to={to}
-      className={`relative h-9 px-3.5 rounded-lg text-sm font-medium text-white/70 hover:text-white items-center transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 after:content-[''] after:absolute after:left-3.5 after:right-3.5 after:bottom-1.5 after:h-px after:bg-gradient-to-r after:from-violet-400 after:to-fuchsia-400 after:origin-left after:scale-x-0 hover:after:scale-x-100 after:transition-transform after:duration-300 motion-reduce:after:transition-none ${className}`}
+      className={`relative h-9 px-3.5 rounded-lg text-sm font-medium text-secondary hover:text-primary items-center transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text after:content-[''] after:absolute after:left-3.5 after:right-3.5 after:bottom-1.5 after:h-px after:bg-gradient-to-r after:from-brand-hover after:to-brand-alt-hover after:origin-left after:scale-x-0 hover:after:scale-x-100 after:transition-transform after:duration-300 motion-reduce:after:transition-none ${className}`}
     >
       {children}
     </Link>
@@ -79,23 +78,23 @@ export function SiteHeader({ session }) {
       {/* Crossfaded bar: border + blur + shadow live here and fade in on scroll */}
       <div
         aria-hidden="true"
-        className={`absolute inset-0 border-b border-white/[0.06] bg-[#070810]/85 backdrop-blur-md shadow-lg shadow-black/20 transition-opacity duration-300 motion-reduce:transition-none ${scrolled ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute inset-0 border-b border-line-subtle bg-canvas/85 backdrop-blur-md shadow-lg shadow-black/20 transition-opacity duration-300 motion-reduce:transition-none ${scrolled ? 'opacity-100' : 'opacity-0'}`}
       />
       <div className="relative max-w-6xl mx-auto px-5 lg:px-8 h-14 flex items-center justify-between">
-        <Link to="/" className="group flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/20 transition-transform duration-300 motion-reduce:transition-none group-hover:scale-110 group-hover:rotate-6">
-            <Sparkles className="w-3.5 h-3.5 text-white" />
+        <Link to="/" className="group flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
+          <div className="w-7 h-7 rounded-lg bg-brand-gradient flex items-center justify-center shadow-lg shadow-brand/10 transition-transform duration-300 motion-reduce:transition-none group-hover:scale-110 group-hover:rotate-6">
+            <Sparkles className="w-3.5 h-3.5 text-brand-fg" />
           </div>
-          <span className="text-[15px] font-semibold font-display tracking-tight">Command Center</span>
+          <span className="text-[15px] font-semibold font-brand tracking-tight">Corlyvo</span>
         </Link>
         <nav className="flex items-center gap-1.5">
           <NavTextLink to="/pricing" className="hidden sm:inline-flex">Pricing</NavTextLink>
           {session ? (
-            <Link to="/" className="h-9 px-4 rounded-lg text-sm font-semibold bg-white text-[#0a0b11] hover:bg-white/90 active:scale-[.97] flex items-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">Open app</Link>
+            <Link to="/" className="h-9 px-4 rounded-lg text-sm font-semibold bg-inverse text-inverse-fg hover:bg-inverse/90 active:scale-[.97] flex items-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">Open app</Link>
           ) : (
             <>
               <NavTextLink to="/login" className="flex">Log in</NavTextLink>
-              <Link to="/signup" className="h-9 px-4 rounded-lg text-sm font-semibold bg-white text-[#0a0b11] hover:bg-white/90 active:scale-[.97] flex items-center transition-all shadow-lg shadow-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">Sign up</Link>
+              <Link to="/signup" className="h-9 px-4 rounded-lg text-sm font-semibold bg-inverse text-inverse-fg hover:bg-inverse/90 active:scale-[.97] flex items-center transition-all shadow-lg shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">Sign up</Link>
             </>
           )}
         </nav>
@@ -107,13 +106,13 @@ export function SiteHeader({ session }) {
 function FooterCol({ title, links }) {
   return (
     <div>
-      <div className="text-[10px] font-medium uppercase tracking-widest text-white/50 mb-2">{title}</div>
-      <ul className="space-y-1 text-[13px]">
+      <div className="text-micro font-medium uppercase tracking-widest text-muted mb-2">{title}</div>
+      <ul className="space-y-1 text-compact">
         {links.map(([label, to]) => (
           <li key={label}>
             {to.startsWith('mailto:')
-              ? <a href={to} className="inline-block py-1.5 text-white/55 hover:text-white transition-colors">{label}</a>
-              : <Link to={to} className="inline-block py-1.5 text-white/55 hover:text-white transition-colors">{label}</Link>}
+              ? <a href={to} className="inline-block py-1.5 text-muted hover:text-primary transition-colors">{label}</a>
+              : <Link to={to} className="inline-block py-1.5 text-muted hover:text-primary transition-colors">{label}</Link>}
           </li>
         ))}
       </ul>
@@ -125,18 +124,18 @@ export function SiteFooter() {
   const year = new Date().getFullYear();
   return (
     <footer className="relative mt-8 overflow-hidden">
-      <div aria-hidden="true" className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-violet-400/25 to-transparent" />
-      <div aria-hidden="true" className="absolute -top-28 left-1/2 -ml-44 h-72 rounded-full pointer-events-none" style={{ width: '22rem', background: 'radial-gradient(closest-side, rgba(139,92,246,.09), transparent 70%)' }} />
+      <div aria-hidden="true" className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-brand-hover/25 to-transparent" />
+      <div aria-hidden="true" className="absolute -top-28 left-1/2 -ml-44 h-72 rounded-full pointer-events-none" style={{ width: '22rem', background: 'radial-gradient(closest-side, rgba(91,103,241,.09), transparent 70%)' }} />
       <div className="relative max-w-6xl mx-auto px-5 lg:px-8 pt-10 pb-8">
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-8">
           <div className="max-w-xs">
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 via-fuchsia-500 to-rose-500 flex items-center justify-center">
-                <Sparkles className="w-3 h-3 text-white" />
+              <div className="w-6 h-6 rounded-md bg-brand-gradient flex items-center justify-center">
+                <Sparkles className="w-3 h-3 text-brand-fg" />
               </div>
-              <span className="text-white/80 font-semibold font-display tracking-tight">Command Center</span>
+              <span className="text-secondary font-semibold font-brand tracking-tight">Corlyvo</span>
             </div>
-            <p className="mt-3 text-[12px] text-white/40 leading-relaxed">
+            <p className="mt-3 text-note text-faint leading-relaxed">
               One visual workspace for your team’s tasks, owners, and due dates — live for everyone.
             </p>
           </div>
@@ -145,8 +144,8 @@ export function SiteFooter() {
             <FooterCol title="Company" links={[['Terms', '/terms'], ['Privacy', '/privacy'], ['Contact', 'mailto:support@opscommandcenter.com']]} />
           </div>
         </div>
-        <div className="mt-9 pt-5 border-t border-white/[0.06] text-[12px] text-white/50">
-          © {year} Command Center. All rights reserved.
+        <div className="mt-9 pt-5 border-t border-line-subtle text-note text-muted">
+          © {year} Corlyvo. All rights reserved.
         </div>
       </div>
     </footer>

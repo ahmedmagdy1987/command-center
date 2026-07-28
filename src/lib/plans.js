@@ -1,5 +1,5 @@
 /* =============================================================================
-   PLANS — the single source of truth for Command Center's freemium packaging.
+   PLANS — the single source of truth for Corlyvo's freemium packaging.
 
    Everything about monetization strategy lives here: tier names, the
    free-vs-paid feature map, all limits, prices (monthly + annual), and the
@@ -205,7 +205,7 @@ export const PRICING_COPY = {
   ],
   // Honest early-access framing. Doubles as the reason existing users keep everything.
   earlyAccessNote:
-    'Command Center is in early access, and founding members get every feature free for now. These are the plans we’re validating; pricing isn’t final.',
+    'Corlyvo is in early access, and founding members get every feature free for now. These are the plans we’re validating; pricing isn’t final.',
   annualLabel: 'Billed annually',
   monthlyLabel: 'Billed monthly',
   annualBadge: 'Save ~2 months',

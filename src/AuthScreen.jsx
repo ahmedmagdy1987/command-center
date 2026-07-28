@@ -67,7 +67,7 @@ export default function AuthScreen({ mode = 'signin', initialSignup = false }) {
                 : 'Welcome back';
   const subheading = view === 'reset' ? 'Enter your email and we’ll send you a reset link.'
                    : view === 'signup' ? 'Set up your credentials to get started.'
-                   : 'Sign in to your Command Center.';
+                   : 'Sign in to your Corlyvo.';
   const cta = view === 'reset' ? 'Send reset link'
             : view === 'signup' ? 'Create account'
             : 'Sign in';
@@ -79,13 +79,13 @@ export default function AuthScreen({ mode = 'signin', initialSignup = false }) {
   return (
     <AuthShell>
       <div className="text-center mb-5">
-        <h2 className="text-base font-semibold text-white">{heading}</h2>
-        <p className="text-[11px] text-white/40 mt-1">{subheading}</p>
+        <h2 className="text-base font-semibold text-primary">{heading}</h2>
+        <p className="text-meta text-faint mt-1">{subheading}</p>
       </div>
 
       <form onSubmit={submit} className="space-y-4">
         <div className="au-in" style={{ animationDelay: '.16s' }}>
-          <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 mb-1.5 block">Email</label>
+          <label className="text-micro font-medium uppercase tracking-widest text-faint mb-1.5 block">Email</label>
           <AuthField icon={Mail} type="email" value={email} onChange={e => setEmail(e.target.value)} required autoFocus
             placeholder="you@example.com" />
         </div>
@@ -93,10 +93,10 @@ export default function AuthScreen({ mode = 'signin', initialSignup = false }) {
         {view !== 'reset' && (
           <div className="au-in" style={{ animationDelay: '.2s' }}>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="text-[10px] font-medium uppercase tracking-widest text-white/40 block">Password</label>
+              <label className="text-micro font-medium uppercase tracking-widest text-faint block">Password</label>
               {view === 'signin' && (
                 <button type="button" onClick={() => navigate('/forgot-password')}
-                  className="text-[10px] font-medium text-violet-300/70 hover:text-violet-200 transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+                  className="text-micro font-medium text-brand-text/70 hover:text-brand-text transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
                   Forgot password?
                 </button>
               )}
@@ -120,16 +120,16 @@ export default function AuthScreen({ mode = 'signin', initialSignup = false }) {
       {view === 'reset' && (
         <div className="au-in" style={{ animationDelay: '.32s' }}>
           <button onClick={() => navigate('/login')}
-            className="mt-4 w-full text-center text-[11px] text-white/40 hover:text-white/70 transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+            className="mt-4 w-full text-center text-meta text-faint hover:text-secondary transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
             ← Back to sign in
           </button>
         </div>
       )}
       {SIGNUP_ENABLED && view === 'signin' && (
-        <p className="au-in mt-4 text-center text-[11px] text-white/40" style={{ animationDelay: '.32s' }}>
+        <p className="au-in mt-4 text-center text-meta text-faint" style={{ animationDelay: '.32s' }}>
           Don’t have an account?{' '}
           <button onClick={() => setSignupOpen(true)}
-            className="text-violet-300/80 hover:text-violet-200 font-medium rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+            className="text-brand-text/80 hover:text-brand-text font-medium rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
             Create one
           </button>
         </p>
@@ -137,7 +137,7 @@ export default function AuthScreen({ mode = 'signin', initialSignup = false }) {
       {SIGNUP_ENABLED && view === 'signup' && (
         <div className="au-in" style={{ animationDelay: '.32s' }}>
           <button onClick={() => setSignupOpen(false)}
-            className="mt-4 w-full text-center text-[11px] text-white/40 hover:text-white/70 transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+            className="mt-4 w-full text-center text-meta text-faint hover:text-secondary transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">
             ← Back to sign in
           </button>
         </div>
