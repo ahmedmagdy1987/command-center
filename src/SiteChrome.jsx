@@ -78,7 +78,7 @@ export function SiteHeader({ session }) {
       {/* Crossfaded bar: border + blur + shadow live here and fade in on scroll */}
       <div
         aria-hidden="true"
-        className={`absolute inset-0 border-b border-line-subtle bg-canvas/85 backdrop-blur-md shadow-lg shadow-sm transition-opacity duration-300 motion-reduce:transition-none ${scrolled ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute inset-0 border-b border-line-subtle bg-canvas/85 backdrop-blur-md shadow-lg shadow-black/20 transition-opacity duration-300 motion-reduce:transition-none ${scrolled ? 'opacity-100' : 'opacity-0'}`}
       />
       <div className="relative max-w-6xl mx-auto px-5 lg:px-8 h-14 flex items-center justify-between">
         <Link to="/" className="group flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-text">

@@ -102,6 +102,11 @@
    * column is `fill-subtle`. A previous pass collapsed them to the same value
    * and the drop target became a zero-delta no-op. Keep the gap.
    * ------------------------------------------------------------------- */
+  /* The scrollbar thumb needs its OWN token. Tying it to --color-fill dropped the
+   * light-mode thumb to 4% black; the retired override sheet used 15%/25%. */
+  --color-scrollbar: rgba(255, 255, 255, 0.14);
+  --color-scrollbar-hover: rgba(255, 255, 255, 0.24);
+
   --color-fill-subtle: rgba(255, 255, 255, 0.03);   /* idle wells, striping   was /[0.005]-/[0.03] */
   --color-fill: rgba(255, 255, 255, 0.05);          /* hover, drag-over, /5   was /[0.04]-/[0.07] */
   --color-fill-strong: rgba(255, 255, 255, 0.10);   /* pressed, selected      was /[0.08]-/25 */
@@ -157,7 +162,15 @@
   --color-brand: 139 92 246;           /* #8B5CF6  violet-500 (Phase 2 -> #5B67F1) */
   --color-brand-hover: 167 139 250;    /* #A78BFA  violet-400 (Phase 2 -> #747BFF) */
   --color-brand-text: 196 181 253;     /* #C4B5FD  violet-300 — brand TEXT on dark */
-  --color-brand-fg: 255 255 255;       /* text/icon ON a brand-filled surface */
+  --color-brand-text-hover: 221 214 254; /* #DDD6FE violet-200 — link hover; without this,
+                                          * shades 200 and 300 both collapse onto -text and
+                                          * `hover:text-brand-text` is a no-op. */
+  /* The foreground for ANY saturated fill — brand, danger, success, warning, info.
+   * It does NOT flip with the theme, because the fill underneath it does not either.
+   * Do NOT reach for `text-primary` here (it flips to near-black and lands on a
+   * saturated button) and do NOT reach for a `-text` role (that is the ON-DARK
+   * READING colour of a family, so `bg-danger text-danger-text` is red-on-red). */
+  --color-brand-fg: 255 255 255;
 
   /* The SECOND gradient stop. It needs its own name: folding fuchsia into
    * --color-brand would turn every `from-violet-500 to-fuchsia-500` into a solid
@@ -304,6 +317,9 @@
   --color-text-muted: 90 93 105;       /* #5A5D69 */
   --color-text-faint: 106 109 121;     /* #6A6D79 */
 
+  --color-scrollbar: rgba(0, 0, 0, 0.15);
+  --color-scrollbar-hover: rgba(0, 0, 0, 0.25);
+
   --color-fill-subtle: rgba(0, 0, 0, 0.025);
   --color-fill: rgba(0, 0, 0, 0.04);
   --color-fill-strong: rgba(0, 0, 0, 0.07);
@@ -338,6 +354,7 @@
   --color-brand: 109 40 217;           /* #6D28D9 */
   --color-brand-hover: 91 33 182;      /* #5B21B6 */
   --color-brand-text: 109 40 217;      /* converges: a light violet is illegible on white */
+  --color-brand-text-hover: 76 29 149; /* #4C1D95 — darkens on hover, the light-mode direction */
   --color-brand-alt: 162 28 175;       /* #A21CAF */
   --color-brand-alt-hover: 192 38 211; /* #C026D3 */
   --color-brand-alt-text: 162 28 175;  /* converges, like every other -text on light */
@@ -410,6 +427,7 @@
   --color-brand: 167 139 250;
   --color-brand-hover: 196 181 253;
   --color-brand-text: 196 181 253;
+  --color-brand-text-hover: 221 214 254;
   --color-brand-alt: 217 70 239;
   --color-brand-alt-hover: 232 121 249;
   --color-brand-alt-text: 240 171 252;
@@ -446,8 +464,20 @@ body {
  * a marketing page would flash the light canvas. Each funnel page used to pin
  * `body { background: #070810 }` in its own <style> block; this replaces all
  * seven of those with one declarative rule. */
-body:has([data-surface='dark']) {
+html:has([data-surface='dark']),
+html:has([data-surface='dark']) body {
   background: rgb(7 8 16);
+}
+
+/* ...and the page scrollbar with it. ::-webkit-scrollbar on the document is resolved
+ * against the ROOT element, so a [data-surface="dark"] div deep in the tree never
+ * reached it: a returning light-theme user on /pricing got a 15%-BLACK thumb on a
+ * near-black page. */
+html:has([data-surface='dark'])::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+}
+html:has([data-surface='dark'])::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.24);
 }
 
 body {
@@ -474,13 +504,13 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-fill);
+  background: var(--color-scrollbar);
   border-radius: 8px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-fill-strong);
+  background: var(--color-scrollbar-hover);
   border: 2px solid transparent;
   background-clip: padding-box;
 }

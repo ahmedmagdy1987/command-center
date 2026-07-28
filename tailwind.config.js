@@ -61,6 +61,7 @@ export default {
           DEFAULT: 'rgb(var(--color-brand) / <alpha-value>)',
           hover: 'rgb(var(--color-brand-hover) / <alpha-value>)',
           text: 'rgb(var(--color-brand-text) / <alpha-value>)',
+          'text-hover': 'rgb(var(--color-brand-text-hover) / <alpha-value>)',
           alt: 'rgb(var(--color-brand-alt) / <alpha-value>)',
           'alt-hover': 'rgb(var(--color-brand-alt-hover) / <alpha-value>)',
           'alt-text': 'rgb(var(--color-brand-alt-text) / <alpha-value>)',
@@ -131,11 +132,12 @@ export default {
         compact: ['var(--text-compact)', { lineHeight: '1.5' }],
       },
 
-      boxShadow: {
-        sm: 'var(--shadow-sm)',
-        md: 'var(--shadow-md)',
-        lg: 'var(--shadow-lg)',
-      },
+      // NOTE: do NOT map shadow-sm/md/lg onto --shadow-*. Overriding those keys sets
+      // both --tw-shadow and --tw-shadow-colored to the same OPAQUE value, which
+      // silently disables Tailwind's coloured-shadow modifier — `shadow-brand/30`
+      // and friends (24 call sites) become no-ops. It also made `shadow-lg` heavier
+      // than `shadow-xl`. The --shadow-* tokens still exist in tokens.css for
+      // deliberate use via arbitrary values; they must not hijack the size scale.
 
       fontFamily: {
         sans: 'var(--font-sans)',

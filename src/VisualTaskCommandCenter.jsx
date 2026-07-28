@@ -1161,7 +1161,7 @@ function AppProvider({ children, session, currentMember, onSignOut, refreshCurre
               {tt.action && (
                 <button
                   onClick={() => { setAppToasts(p => p.filter(x => x.id !== tt.id)); tt.action.onClick?.(); }}
-                  className="shrink-0 font-semibold underline underline-offset-2 text-brand-text hover:text-brand-text focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-hover/70 rounded px-0.5">
+                  className="shrink-0 font-semibold underline underline-offset-2 text-brand-text hover:text-brand-text-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-hover/70 rounded px-0.5">
                   {tt.action.label}
                 </button>
               )}
@@ -1291,7 +1291,7 @@ function Tooltip({ children, content, className = 'inline-flex' }) {
   return (
     <span className={cx('relative group', className)}>
       {children}
-      <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-9 whitespace-nowrap text-micro font-medium px-2 py-1 rounded-md bg-tooltip border border-line text-primary opacity-0 group-hover:opacity-100 transition-opacity z-50">
+      <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-9 whitespace-nowrap text-micro font-medium px-2 py-1 rounded-md bg-tooltip border border-tooltip-fg/15 text-tooltip-fg opacity-0 group-hover:opacity-100 transition-opacity z-50">
         {content}
       </span>
     </span>
@@ -1446,8 +1446,8 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showAssign
       className={cx(
         'group relative rounded-xl border cursor-pointer transition-all duration-200',
         'border-line-subtle bg-gradient-to-br from-fill to-fill-subtle',
-        'hover:border-line hover:from-fill hover:to-fill-subtle',
-        'hover:-translate-y-0.5 hover:shadow-xl hover:shadow-md',
+        'hover:border-line hover:from-fill-strong hover:to-fill',
+        'hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/30',
         done && 'opacity-50',
         exiting && 'animate-[fadeSlideOut_.18s_ease_forwards] pointer-events-none',
         compact ? 'p-3' : 'p-4',
@@ -1750,7 +1750,7 @@ function TaskComments({ taskId }) {
                     onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(c.id); } else if (e.key === 'Escape') setEditId(null); }}
                     className="w-full bg-fill border border-line rounded-lg px-3 py-2 text-xs text-primary outline-none focus:border-brand-hover/50 resize-none" />
                   <div className="flex items-center gap-3">
-                    <button onClick={() => saveEdit(c.id)} className="text-micro font-semibold text-brand-text hover:text-brand-text">Save</button>
+                    <button onClick={() => saveEdit(c.id)} className="text-micro font-semibold text-brand-text hover:text-brand-text-hover">Save</button>
                     <button onClick={() => setEditId(null)} className="text-micro text-faint hover:text-secondary">Cancel</button>
                   </div>
                 </div>
@@ -2719,7 +2719,7 @@ function MobileTabs() {
                   <it.icon className="w-4 h-4 shrink-0" />
                   <span className="flex-1 text-sm font-medium">{it.label}</span>
                   {it.badge > 0 && (
-                    <span className="min-w-[16px] h-4 px-1 rounded-full bg-danger text-danger-text text-[9px] font-bold leading-none flex items-center justify-center">{it.badge > 9 ? '9+' : it.badge}</span>
+                    <span className="min-w-[16px] h-4 px-1 rounded-full bg-danger text-brand-fg text-[9px] font-bold leading-none flex items-center justify-center">{it.badge > 9 ? '9+' : it.badge}</span>
                   )}
                 </button>
               ))}
@@ -2737,7 +2737,7 @@ function MobileTabs() {
                 view === it.id ? 'text-primary' : 'text-faint')}>
               <it.icon className="w-5 h-5" />
               {it.badge > 0 && (
-                <span className="absolute top-1.5 left-1/2 translate-x-2 min-w-[14px] h-3.5 px-1 rounded-full bg-danger text-danger-text text-[8px] font-bold leading-none flex items-center justify-center">{it.badge > 9 ? '9+' : it.badge}</span>
+                <span className="absolute top-1.5 left-1/2 translate-x-2 min-w-[14px] h-3.5 px-1 rounded-full bg-danger text-brand-fg text-[8px] font-bold leading-none flex items-center justify-center">{it.badge > 9 ? '9+' : it.badge}</span>
               )}
               <span className="text-[9px] font-medium tracking-wide">{it.label}</span>
             </button>
@@ -3005,7 +3005,7 @@ function NotificationBell() {
       <div className="relative">
         <IconButton icon={Bell} label="Notifications" active={open} onClick={() => setOpen(o => !o)} />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-danger text-danger-text text-[9px] font-bold leading-none flex items-center justify-center pointer-events-none shadow-[0_0_8px_rgba(244,63,94,0.5)]">
+          <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-danger text-brand-fg text-[9px] font-bold leading-none flex items-center justify-center pointer-events-none shadow-[0_0_8px_rgba(244,63,94,0.5)]">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
@@ -3178,7 +3178,7 @@ function ConfirmModal({ open, title, message, confirmLabel = 'Delete', confirmDi
             <button onClick={onClose}
               className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">Cancel</button>
             <button ref={btnRef} onClick={onConfirm} disabled={confirmDisabled}
-              className={cx('h-9 px-4 rounded-xl text-primary text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
+              className={cx('h-9 px-4 rounded-xl text-brand-fg text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
                 confirmDisabled ? 'bg-danger/40 text-muted cursor-not-allowed'
                   : tone === 'danger' ? 'bg-danger hover:bg-danger-hover' : 'bg-brand hover:bg-brand-hover')}>
               <Icon className="w-3.5 h-3.5" />{confirmLabel}
@@ -3302,7 +3302,7 @@ function ProjectDeleteModal({ open, project, projects, taskCount, isOwner, onCan
             <button onClick={handleCancel}
               className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">Cancel</button>
             <button onClick={doConfirm} disabled={!canConfirm}
-              className={cx('h-9 px-4 rounded-xl text-primary text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
+              className={cx('h-9 px-4 rounded-xl text-brand-fg text-xs font-semibold transition-colors inline-flex items-center gap-1.5',
                 !canConfirm ? 'bg-fill-strong text-faint cursor-not-allowed'
                   : mode === 'cascade' ? 'bg-danger hover:bg-danger-hover' : 'bg-brand hover:bg-brand-hover')}>
               <Trash2 className="w-3.5 h-3.5" />
@@ -3486,7 +3486,7 @@ function ProjectModal({ open, onClose, project }) {
             <button type="button" onClick={onClose}
               className="h-9 px-4 rounded-xl border border-line bg-fill text-xs font-medium text-secondary hover:bg-fill-strong transition-colors">Cancel</button>
             <button type="submit" disabled={busy}
-              className={cx('h-9 px-4 rounded-xl text-xs font-semibold text-primary transition-colors', busy ? 'bg-brand/40 cursor-not-allowed' : 'bg-brand hover:bg-brand-hover')}>
+              className={cx('h-9 px-4 rounded-xl text-xs font-semibold text-brand-fg transition-colors', busy ? 'bg-brand/40 cursor-not-allowed' : 'bg-brand hover:bg-brand-hover')}>
               {editing ? 'Save changes' : 'Create project'}
             </button>
           </div>
@@ -4326,7 +4326,7 @@ function FirstRunPanel() {
                   <h.icon className="w-4 h-4 text-brand-text mb-2" />
                   <div className="text-compact font-medium text-primary">{h.label}</div>
                   <div className="text-meta text-faint mt-0.5 leading-snug">{h.desc}</div>
-                  <div className="mt-2 text-meta font-medium text-brand-text/80 inline-flex items-center gap-0.5 group-hover:text-brand-text">{h.cta}<ChevronRight className="w-3 h-3" /></div>
+                  <div className="mt-2 text-meta font-medium text-brand-text/80 inline-flex items-center gap-0.5 group-hover:text-brand-text-hover-hover">{h.cta}<ChevronRight className="w-3 h-3" /></div>
                 </button>
               ))}
             </div>
@@ -5447,7 +5447,7 @@ function MsgBubble({ m, mine, onDelete, onEdit, onHide }) {
           className="w-full bg-transparent text-sm text-primary leading-relaxed outline-none resize-none" />
         <div className="mt-1 flex items-center justify-end gap-3 text-meta">
           <button onClick={() => setEditing(false)} className="text-faint hover:text-secondary">Cancel</button>
-          <button onClick={saveEdit} className="font-medium text-brand-text hover:text-brand-text">Save</button>
+          <button onClick={saveEdit} className="font-medium text-brand-text hover:text-brand-text-hover">Save</button>
         </div>
       </div>
     );
@@ -6226,7 +6226,7 @@ function DirectMessagesView() {
                 <span className="flex items-center justify-between gap-2">
                   <span className={cx('text-note truncate', c.unread > 0 ? 'text-secondary' : 'text-faint')}>{preview(c.preview)}</span>
                   {c.unread > 0 && (
-                    <span className="shrink-0 min-w-[16px] h-4 px-1 rounded-full bg-danger text-danger-text text-[9px] font-bold leading-none flex items-center justify-center">{c.unread > 9 ? '9+' : c.unread}</span>
+                    <span className="shrink-0 min-w-[16px] h-4 px-1 rounded-full bg-danger text-brand-fg text-[9px] font-bold leading-none flex items-center justify-center">{c.unread > 9 ? '9+' : c.unread}</span>
                   )}
                 </span>
               </button>
@@ -6796,7 +6796,7 @@ function MembersView() {
             ))}
           </div>
           <button type="submit" disabled={busy || !email.trim()}
-            className={cx('h-9 px-4 rounded-xl text-primary text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors', (busy || !email.trim()) ? 'bg-brand/40 cursor-not-allowed' : 'bg-brand hover:bg-brand-hover')}>
+            className={cx('h-9 px-4 rounded-xl text-brand-fg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors', (busy || !email.trim()) ? 'bg-brand/40 cursor-not-allowed' : 'bg-brand hover:bg-brand-hover')}>
             <Mail className="w-3.5 h-3.5" />Create invite link
           </button>
         </form>
