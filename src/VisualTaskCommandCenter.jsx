@@ -122,7 +122,7 @@ const STATUSES = {
 // renders no chip (`projects.find(...)` -> undefined). That is the intended graceful degradation.
 
 // Palette + glyphs offered when creating/editing a project.
-const PROJECT_PALETTE = ['#7c8cff','#f472b6','#38bdf8','#34d399','#fb923c','#f43f5e','#facc15','#94a3b8','#64748b','#22d3ee','#c084fc','#4ade80'];
+const PROJECT_PALETTE = ['#7c8cff','#f472b6','#38bdf8','#34d399','#fb923c','#f43f5e','#facc15','#94a3b8','#64748b','#22d3ee','#3dd6b3','#4ade80'];
 const PROJECT_ICONS = ['◇','◈','◎','☉','✎','↗','♡','◐','⚙','★','✦','⬢'];
 
 const EFFORTS = {
@@ -1470,7 +1470,7 @@ function TaskCard({ task, compact = false, onClick, draggable = true, showAssign
             className="shrink-0 w-4 h-4 rounded-full border-2 border-line-strong flex items-center justify-center transition-all"
             style={{ borderColor: done ? priority.hex : undefined, background: done ? priority.hex : 'transparent' }}
           >
-            {done && <Check className="w-2.5 h-2.5" style={{ color: '#0a0b11' }} strokeWidth={3} />}
+            {done && <Check className="w-2.5 h-2.5" style={{ color: 'rgb(var(--color-canvas))' }} strokeWidth={3} />}
           </button>
           <PriorityDot priority={task.priority} />
           {isPrivate && <span title="Private: visible only to the creator and assignee"><Lock className="w-3 h-3 text-faint shrink-0" /></span>}
@@ -2083,7 +2083,7 @@ function TaskModal() {
                   <button onClick={() => canEditTask && toggleSubtask(t.id, s.id)} disabled={!canEditTask} aria-pressed={s.done}
                     className={cx('shrink-0 w-4 h-4 rounded border-2 border-line-strong flex items-center justify-center transition-all', !canEditTask && 'cursor-default')}
                     style={{ borderColor: s.done ? priority.hex : undefined, background: s.done ? priority.hex : 'transparent' }}>
-                    {s.done && <Check className="w-2.5 h-2.5" style={{ color: '#0a0b11' }} strokeWidth={3} />}
+                    {s.done && <Check className="w-2.5 h-2.5" style={{ color: 'rgb(var(--color-canvas))' }} strokeWidth={3} />}
                   </button>
                   <div className={cx('flex-1 text-sm', s.done ? 'text-faint line-through' : 'text-primary')}>{s.title}</div>
                   {canEditTask && (
@@ -2803,7 +2803,7 @@ function NotificationToast({ n, light, onOpen, onDismiss }) {
             </span>}
         {actor && (
           <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center border"
-            style={{ background: light ? '#ffffff' : '#0f1017', borderColor: light ? '#d1d5db' : 'rgba(255,255,255,0.12)' }}>
+            style={{ background: light ? '#ffffff' : '#191f35', borderColor: light ? '#d1d5db' : 'rgba(255,255,255,0.12)' }}>
             <tv.Icon className="w-2 h-2" style={{ color: tv.hex }} />
           </span>
         )}
@@ -3066,7 +3066,7 @@ function NotificationBell() {
                                 </span>}
                             {actor && (
                               <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center border"
-                                style={{ background: light ? '#ffffff' : '#0f1017', borderColor: light ? '#d1d5db' : 'rgba(255,255,255,0.12)' }}>
+                                style={{ background: light ? '#ffffff' : '#191f35', borderColor: light ? '#d1d5db' : 'rgba(255,255,255,0.12)' }}>
                                 <tv.Icon className="w-2 h-2" style={{ color: tv.hex }} />
                               </span>
                             )}
@@ -3529,7 +3529,7 @@ function WorkspaceSwitcher() {
   const [createOpen, setCreateOpen] = useState(false);
   const current = workspaces.find(w => w.id === currentWorkspaceId);
   if (!current) return null;
-  const badgeCls = 'w-4 h-4 rounded-md bg-gradient-to-br from-brand to-brand-alt flex items-center justify-center text-[8px] font-bold text-brand-fg shrink-0';
+  const badgeCls = 'w-4 h-4 rounded-md bg-brand flex items-center justify-center text-[8px] font-bold text-brand-fg shrink-0';
   const initial = (name) => (name || 'W').slice(0, 1).toUpperCase();
   return (
     <div className="relative shrink-0">
@@ -4130,7 +4130,7 @@ function DashboardView() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {top3.map((r, i) => (
               <div key={r.t.id} className="relative">
-                <div className="absolute -top-2 -left-2 z-10 w-7 h-7 rounded-full bg-gradient-to-br from-brand to-brand-alt text-brand-fg text-xs font-bold flex items-center justify-center shadow-lg shadow-brand/15 font-display">
+                <div className="absolute -top-2 -left-2 z-10 w-7 h-7 rounded-full bg-brand text-brand-fg text-xs font-bold flex items-center justify-center shadow-lg shadow-brand/15 font-display">
                   {i + 1}
                 </div>
                 <Tooltip content={`Why: ${scoreRationale(r.t)}`} className="block w-full">

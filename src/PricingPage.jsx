@@ -72,7 +72,7 @@ export default function PricingPage({ session }) {
       {/* Background glows, clipped in their own layer so the page never scrolls sideways */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
         <div className="absolute top-[-8rem] left-1/4 w-[32rem] h-[32rem] rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(91,103,241,.14), transparent 72%)', animation: 'ppDrift1 26s ease-in-out infinite alternate' }} />
-        <div className="absolute top-1/3 -right-40 w-[30rem] h-[30rem] rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(217,70,239,.11), transparent 72%)', animation: 'ppDrift2 32s ease-in-out infinite alternate' }} />
+        <div className="absolute top-1/3 -right-40 w-[30rem] h-[30rem] rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(61,214,179,.10), transparent 72%)', animation: 'ppDrift2 32s ease-in-out infinite alternate' }} />
       </div>
 
       <SiteHeader session={session} />

@@ -74,9 +74,9 @@
    * surface        : sidebar, top bar, cards resting on the canvas
    * surface-raised : modals, popovers, dropdowns — things that float
    * ------------------------------------------------------------------- */
-  --color-canvas: 12 16 32;              /* #070810 */
-  --color-surface: 19 24 43;           /* #0a0b11 */
-  --color-surface-raised: 25 31 53;    /* #0f1017 */
+  --color-canvas: 12 16 32;              /* #0C1020  Night */
+  --color-surface: 19 24 43;           /* #13182B */
+  --color-surface-raised: 25 31 53;    /* #191F35 */
 
   /* ---------------------------------------------------------------------
    * TEXT — four steps, high to low emphasis.
@@ -162,7 +162,7 @@
   --color-brand: 91 103 241;           /* #5B67F1  Corlyvo Blue */
   --color-brand-hover: 116 123 255;    /* #747BFF */
   --color-brand-text: 154 163 255;     /* #9AA3FF  brand TEXT on Night — the fill is too dark to read */
-  --color-brand-text-hover: 186 192 255; /* #DDD6FE violet-200 — link hover; without this,
+  --color-brand-text-hover: 186 192 255; /* #BAC0FF — link hover; without this,
                                           * shades 200 and 300 both collapse onto -text and
                                           * `hover:text-brand-text` is a no-op. */
   /* The foreground for ANY saturated fill — brand, danger, success, warning, info.
@@ -308,11 +308,11 @@
 [data-theme='light'] {
   color-scheme: light;
 
-  --color-canvas: 246 247 251;         /* #F6F5F2 */
-  --color-surface: 255 255 255;        /* #FBFAF7 */
+  --color-canvas: 246 247 251;         /* #F6F7FB */
+  --color-surface: 255 255 255;        /* #FFFFFF */
   --color-surface-raised: 255 255 255; /* #FFFFFF */
 
-  --color-text-primary: 24 32 51;      /* #17181C */
+  --color-text-primary: 24 32 51;      /* #182033 */
   --color-text-secondary: 69 80 107;    /* #3A3C44 */
   --color-text-muted: 90 100 127; /* #5A647F  5.5:1 */
   --color-text-faint: 104 113 137; /* #687189  4.5:1 */
@@ -428,7 +428,8 @@
   --color-brand: 154 163 255;
   --color-brand-hover: 186 192 255;
   --color-brand-text: 186 192 255;
-  --color-brand-text-hover: 221 214 254;
+  --color-brand-text-hover: 209 213 255; /* #D1D5FF — was violet-200; the inverted scope
+                                          * was missed by the Phase 2 value table. */
   --color-brand-alt: 61 214 179;
   --color-brand-alt-hover: 95 224 196;
   --color-brand-alt-text: 127 234 211;
@@ -467,7 +468,7 @@ body {
  * seven of those with one declarative rule. */
 html:has([data-surface='dark']),
 html:has([data-surface='dark']) body {
-  background: rgb(7 8 16);
+  background: rgb(12 16 32);
 }
 
 /* ...and the page scrollbar with it. ::-webkit-scrollbar on the document is resolved

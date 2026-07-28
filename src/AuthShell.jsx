@@ -52,7 +52,7 @@ export default function AuthShell({
       {/* Ambient depth, clipped so the screen never scrolls sideways */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
         <div className="absolute top-1/4 -left-40 w-[28rem] h-[28rem] rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(91,103,241,.14), transparent 72%)', animation: 'auDrift1 22s ease-in-out infinite alternate' }} />
-        <div className="absolute bottom-1/4 -right-40 w-[28rem] h-[28rem] rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(217,70,239,.11), transparent 72%)', animation: 'auDrift2 28s ease-in-out infinite alternate' }} />
+        <div className="absolute bottom-1/4 -right-40 w-[28rem] h-[28rem] rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(61,214,179,.09), transparent 72%)', animation: 'auDrift2 28s ease-in-out infinite alternate' }} />
         <div className="absolute inset-0 opacity-[0.022]" style={{ backgroundImage: GRAIN }} />
       </div>
 

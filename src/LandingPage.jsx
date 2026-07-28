@@ -314,7 +314,7 @@ export default function LandingPage() {
           <div className="w-full h-full rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(91,103,241,.17), transparent 72%)', animation: 'lpDrift1 26s ease-in-out infinite alternate' }} />
         </div>
         <div data-lp-depth="-14" className="absolute top-[4rem] -right-48 w-[34rem] h-[34rem]">
-          <div className="w-full h-full rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(217,70,239,.13), transparent 72%)', animation: 'lpDrift2 32s ease-in-out infinite alternate' }} />
+          <div className="w-full h-full rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(61,214,179,.10), transparent 72%)', animation: 'lpDrift2 32s ease-in-out infinite alternate' }} />
         </div>
         <div data-lp-depth="10" className="absolute top-[22rem] left-[38%] w-[30rem] h-[30rem]">
           <div className="w-full h-full rounded-full" style={{ background: 'radial-gradient(closest-side, rgba(99,102,241,.12), transparent 72%)', animation: 'lpDrift3 40s ease-in-out infinite alternate' }} />

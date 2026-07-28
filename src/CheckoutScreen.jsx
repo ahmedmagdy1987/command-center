@@ -166,7 +166,7 @@ function Shell({ children }) {
     <div data-surface="dark" className="min-h-screen bg-canvas text-primary relative overflow-hidden px-5 lg:px-8 py-6">
       <style>{`
         .primary-cta { height: 2.75rem; padding: 0 1.25rem; border-radius: 0.75rem; display:inline-flex; align-items:center; justify-content:center; gap:0.5rem; font-size:0.875rem; font-weight:600; color:#fff; background-image:linear-gradient(to right,#5b67f1,#747bff); transition:all .2s; }
-        .primary-cta:hover { box-shadow: 0 10px 25px -5px rgba(217,70,239,0.3); }
+        .primary-cta:hover { box-shadow: 0 10px 25px -5px rgba(91,103,241,0.18); }
         @keyframes float { 0%,100% { transform: translateY(0px); } 50% { transform: translateY(-20px); } }
       `}</style>
       <div className="absolute top-[-6rem] left-1/4 w-[26rem] h-[26rem] rounded-full bg-brand/10 blur-3xl pointer-events-none" style={{ animation: 'float 9s ease-in-out infinite' }} />
