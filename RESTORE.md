@@ -54,6 +54,24 @@ cd C:\Users\bdstd\Documents\projects
 git clone https://github.com/ahmedmagdy1987/command-center.git
 ```
 
+> **⚠ The `bdstd` profile is NOT guaranteed to exist after a wipe (hit for real 2026-08-24).** Deep
+> Freeze can restore to a baseline where the active Windows account is a **different** user — that
+> restore ran as `CCBoot`, `C:\Users\bdstd` did not exist, and creating it failed with
+> `UnauthorizedAccessException` (a non-admin account cannot create another profile under
+> `C:\Users`). Retrying with elevation does not help; this is an ACL boundary, not a tooling
+> problem. **Check first, then use the profile you're actually running as:**
+> ```powershell
+> whoami                                    # who am I really?
+> $root = "$env:USERPROFILE\Documents\projects"
+> New-Item -ItemType Directory -Force $root | Out-Null
+> git clone https://github.com/ahmedmagdy1987/command-center.git "$root\command-center"
+> ```
+> Nothing in the build actually depends on the `bdstd` spelling — `.env`, `vite.config.js` and
+> `.mcp.json` are all repo-relative, and the 2026-08-24 restore built and linted clean from
+> `C:\Users\CCBoot\Documents\projects\command-center`. Only the hardcoded paths **in these docs**
+> assume it, so read every `C:\Users\bdstd\…` below as "the project root on *this* machine",
+> including the MinGit location in §0.5 and the `.env` path in §5.
+
 ## 2. Per-machine git TLS fix — only if you actually hit a cert error (often NOT needed)
 After a wipe the Windows root certificate store *can* fail to verify GitHub's TLS cert, making
 git's default **schannel** backend error out on clone/fetch/push. But this often does **not**
@@ -174,7 +192,83 @@ npm run dev        # local dev server
 npm run build      # production build
 ```
 Production **auto-deploys from `main`** via Vercel (push to `main` = production deploy), so
-always push your work — a wipe takes anything uncommitted/unpushed with it.
+always push your work — a wipe takes anything uncommitted/unpushed with it. **Before you reboot,
+run the §9 safety check** — "I pushed it" is not evidence, and the check that *looks* like proof
+isn't.
+
+## 9. BEFORE YOU REBOOT — the pre-wipe safety check  🔴 THIS HAS ALREADY COST US A COMMIT
+
+A reboot is irreversible: Deep Freeze discards every local object. So the check that says
+"safe to wipe" has to be **evidence from the server**, not a local inference.
+
+### ⛔ NEVER use this — it produced a false "safe to wipe" and lost `47a922d`
+```powershell
+git log --branches --not --remotes      # ⛔ BANNED as a pre-wipe gate
+```
+**Why it lies:** `--remotes` reads `refs/remotes/origin/*` — **local cache files**, not the
+server. Those refs only move when *this clone* last fetched or believed a push succeeded, so the
+command is really asking "does my local copy of the remote contain this?" A stale, hand-updated,
+or optimistically-advanced tracking ref makes it print **nothing** — which reads as "everything is
+pushed" — while the real remote has never seen the commit. It cannot detect the one failure mode
+that matters, because the thing it trusts is the thing that's wrong.
+
+**Reproduced empirically, not theorised (2026-08-24)** — on a throwaway branch with a local-only
+commit: with an honest tracking ref the banned command *does* report it (so the demo isn't vacuous);
+`git update-ref refs/remotes/origin/<branch> <sha>` — one stale ref, exactly what an
+optimistically-advanced or hand-touched ref looks like — makes it print **nothing** while the commit
+exists on no server anywhere. The §9 check below reported `UNSAFE … remote ABSENT` in both states.
+
+**What it cost (2026-07-28/29):** local `main` carried **`47a922d`** — the new app-icon set plus
+the interactive landing page. This command reported nothing unpushed, the machine was rebooted, and
+`47a922d` ceased to exist; the actual `refs/heads/main` on GitHub was still **`c32461d`**, and
+production was still serving a `c32461d` build. Recovery was possible **only** because the work
+also existed on the pushed branch `feat/icon-and-landing` (`6ebfdcf`) — luck, not process.
+
+### ✅ The authoritative check — ask the network, then compare
+```powershell
+cd C:\Users\bdstd\Documents\projects\command-center   # adjust per the §1 path note
+
+# (a) Nothing uncommitted. ls-remote can NEVER see working-tree state, so check it separately.
+#     --porcelain covers staged, unstaged AND untracked. It must print NOTHING.
+git status --porcelain
+
+# (b) Every local branch tip must exist on the REAL remote, verified over the wire.
+$remote = @{}
+git ls-remote --heads origin | ForEach-Object {
+  $parts = $_ -split '\s+', 2
+  $remote[$parts[1].Trim()] = $parts[0]
+}
+$unsafe = @()
+foreach ($line in (git for-each-ref --format='%(refname:short) %(objectname)' refs/heads)) {
+  $name, $sha = $line -split '\s+'
+  $have = $remote["refs/heads/$name"]
+  if ($have -ne $sha) {
+    $shown = if ($have) { $have.Substring(0,7) } else { 'ABSENT ON REMOTE' }
+    $unsafe += "  $name : local $($sha.Substring(0,7))  |  remote $shown"
+  }
+}
+if ($unsafe) { "🔴 DO NOT REBOOT — these exist only on this disk:"; $unsafe } else { "✅ SAFE TO WIPE" }
+```
+- `git ls-remote` opens a **connection to GitHub** and reports what the server actually holds. That
+  is the only trustworthy source. Note it takes **no** local refs into account — that's the point.
+- The loop checks **every** local branch, not just the current one, and treats a branch the remote
+  has never heard of as unsafe rather than skipping it.
+- Run it **immediately before** the reboot. A check from an hour and three commits ago proves nothing.
+
+### Cross-check a specific commit exists on GitHub (the direct question)
+```powershell
+$sha = "<full-or-short-sha>"
+curl.exe -s -o NUL -w "%{http_code}`n" "https://api.github.com/repos/ahmedmagdy1987/command-center/commits/$sha"
+```
+**200** = GitHub has it (survives the wipe). **422** = no commit for that SHA — it exists nowhere
+but this disk. *(422 is exactly what `47a922d` returns today.)*
+
+### If the check says unsafe
+Push it — a branch is fine, it does **not** have to be `main` (a push to `main` deploys to
+production; a feature branch doesn't). Getting the objects onto the server is what matters:
+```powershell
+git push -u origin HEAD    # then re-run the check above until it prints SAFE TO WIPE
+```
 
 ---
 
