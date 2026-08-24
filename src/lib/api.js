@@ -1,3 +1,27 @@
+// @ts-check
+
+/*  REALTIME PAYLOAD TYPING — why the casts below exist.
+ *
+ *  supabase-js types every `postgres_changes` payload as `{ [key: string]: any }` and every
+ *  presence entry as `{ presence_ref: string }`, because neither shape is knowable from the
+ *  client library alone. We DO know them: the row shape comes from the table, and the presence
+ *  shape is whatever we hand `channel.track()`. So each site below asserts the shape it already
+ *  documents in prose, rather than being suppressed with a blanket @ts-ignore.
+ *
+ *  The one asymmetry that actually matters, and is NOT papered over:
+ *    - `tasks` is REPLICA IDENTITY **DEFAULT**, so on DELETE `payload.old` carries ONLY the
+ *      primary key. `tasks.subscribe` therefore reads `payload.old.id` directly and never calls
+ *      `fromDbTask` on it — passing that stub through a converter would yield a Task whose every
+ *      other field is undefined.
+ *    - `comments` and `messages` are REPLICA IDENTITY **FULL**, so their `old` IS a complete row
+ *      and converting it is correct.
+ *  If a table's replica identity ever changes, these casts become lies — re-verify them.
+ */
+
+/** @typedef {import('./types.js').TaskRow} TaskRow */
+/** @typedef {import('./types.js').CommentRow} CommentRow */
+/** @typedef {import('./types.js').MessageRow} MessageRow */
+/** @typedef {import('./types.js').PresenceMeta} PresenceMeta */
 import { supabase } from './supabase';
 import { fromDbTask, toDbTask, sanitizeTask, fromDbNotification, fromDbComment, fromDbMessage, fromDbDmConversation, fromDbDirectMessage, fromDbAttachment, uid } from './sanitize';
 import { reportError, logCaught } from './errors';
@@ -435,7 +459,7 @@ export const tasks = {
         if (type === 'DELETE') {
           cb({ type, task: { id: payload.old.id } });
         } else {
-          cb({ type, task: fromDbTask(payload.new) });
+          cb({ type, task: fromDbTask(/** @type {TaskRow} */ (payload.new)) });
         }
       })
       .subscribe();
@@ -616,9 +640,9 @@ export const comments = {
     const opts = (event) => ({ event, schema: 'public', table: 'comments', filter: `task_id=eq.${taskId}` });
     const channel = supabase
       .channel(`comments-${taskId}`)
-      .on('postgres_changes', opts('INSERT'), (p) => cb({ type: 'INSERT', comment: fromDbComment(p.new) }))
-      .on('postgres_changes', opts('UPDATE'), (p) => cb({ type: 'UPDATE', comment: fromDbComment(p.new) }))
-      .on('postgres_changes', opts('DELETE'), (p) => cb({ type: 'DELETE', comment: fromDbComment(p.old) }))
+      .on('postgres_changes', opts('INSERT'), (p) => cb({ type: 'INSERT', comment: fromDbComment(/** @type {CommentRow} */ (p.new)) }))
+      .on('postgres_changes', opts('UPDATE'), (p) => cb({ type: 'UPDATE', comment: fromDbComment(/** @type {CommentRow} */ (p.new)) }))
+      .on('postgres_changes', opts('DELETE'), (p) => cb({ type: 'DELETE', comment: fromDbComment(/** @type {CommentRow} */ (p.old)) }))
       .subscribe();
     return () => supabase.removeChannel(channel);
   },
@@ -854,9 +878,9 @@ export const messages = {
     const base = { schema: 'public', table: 'messages' };
     const opts = (event) => (workspaceId ? { event, ...base, filter: `workspace_id=eq.${workspaceId}` } : { event, ...base });
     const channel = supabase.channel(`${channelName}${workspaceId ? `-${workspaceId}` : ''}`)
-      .on('postgres_changes', opts('INSERT'), (p) => cb({ type: 'INSERT', message: fromDbMessage(p.new) }))
-      .on('postgres_changes', opts('UPDATE'), (p) => cb({ type: 'UPDATE', message: fromDbMessage(p.new) }))
-      .on('postgres_changes', opts('DELETE'), (p) => cb({ type: 'DELETE', message: fromDbMessage(p.old) }))
+      .on('postgres_changes', opts('INSERT'), (p) => cb({ type: 'INSERT', message: fromDbMessage(/** @type {MessageRow} */ (p.new)) }))
+      .on('postgres_changes', opts('UPDATE'), (p) => cb({ type: 'UPDATE', message: fromDbMessage(/** @type {MessageRow} */ (p.new)) }))
+      .on('postgres_changes', opts('DELETE'), (p) => cb({ type: 'DELETE', message: fromDbMessage(/** @type {MessageRow} */ (p.old)) }))
       .subscribe();
     return () => supabase.removeChannel(channel);
   },
@@ -882,7 +906,7 @@ export const messages = {
       for (const key of Object.keys(state)) {
         if (key === userId) continue;
         const metas = Array.isArray(state[key]) ? state[key] : [];
-        const meta = metas[metas.length - 1] || {};
+        const meta = /** @type {PresenceMeta} */ (metas[metas.length - 1] || {});
         // Emit every present peer (not just typers) so a peer's read cursor (readAt) is available for
         // live read receipts; presenceLabel still filters to typing/recording for the typing strip.
         others.push({ userId: key, name: meta.name || 'Someone', typing: !!meta.typing, recording: !!meta.recording, readAt: meta.readAt || null });

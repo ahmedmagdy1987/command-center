@@ -1,0 +1,44 @@
+{
+  "//": [
+    "TYPE-CHECKING ONLY. This config never emits and is not part of the build — `vite build`",
+    "does not read it. `npm run typecheck` is the only consumer.",
+    "",
+    "NO .ts/.tsx FILES. tailwind.config.js globs ./src/**/*.{js,jsx}; a .tsx file is invisible",
+    "to that glob, so its class names never reach the CSS and the component renders UNSTYLED",
+    "with a clean, exit-0 build. Types are JSDoc. See src/lib/types.js.",
+    "",
+    "WHY checkJs IS false: it is an OPT-IN gate. src/VisualTaskCommandCenter.jsx is ~6.5k",
+    "untyped lines; switching checkJs on globally would emit hundreds of errors on day one and",
+    "the gate would be ignored within a week — the failure mode this safety net exists to",
+    "prevent. Instead each file opts in with `// @ts-check` at the top once it is typed, so the",
+    "checked set only ever grows and `npm run typecheck` is always expected to be CLEAN.",
+    "",
+    "PHASE B RATCHET: every module extracted from the monolith gets `// @ts-check` as it lands.",
+    "Coverage therefore tightens automatically as the refactor proceeds, with no flag day."
+  ],
+
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+
+    "strict": true,
+    "noImplicitAny": false,
+    "noUncheckedIndexedAccess": false,
+
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+
+  "include": ["src/**/*.js", "src/**/*.jsx"],
+  "exclude": ["node_modules", "dist"]
+}

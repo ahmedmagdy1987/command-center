@@ -568,6 +568,57 @@ For a true behavior-preservation proof, also run a temporary **second-workspace 
   **[`RESTORE.md`](RESTORE.md)** to rebuild the local env (toolchain → clone → git TLS fix →
   `npm install` → launch Claude *inside* the repo so `.mcp.json` loads → recreate `.env` → MCP auth).
 
+## THE THREE GATES — no refactor commit lands unless all three pass
+
+Added by the **Phase A refactor safety net** (2026-08-24). `src/VisualTaskCommandCenter.jsx` is
+~7k lines with no TypeScript and, until now, no application tests. The danger in splitting it is
+not entanglement (it is architecturally isolated — only `App.jsx` imports it) but **invisibility**:
+~15 file-scope side channels and a 68-key god-context, where a mistake produces a blank surface or
+a silently-unscoped query rather than a crash. These gates exist to make that visible immediately.
+
+```powershell
+npm run verify      # lint:gate && typecheck && test  — run this before every commit
+```
+
+A **pre-commit hook** runs all three (`.githooks/pre-commit`). It is wired automatically by
+`npm install` via the `prepare` script (`git config core.hooksPath .githooks`); after a wipe you
+get it for free with dependencies. `git commit --no-verify` bypasses it — if you ever do, **say so
+in the commit message**, because a silent bypass is how a gate becomes permanently ignored.
+
+| Gate | Command | Contract |
+|---|---|---|
+| **Lint** | `npm run lint:gate` | Compares to a recorded **baseline of 12 errors / 2 warnings**, not to zero. |
+| **Types** | `npm run typecheck` | Must be **CLEAN (0)**. |
+| **Tests** | `npm run test` | Must be **28/28 green**. |
+
+- **Lint is baselined, and the baseline is a RATCHET.** Raw `eslint .` exits non-zero here — the 12
+  standing errors are almost all `react-hooks/set-state-in-effect` inside the monolith, which is
+  Phase B work. A gate that always fails is a gate everyone ignores, so `scripts/lint-gate.mjs`
+  fails only when lint gets **worse**. It also fails when lint gets **BETTER**, telling you to lower
+  the baseline — otherwise the slack silently absorbs the next new error. Never raise it to go green.
+- **Typecheck is OPT-IN per file, and that is deliberate.** `jsconfig.json` sets `checkJs: false`;
+  a file joins the checked set by adding `// @ts-check` at the top. Turning it on globally would
+  emit hundreds of errors against the untyped monolith on day one. Today `src/lib/api.js` and
+  `src/lib/sanitize.js` are checked, with shapes in **`src/lib/types.js`** (JSDoc typedefs only, no
+  runtime code, zero bundle bytes). **PHASE B RATCHET: every module extracted from the monolith gets
+  `// @ts-check` as it lands**, so coverage tightens as the refactor proceeds, with no flag day.
+- **🔴 NO `.ts` / `.tsx` FILES. EVER.** `tailwind.config.js` globs `./src` for `.js`/`.jsx` only. A
+  `.tsx` file is invisible to that glob, so its class names never reach the CSS and the component
+  renders **UNSTYLED with a clean, exit-0 build**. Types are JSDoc. This is why the type layer is
+  `types.js` and not `types.d.ts`.
+- **Tests mock at the `src/lib/api.js` boundary**, never the network (`src/test/apiMock.js`), and
+  drive the app through rendered UI — the monolith has only a default export, so there is nothing
+  else to mount. That is also why the tests survive Phase B: they assert on behaviour and on the
+  api calls it produces, not on internals, so **moving code does not break them**.
+- **Mock fidelity is load-bearing.** `tasks.list()` returns APP shape (mapped through `fromDbTask`);
+  `projects.list()` returns RAW snake_case rows. `directMessages.unreadCounts()` returns an ARRAY.
+  A wrong shape tests the app against data it can never receive — and fails *silently*, inside a
+  caught handler.
+- **Every test is proven non-vacuous.** All 7 suites were mutation-tested: break the behaviour, the
+  guarding test must go RED. **8/8 mutations red** (see the Phase A entry below). Two of those
+  mutations initially came back green and were *bad mutations*, and one test was genuinely vacuous —
+  which is the entire argument for doing this rather than trusting a green suite.
+
 ## Post-Bundle-3 work (the ledger had drifted ahead of this doc — now caught up)
 
 - **Voice-notes storage scoped to the workspace** (`20260602041008`). `voice_notes_select_member` now allows a

@@ -1,0 +1,25 @@
+#!/bin/sh
+#
+# PRE-COMMIT GATE — lint (vs baseline) + typecheck + tests.
+#
+# Enabled automatically by `npm install` (the "prepare" script points core.hooksPath here).
+# To enable by hand:      git config core.hooksPath .githooks
+# To bypass in a genuine emergency:  git commit --no-verify
+#   ...and if you do, say so in the commit message. A silent bypass is how a broken gate
+#   becomes a permanently ignored gate.
+#
+# Deliberately NOT run here: `npm run build`. It is slow, and every failure it would catch is
+# already caught by typecheck or the tests. Build stays a pre-push / CI concern.
+
+set -e
+
+echo "[pre-commit] lint (against baseline)…"
+npm run --silent lint:gate
+
+echo "[pre-commit] typecheck…"
+npm run --silent typecheck
+
+echo "[pre-commit] tests…"
+npm run --silent test
+
+echo "[pre-commit] all gates passed."

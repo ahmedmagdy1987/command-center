@@ -1,15 +1,53 @@
+// @ts-check
 /* =================================================================================
    SANITIZE — normalize task/project shapes regardless of source (DB, import, etc)
+
+   This is the ONLY sanctioned crossing between DB shape (snake_case rows) and app shape
+   (camelCase). Reading `row.workspace_id` anywhere outside this file is a bug.
+
+   Type-checked (`// @ts-check`) — shapes come from ./types.js. See that file's ID
+   DISCIPLINE note for why `tasks.id` is TEXT and not a uuid.
 ================================================================================= */
+
+/** @typedef {import('./types.js').Task} Task */
+/** @typedef {import('./types.js').TaskRow} TaskRow */
+/** @typedef {import('./types.js').TaskWrite} TaskWrite */
+/** @typedef {import('./types.js').TaskLink} TaskLink */
+/** @typedef {import('./types.js').Subtask} Subtask */
+/** @typedef {import('./types.js').Notification} Notification */
+/** @typedef {import('./types.js').NotificationRow} NotificationRow */
+/** @typedef {import('./types.js').Comment} Comment */
+/** @typedef {import('./types.js').CommentRow} CommentRow */
+/** @typedef {import('./types.js').Message} Message */
+/** @typedef {import('./types.js').MessageRow} MessageRow */
+/** @typedef {import('./types.js').DmConversation} DmConversation */
+/** @typedef {import('./types.js').DirectMessage} DirectMessage */
+/** @typedef {import('./types.js').Attachment} Attachment */
+/** @typedef {import('./types.js').AttachmentRow} AttachmentRow */
 
 const PRIORITY_IDS = new Set(['critical', 'high', 'medium', 'low']);
 const STATUS_IDS = new Set(['inbox', 'must', 'should', 'waiting', 'scheduled', 'done']);
 const EFFORT_IDS = new Set(['quick', 'medium', 'deep']);
 
+/** @type {Record<string, string>} */
 const LEGACY_PROJECT_MAP = { content: 'blogs', design: 'assets', operations: 'tools', admin: 'other' };
+/**
+ * Remap a retired seed project id to its current one. Unknown ids pass through unchanged.
+ * @param {string} id
+ * @returns {string}
+ */
 export const migrateProjectId = (id) => LEGACY_PROJECT_MAP[id] || id;
 
+/**
+ * Client-generated id. NOTE: this is NOT a uuid — it is ~12 chars of base36. It is valid for
+ * `tasks.id` / `projects.id` (both TEXT) and for a storage object name, and INVALID for any
+ * uuid column (`workspace_id`, `assignee_id`, `created_by`, …), which would reject it with
+ * `22P02 invalid input syntax for type uuid`. See the ID DISCIPLINE note in ./types.js.
+ * @returns {string}
+ */
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+
+/** @returns {import('./types.js').IsoTimestamp} */
 export const nowISO = () => new Date().toISOString();
 
 // Caps on user-supplied fields. Two different jobs here:
@@ -31,15 +69,27 @@ const MAX_RECURRING_CHARS = 2000;
 // today, so this is defense-in-depth: it guarantees a javascript:/data:/vbscript: URL can never
 // be stored on a link and reach a future render. Legitimate http(s)/mailto links pass through.
 const SAFE_LINK_SCHEMES = new Set(['http:', 'https:', 'mailto:']);
+/**
+ * @param {unknown} u
+ * @returns {string} The trimmed URL, or `''` if it is not a string or its scheme is not allowlisted.
+ */
 export const safeLinkUrl = (u) => {
   if (typeof u !== 'string' || !u) return '';
   try { return SAFE_LINK_SCHEMES.has(new URL(u, 'https://x.invalid').protocol) ? u.trim() : ''; }
   catch { return ''; }
 };
+/**
+ * @param {unknown} v
+ * @returns {string}
+ */
 const linkText = (v) => (typeof v === 'string' ? v.slice(0, MAX_LINK_TEXT_LEN) : '');
 // Whitelist the known link properties rather than spreading. The old `{...l}` preserved ANY property,
 // so a crafted import could park an arbitrarily large blob on a link and it went straight into the
 // links jsonb unbounded. No live rows carry links, so nothing is lost by narrowing this.
+/**
+ * @param {unknown} arr
+ * @returns {TaskLink[]}
+ */
 const normalizeLinks = (arr) =>
   Array.isArray(arr)
     ? arr.filter(l => l && typeof l === 'object').slice(0, MAX_LINKS).map(l => ({
@@ -49,6 +99,10 @@ const normalizeLinks = (arr) =>
     : [];
 
 // A recurring rule is a short string or a small object; anything bigger is not a rule.
+/**
+ * @param {unknown} r
+ * @returns {unknown} The rule as given if within caps, else null.
+ */
 const normalizeRecurring = (r) => {
   if (typeof r === 'string') return r.length <= MAX_RECURRING_CHARS ? r : null;
   if (r && typeof r === 'object') {
@@ -57,7 +111,12 @@ const normalizeRecurring = (r) => {
   return null;
 };
 
-/** Convert a DB-shaped task (snake_case columns) to app shape (camelCase) */
+/**
+ * Convert a DB-shaped task (snake_case columns) to app shape (camelCase).
+ * @param {TaskRow | null | undefined} row
+ * @returns {Task | null} `null` for an absent/non-object row — EVERY caller must handle it.
+ *   This is the null that reaches the UI as a blank card if ignored.
+ */
 export const fromDbTask = (row) => {
   if (!row || typeof row !== 'object') return null;
   return {
@@ -90,7 +149,16 @@ export const fromDbTask = (row) => {
   };
 };
 
-/** Convert app shape (camelCase) → DB shape (snake_case) */
+/**
+ * Convert app shape (camelCase) → DB shape (snake_case) for a write.
+ *
+ * The return is deliberately PARTIAL: a key whose value is `undefined` is omitted by
+ * PostgREST, which is how an update patch leaves untouched columns alone. `links` relies on
+ * this explicitly — see the note below.
+ *
+ * @param {Partial<Task>} task
+ * @returns {TaskWrite}
+ */
 export const toDbTask = (task) => {
   return {
     id: task.id,
@@ -121,6 +189,15 @@ export const toDbTask = (task) => {
   };
 };
 
+/**
+ * Normalize ANY task-shaped input into a valid `Task`. Used on create and on bulk import,
+ * so the input is genuinely untrusted and arbitrary — hence `any` on the way in. The
+ * valuable half of this contract is the OUTPUT: whatever goes in, a complete `Task` with
+ * every field within the server-side CHECK limits comes out.
+ *
+ * @param {any} raw Untrusted — a DB row, an imported JSON blob, or a partial UI draft.
+ * @returns {Task}
+ */
 export const sanitizeTask = (raw) => {
   const t = raw && typeof raw === 'object' ? raw : {};
   const priority = PRIORITY_IDS.has(t.priority) ? t.priority : 'medium';
@@ -174,7 +251,11 @@ export const sanitizeTask = (raw) => {
 /* =================================================================================
    NOTIFICATIONS
 ================================================================================= */
-/** Convert a DB-shaped notification (snake_case columns) to app shape (camelCase) */
+/**
+ * Convert a DB-shaped notification to app shape.
+ * @param {NotificationRow | null | undefined} row
+ * @returns {Notification | null}
+ */
 export const fromDbNotification = (row) => {
   if (!row || typeof row !== 'object') return null;
   return {
@@ -195,7 +276,11 @@ export const fromDbNotification = (row) => {
 /* =================================================================================
    COMMENTS
 ================================================================================= */
-/** Convert a DB-shaped comment (snake_case columns) to app shape (camelCase) */
+/**
+ * Convert a DB-shaped comment to app shape.
+ * @param {CommentRow | null | undefined} row
+ * @returns {Comment | null}
+ */
 export const fromDbComment = (row) => {
   if (!row || typeof row !== 'object') return null;
   return {
@@ -213,7 +298,11 @@ export const fromDbComment = (row) => {
 /* =================================================================================
    TASK ATTACHMENTS
 ================================================================================= */
-/** Convert a DB-shaped task_attachments row (snake_case) to app shape (camelCase) */
+/**
+ * Convert a DB-shaped task_attachments row to app shape.
+ * @param {AttachmentRow | null | undefined} row
+ * @returns {Attachment | null}
+ */
 export const fromDbAttachment = (row) => {
   if (!row || typeof row !== 'object') return null;
   return {
@@ -232,7 +321,13 @@ export const fromDbAttachment = (row) => {
 /* =================================================================================
    MESSAGES (team chat)
 ================================================================================= */
-/** Convert a DB-shaped chat message (snake_case columns) to app shape (camelCase) */
+/**
+ * Convert a DB-shaped team-chat message to app shape.
+ * NOTE `senderId` is nullable — a departed member's messages survive with a null sender.
+ * Filtering senders with `!==` silently drops them; compare with null-safe semantics.
+ * @param {MessageRow | null | undefined} row
+ * @returns {Message | null}
+ */
 export const fromDbMessage = (row) => {
   if (!row || typeof row !== 'object') return null;
   return {
@@ -253,7 +348,11 @@ export const fromDbMessage = (row) => {
 /* =================================================================================
    DIRECT MESSAGES (1:1)
 ================================================================================= */
-/** Convert a DB-shaped dm_conversations row to app shape. */
+/**
+ * Convert a DB-shaped dm_conversations row to app shape.
+ * @param {any} row
+ * @returns {DmConversation | null}
+ */
 export const fromDbDmConversation = (row) => {
   if (!row || typeof row !== 'object') return null;
   return {
@@ -265,7 +364,11 @@ export const fromDbDmConversation = (row) => {
   };
 };
 
-/** Convert a DB-shaped dm_messages row to app shape (mirrors fromDbMessage + conversationId). */
+/**
+ * Convert a DB-shaped dm_messages row to app shape (mirrors fromDbMessage + conversationId).
+ * @param {any} row
+ * @returns {DirectMessage | null}
+ */
 export const fromDbDirectMessage = (row) => {
   if (!row || typeof row !== 'object') return null;
   return {
