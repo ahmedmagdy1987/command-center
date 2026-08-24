@@ -18,14 +18,35 @@
    after an improvement, or the slack gets re-consumed by new errors.
 ================================================================================= */
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 
-const BASELINE = { errors: 12, warnings: 2 };
+// Run eslint's own JS entrypoint with the current node binary. Two Windows traps avoided:
+// `npx` with `shell: true` emits a DEP0190 deprecation on every run (noise in a gate trains
+// people to stop reading it), and spawning `node_modules/.bin/eslint.cmd` WITHOUT a shell
+// fails EINVAL. Invoking the .js directly sidesteps both and is platform-neutral.
+const BIN = path.join('node_modules', 'eslint', 'bin', 'eslint.js');
+
+/**
+ * PER-FILE, not just a total. A totals-only gate is trivially defeated: fix one error in the
+ * monolith, introduce one somewhere else, and the sum still reads 12 — "OK, exactly at
+ * baseline" — while a brand-new problem just landed. The counts below are keyed by basename.
+ */
+const BASELINE = {
+  'App.jsx': { errors: 1, warnings: 1 },
+  'VisualTaskCommandCenter.jsx': { errors: 11, warnings: 1 },
+};
+const BASELINE_TOTAL = { errors: 12, warnings: 2 };
+
+if (!existsSync(BIN)) {
+  console.error(`[lint-gate] eslint not found at ${BIN} — run npm install.`);
+  process.exit(2);
+}
 
 let raw;
 try {
-  raw = execFileSync('npx', ['eslint', '.', '-f', 'json'], {
+  raw = execFileSync(process.execPath, [BIN, '.', '-f', 'json'], {
     encoding: 'utf8',
-    shell: process.platform === 'win32',
     maxBuffer: 64 * 1024 * 1024,
   });
 } catch (err) {
@@ -54,23 +75,36 @@ for (const file of report) {
 
 const fmt = (e, w) => `${e} error${e === 1 ? '' : 's'} / ${w} warning${w === 1 ? '' : 's'}`;
 console.log(`[lint-gate] current:  ${fmt(errors, warnings)}`);
-console.log(`[lint-gate] baseline: ${fmt(BASELINE.errors, BASELINE.warnings)}`);
+console.log(`[lint-gate] baseline: ${fmt(BASELINE_TOTAL.errors, BASELINE_TOTAL.warnings)}`);
 
-if (errors > BASELINE.errors || warnings > BASELINE.warnings) {
-  console.error('\n[lint-gate] FAIL — lint got worse than the baseline.');
-  console.error('Per file:');
-  for (const [name, c] of Object.entries(byFile)) {
-    console.error(`  ${name}: ${fmt(c.errors, c.warnings)}`);
+/** @type {string[]} */
+const worse = [];
+/** @type {string[]} */
+const better = [];
+
+for (const name of new Set([...Object.keys(BASELINE), ...Object.keys(byFile)])) {
+  const want = BASELINE[name] ?? { errors: 0, warnings: 0 };
+  const got = byFile[name] ?? { errors: 0, warnings: 0 };
+  if (got.errors > want.errors || got.warnings > want.warnings) {
+    worse.push(`  ${name}: ${fmt(got.errors, got.warnings)} (baseline ${fmt(want.errors, want.warnings)})`);
+  } else if (got.errors < want.errors || got.warnings < want.warnings) {
+    better.push(`  ${name}: ${fmt(got.errors, got.warnings)} (baseline ${fmt(want.errors, want.warnings)})`);
   }
+}
+
+if (worse.length) {
+  console.error('\n[lint-gate] FAIL — lint got worse than the baseline:');
+  worse.forEach((l) => console.error(l));
   console.error('\nFix the new problems. Do NOT raise the baseline to make this pass.');
   process.exit(1);
 }
 
-if (errors < BASELINE.errors || warnings < BASELINE.warnings) {
-  console.error(`\n[lint-gate] FAIL — lint got BETTER (${fmt(errors, warnings)}).`);
-  console.error('Lower BASELINE in scripts/lint-gate.mjs to lock the improvement in,');
-  console.error('otherwise the slack silently absorbs the next new error.');
+if (better.length) {
+  console.error('\n[lint-gate] FAIL — lint got BETTER:');
+  better.forEach((l) => console.error(l));
+  console.error('\nLower the matching entry in BASELINE (scripts/lint-gate.mjs) to lock the');
+  console.error('improvement in, otherwise the slack silently absorbs the next new error.');
   process.exit(1);
 }
 
-console.log('[lint-gate] OK — exactly at baseline.');
+console.log('[lint-gate] OK — exactly at baseline, per file.');

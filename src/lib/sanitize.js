@@ -54,9 +54,12 @@ export const nowISO = () => new Date().toISOString();
 //  - ID_MAX_LEN mirrors the server-side CHECKs (tasks_id_len_chk / tasks_project_len_chk /
 //    projects_id_len_chk, all 1..64) so a bad value degrades gracefully instead of hitting a raw
 //    23514 that aborts the whole bulk-insert statement.
-//  - The collection caps have NO server-side counterpart: tags/subtasks/links/recurring are jsonb
-//    with no CHECK, so these are the only limit on a crafted import (a 5000-subtask, 50k-char-tag
-//    row was accepted before). Flagged for a future DB-side jsonb cap.
+//  - The collection caps for tags/subtasks/links/recurring are the CLIENT half. They used to be
+//    the only limit (a 5000-subtask, 50k-char-tag row was accepted before), but the DB-side caps
+//    HAVE SINCE SHIPPED — 20260715235911_tasks_jsonb_size_caps adds tasks_tags_shape_chk,
+//    tasks_subtasks_shape_chk, tasks_links_shape_chk and tasks_recurring_size_chk. So these are
+//    now UX (degrade gracefully instead of hitting a raw 23514), not the last line of defence.
+//    Keep them in step with that migration.
 export const ID_MAX_LEN = 64;
 const MAX_TAGS = 50;
 const MAX_TAG_LEN = 100;

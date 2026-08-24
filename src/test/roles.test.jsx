@@ -39,15 +39,34 @@ describe('guest', () => {
     renderApp({ route: '/projects' });
     await bootDone();
 
-    // GUEST_VIEWS is {mine, dms}; /projects is not one, so the guest is redirected and the
-    // Projects surface never renders.
-    expect(screen.queryByText('Visible Project')).not.toBeInTheDocument();
+    // POSITIVE CONTROL FIRST. Every assertion below is an ABSENCE, and an absence is equally
+    // satisfied by "the gate worked" and by "the whole shell failed to render". Prove the app
+    // is up and landed on the guest destination before concluding anything from what is missing.
+    expect((await screen.findAllByRole('button', { name: /my tasks/i })).length).toBeGreaterThan(0);
+    // GUEST_VIEWS is {mine, dms}; /projects is not one, so the guest is redirected. This is the
+    // redirect itself, not a proxy for it.
+    expect(window.location.pathname).toBe('/my-tasks');
+
+    // The Projects SURFACE is absent — asserted via an affordance only that view renders.
+    // NOTE: do NOT assert on the project NAME here. A task's project chip legitimately renders
+    // "Visible Project" on My Tasks, so that assertion only passed while the task list had not
+    // loaded yet — a race, not a gate. Adding the control above is what exposed it.
+    expect(screen.queryByRole('button', { name: /new project/i })).not.toBeInTheDocument();
   });
 
-  it('gets the reduced nav — no Projects, no Members', async () => {
+  it('gets the reduced nav — no Projects, no Members, no Chat', async () => {
     asRole('guest');
     renderApp({ route: '/my-tasks' });
     await bootDone();
+
+    // POSITIVE CONTROL: the nav rendered, and rendered the two destinations a guest DOES get.
+    // Without this, a Sidebar that crashed behind its ErrorBoundary would pass all three
+    // absence assertions below and report a working role gate.
+    // findAll/getAll, not find/get: the nav renders in BOTH the sidebar and the mobile tab bar,
+    // and the sidebar item carries an unread badge in its accessible name ("My Tasks1"), so an
+    // anchored single-match query is wrong on both counts.
+    expect((await screen.findAllByRole('button', { name: /my tasks/i })).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /direct messages/i }).length).toBeGreaterThan(0);
 
     expect(screen.queryByRole('button', { name: /^projects$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^members$/i })).not.toBeInTheDocument();
@@ -61,8 +80,10 @@ describe('member', () => {
     renderApp();
     await bootDone();
 
-    // A member is a full workspace participant...
+    // A member is a full workspace participant — this doubles as the positive control that
+    // the shell and nav are up before the absence assertion below.
     expect((await screen.findAllByText('A task')).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /^projects$/i }).length).toBeGreaterThan(0);
     // ...but managing members is owner/admin only (canManageMembers).
     expect(screen.queryByRole('button', { name: /^members$/i })).not.toBeInTheDocument();
   });

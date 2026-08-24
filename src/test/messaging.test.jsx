@@ -97,8 +97,10 @@ describe('"delete for me" (per-user hide)', () => {
     await user.click(await screen.findByRole('menuitem', { name: /delete for me/i }));
 
     await waitFor(() => expect(callsTo('messages.hide')).toBe(1));
-    // The optimistic filter must be undone by the refetch — otherwise the message is gone
-    // from the user's view while still very much present for everyone, forever.
+    // A refetch being ISSUED is not the property under test — the message coming BACK is.
+    // Asserting only the call count would stay green if the refetch returned and the UI
+    // never re-rendered it.
     await waitFor(() => expect(callsTo('messages.list')).toBeGreaterThan(1));
+    expect((await screen.findAllByText('Sticky message')).length).toBeGreaterThan(0);
   });
 });

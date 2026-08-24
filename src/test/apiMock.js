@@ -24,6 +24,7 @@ export const WS_1 = '11111111-1111-1111-1111-111111111111';
 export const WS_2 = '22222222-2222-2222-2222-222222222222';
 export const ME = 'aaaaaaaa-0000-0000-0000-00000000000a';
 export const PEER = 'bbbbbbbb-0000-0000-0000-00000000000b';
+export const DM_CONV_ID = 'cccccccc-0000-0000-0000-00000000000c';
 
 /**
  * Mutable state the mock reads at CALL time (not at mock-construction time), so a test can
@@ -173,7 +174,11 @@ export function buildApiMock() {
 
     projects: {
       // RAW DB ROWS — snake_case, deliberately unmapped. See the FIDELITY NOTE above.
-      list: fn('projects.list', () => apiState.projects),
+      // Workspace-SCOPED like the real query (`.eq('workspace_id', …)`). Modelling this is
+      // what lets a test detect an UNSCOPED read; a mock that ignores the argument returns
+      // the same rows either way and can never catch tenant bleed.
+      list: fn('projects.list', (workspaceId) =>
+        apiState.projects.filter((p) => !workspaceId || !p.workspace_id || p.workspace_id === workspaceId)),
       create: fn('projects.create', ({ name, color, icon }, workspaceId) => {
         const row = { id: `proj-${apiState.projects.length + 1}`, name, color, icon, workspace_id: workspaceId };
         apiState.projects = [...apiState.projects, row];
@@ -199,7 +204,8 @@ export function buildApiMock() {
 
     tasks: {
       // APP SHAPE — already mapped through fromDbTask by the real implementation.
-      list: fn('tasks.list', () => apiState.tasks),
+      list: fn('tasks.list', (workspaceId) =>
+        apiState.tasks.filter((t) => !workspaceId || !t.workspaceId || t.workspaceId === workspaceId)),
       stats: fn('tasks.stats', () => apiState.stats),
       getById: fn('tasks.getById', (id) => apiState.tasks.find((t) => t.id === id) ?? null),
       getSubtasks: fn('tasks.getSubtasks', (id) => apiState.tasks.find((t) => t.id === id)?.subtasks ?? []),
@@ -245,8 +251,18 @@ export function buildApiMock() {
 
     messages: {
       search: fn('messages.search', () => []),
-      list: fn('messages.list', () => apiState.messages),
-      listBefore: fn('messages.listBefore', () => []),
+      // The REAL messages.list / listBefore THROW on a falsy workspaceId (api.js:683, 697):
+      // the old table read silently omitted the filter and mixed every visible workspace into
+      // one channel. Mirror the throw, or a refactor that drops the argument passes the tests
+      // and mixes tenants in production.
+      list: fn('messages.list', (_limit, workspaceId) => {
+        if (!workspaceId) throw new Error('messages.list requires a workspaceId');
+        return apiState.messages.filter((m) => !m.workspaceId || m.workspaceId === workspaceId);
+      }),
+      listBefore: fn('messages.listBefore', (_before, _limit, workspaceId) => {
+        if (!workspaceId) throw new Error('messages.listBefore requires a workspaceId');
+        return [];
+      }),
       unreadCount: fn('messages.unreadCount', () => apiState.chatUnread),
       hide: fn('messages.hide', (id) => {
         apiState.messages = apiState.messages.filter((m) => m.id !== id);
@@ -280,7 +296,11 @@ export function buildApiMock() {
     },
 
     directMessages: {
-      getOrCreateConversation: fn('directMessages.getOrCreateConversation', () => ({ id: 'dm-1' })),
+      // Returns a SCALAR uuid string, not an object — api.js:1021 ends
+      // `return Array.isArray(data) ? data[0] : data;   // scalar uuid`, and the app binds it
+      // straight to `const convId = await ...`. An object here would make a future DM test
+      // pass against a shape the app can never receive.
+      getOrCreateConversation: fn('directMessages.getOrCreateConversation', () => DM_CONV_ID),
       listConversations: fn('directMessages.listConversations', () => apiState.dmConversations),
       listMessages: fn('directMessages.listMessages', () => []),
       listMessagesBefore: fn('directMessages.listMessagesBefore', () => []),

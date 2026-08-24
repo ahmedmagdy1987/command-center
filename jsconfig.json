@@ -1,7 +1,10 @@
 {
   "//": [
-    "TYPE-CHECKING ONLY. This config never emits and is not part of the build — `vite build`",
-    "does not read it. `npm run typecheck` is the only consumer.",
+    "TYPE-CHECKING ONLY: this config never emits, and `npm run typecheck` is its intended",
+    "consumer. But do NOT assume vite ignores it — esbuild/vite DO discover jsconfig.json and",
+    "read parts of compilerOptions (jsx, jsxImportSource, target, baseUrl, paths). The current",
+    "options are empirically inert (the built bundle is byte-identical either way), but adding",
+    "e.g. `paths` here WOULD silently change module resolution for the production build.",
     "",
     "NO .ts/.tsx FILES. tailwind.config.js globs ./src/**/*.{js,jsx}; a .tsx file is invisible",
     "to that glob, so its class names never reach the CSS and the component renders UNSTYLED",

@@ -34,12 +34,25 @@
        `workspace_id`, `assignee_id`, `created_by`, `sender_id`, `recipient_id`,
        `members.id`, `user_id`.
 
-   `Uuid` is therefore a BRANDED type: a plain `string` is not assignable to it. That makes
-   "a synthetic uid() flowed into a UUID column" a compile error rather than a runtime 22P02.
-   Values genuinely arriving from the DB are typed `Uuid` by the `*Row` typedefs, so they
-   flow without friction. For the handful of true boundaries where an external `string` is
-   known to be a UUID (a Supabase session id, a router param), use `asUuid()` below — and
-   only there.
+   `Uuid` is therefore a BRANDED type: a plain `string` is not assignable to it. Values
+   genuinely arriving from the DB are typed `Uuid` by the `*Row` typedefs, so they flow
+   without friction. For the handful of true boundaries where an external `string` is known
+   to be a UUID (a Supabase session id, a router param), use `asUuid()` below — and only there.
+
+   ⚠ HOW MUCH THE BRAND ACTUALLY BUYS TODAY — measured, not assumed.
+   It only constrains assignments in code TypeScript is checking AND whose values are typed.
+   `src/lib/api.js` currently declares no `@param` types, so every parameter there is
+   implicitly `any`, and `any` is assignable to `Uuid` — meaning `tasks.create`'s
+   `row.workspace_id = workspaceId` is NOT checked. Verified by probe: assigning an untyped
+   parameter to a `Uuid` field raises nothing, while assigning a known `string` raises TS2322.
+   So right now the brand fires inside `sanitize.js` and at any annotated boundary, and NOT
+   at the api.js call sites.
+
+   That gap is covered two other ways, deliberately: the runtime assertion in
+   `src/test/tasks.test.jsx` ("id discipline") checks a real create call, and the brand
+   starts biting the api.js boundary as `@param` annotations are added — which is Phase B
+   work, alongside `// @ts-check` on each extracted module. Do not describe this as
+   compile-time-proof until those annotations exist.
 ================================================================================= */
 
 /**
@@ -99,7 +112,12 @@ export const asUuid = (s) => /** @type {Uuid} */ (/** @type {unknown} */ (s));
  * @typedef {'workspace' | 'private'} TaskPrivacy
  */
 
-/** @typedef {'pending' | 'accepted' | 'revoked' | 'expired'} InvitationStatus */
+/**
+ * The `invitations_status_check` CHECK is exactly these three. **There is no 'expired'
+ * status** — expiry is expressed by `expires_at` passing, while `status` stays 'pending'.
+ * A row is never written with 'expired', so branching on it is dead code.
+ * @typedef {'pending' | 'accepted' | 'revoked'} InvitationStatus
+ */
 
 /* ---------------------------------------------------------------------------------
    TASKS
@@ -208,11 +226,12 @@ export const asUuid = (s) => /** @type {Uuid} */ (/** @type {unknown} */ (s));
  * `public.projects` as PostgREST returns it.
  * @typedef {object} ProjectRow
  * @property {ProjectId} id
- * @property {Uuid} workspace_id
- * @property {string} name
- * @property {string | null} color
- * @property {string | null} icon
- * @property {IsoTimestamp} created_at
+ * @property {Uuid} workspace_id               NOT NULL since Phase 3A.
+ * @property {string} name                     NOT NULL.
+ * @property {string} color                    NOT NULL, default '#64748b'.
+ * @property {string} icon                     NOT NULL, default '◇'.
+ * @property {Uuid | null} created_by          Nullable FK to auth.users.
+ * @property {IsoTimestamp} created_at         NOT NULL.
  */
 
 /**
@@ -226,10 +245,13 @@ export const asUuid = (s) => /** @type {Uuid} */ (/** @type {unknown} */ (s));
 
 /**
  * How `projects.deleteViaRpc` disposes of the tasks filed under a project being deleted.
- * `reassign` moves them to another project id — which MUST resolve, or the tasks are
- * silently unfiled (the data-loss path closed by migration 20260719172122, which now
- * raises P0002 instead).
- * @typedef {'reassign' | 'delete'} ProjectDeleteMode
+ * These are the literals the `delete_project` RPC actually accepts — anything else raises
+ * `22023 invalid mode`.
+ *  - `unassign` (owner+admin, rank>=2) re-files the tasks onto `reassignTo`, which MUST
+ *    resolve to a real project or they are silently unfiled — the data-loss path closed by
+ *    migration 20260719172122, which now raises P0002 instead.
+ *  - `cascade` (OWNER only, rank 3) deletes the caller-visible tasks.
+ * @typedef {'cascade' | 'unassign'} ProjectDeleteMode
  */
 
 /* ---------------------------------------------------------------------------------
@@ -244,7 +266,9 @@ export const asUuid = (s) => /** @type {Uuid} */ (/** @type {unknown} */ (s));
  * @property {Uuid} id                         = the auth user id.
  * @property {string} email
  * @property {string | null} display_name
- * @property {string | null} role              Vestigial. Not authorization.
+ * @property {string} role                     NOT NULL, and its CHECK is `('owner','member')`
+ *   ONLY — so this column can never even hold 'admin' or 'guest'. Vestigial; the authority is
+ *   `workspace_members.role`. Never read this for authorization.
  * @property {string | null} avatar_url        A storage PATH, e.g. "<uid>/abc123.jpg".
  * @property {string | null} bio
  * @property {string | null} status_text
@@ -275,9 +299,11 @@ export const asUuid = (s) => /** @type {Uuid} */ (/** @type {unknown} */ (s));
 /**
  * @typedef {object} Workspace
  * @property {Uuid} id
- * @property {string} name
- * @property {string | null} slug
- * @property {IsoTimestamp} created_at
+ * @property {string} name                     NOT NULL.
+ * @property {Uuid | null} [owner_id]          Nullable (on delete set null). NOT what authorizes
+ *   anything — `workspace_members.role` is. `workspaces.listMine()` does not select it.
+ * @property {string | null} slug              Nullable; added later and backfilled.
+ * @property {IsoTimestamp} created_at         NOT NULL.
  */
 
 /**
@@ -300,12 +326,19 @@ export const asUuid = (s) => /** @type {Uuid} */ (/** @type {unknown} */ (s));
 /**
  * @typedef {object} Invitation
  * @property {Uuid} id
- * @property {Uuid} workspace_id
- * @property {string} email
- * @property {Role} role                       Only 'member' | 'guest' are creatable.
- * @property {InvitationStatus} status
- * @property {IsoTimestamp} created_at
- * @property {IsoTimestamp | null} expires_at
+ * @property {Uuid} workspace_id               NOT NULL.
+ * @property {string} email                    NOT NULL. The invite is EMAIL-BOUND.
+ * @property {Role} role                       NOT NULL. The CHECK allows all four, but
+ *   `create_invitation` validates to 'member' | 'guest' only — owner/admin are granted after
+ *   join via `set_member_role`.
+ * @property {Uuid} token                      NOT NULL unique — the value in `/invite/:token`.
+ * @property {InvitationStatus} status         NOT NULL, default 'pending'.
+ * @property {Uuid} invited_by                 NOT NULL.
+ * @property {IsoTimestamp} created_at         NOT NULL.
+ * @property {IsoTimestamp} expires_at         NOT NULL, default now() + 14 days. Expiry is
+ *   THIS passing, not a status value — see InvitationStatus.
+ * @property {IsoTimestamp | null} accepted_at
+ * @property {Uuid | null} accepted_by
  */
 
 /* ---------------------------------------------------------------------------------
@@ -326,11 +359,11 @@ export const asUuid = (s) => /** @type {Uuid} */ (/** @type {unknown} */ (s));
  * @property {Uuid | null} actor_id
  * @property {TaskId | null} task_id           TEXT FK to tasks.id — not a uuid.
  * @property {string | null} ref_id            Polymorphic (e.g. a DM conversation id).
- * @property {NotificationType} type
- * @property {string} title
- * @property {string | null} message
- * @property {boolean | null} read
- * @property {IsoTimestamp} created_at
+ * @property {NotificationType} type          NOT NULL.
+ * @property {string | null} title             NULLABLE — the bell renders `message`, not this.
+ * @property {string} message                  NOT NULL. This is what the UI actually draws.
+ * @property {boolean} read                    NOT NULL, default false.
+ * @property {IsoTimestamp} created_at         NOT NULL.
  */
 
 /**
@@ -342,8 +375,8 @@ export const asUuid = (s) => /** @type {Uuid} */ (/** @type {unknown} */ (s));
  * @property {TaskId | null} taskId
  * @property {string | null} refId
  * @property {NotificationType} type
- * @property {string} title
- * @property {string | null} message
+ * @property {string | null} title             Nullable — see NotificationRow.title.
+ * @property {string} message                  What the bell renders.
  * @property {boolean} read
  * @property {IsoTimestamp} createdAt
  */
@@ -351,13 +384,14 @@ export const asUuid = (s) => /** @type {Uuid} */ (/** @type {unknown} */ (s));
 /**
  * @typedef {object} CommentRow
  * @property {Uuid} id
- * @property {Uuid} workspace_id
- * @property {TaskId} task_id                  TEXT FK — not a uuid.
- * @property {Uuid} author_id
- * @property {string} body
- * @property {Uuid[] | null} mentions
- * @property {IsoTimestamp} created_at
- * @property {IsoTimestamp | null} updated_at
+ * @property {Uuid} workspace_id               NOT NULL since Phase 2.
+ * @property {TaskId} task_id                  NOT NULL. TEXT FK — not a uuid.
+ * @property {Uuid | null} author_id           NULLABLE — `on delete set null`. A departed
+ *   member's comments survive with no author; render a fallback, never assume a name.
+ * @property {string} body                     NOT NULL.
+ * @property {Uuid[]} mentions                 NOT NULL, default '{}'.
+ * @property {IsoTimestamp} created_at         NOT NULL.
+ * @property {IsoTimestamp} updated_at         NOT NULL.
  */
 
 /**
@@ -365,11 +399,11 @@ export const asUuid = (s) => /** @type {Uuid} */ (/** @type {unknown} */ (s));
  * @property {Uuid} id
  * @property {Uuid} workspaceId
  * @property {TaskId} taskId
- * @property {Uuid} authorId
+ * @property {Uuid | null} authorId           Nullable — see CommentRow.author_id.
  * @property {string} body
  * @property {Uuid[]} mentions
  * @property {IsoTimestamp} createdAt
- * @property {IsoTimestamp | null} updatedAt
+ * @property {IsoTimestamp} updatedAt
  */
 
 /* ---------------------------------------------------------------------------------
@@ -387,9 +421,9 @@ export const asUuid = (s) => /** @type {Uuid} */ (/** @type {unknown} */ (s));
  * @property {string | null} body
  * @property {string | null} audio_path
  * @property {number | null} audio_duration_seconds
- * @property {Uuid[] | null} mentions
- * @property {IsoTimestamp} created_at
- * @property {IsoTimestamp | null} updated_at
+ * @property {Uuid[]} mentions                 NOT NULL, default '{}'.
+ * @property {IsoTimestamp} created_at         NOT NULL.
+ * @property {IsoTimestamp} updated_at         NOT NULL.
  * @property {IsoTimestamp | null} edited_at   Non-null once edited → drives "(edited)".
  * @property {IsoTimestamp | null} deleted_at  Non-null = tombstone, content stripped server-side.
  */
@@ -450,7 +484,8 @@ export const asUuid = (s) => /** @type {Uuid} */ (/** @type {unknown} */ (s));
  * @property {Uuid} id
  * @property {TaskId} task_id                  TEXT FK — not a uuid.
  * @property {Uuid} workspace_id
- * @property {Uuid} uploaded_by
+ * @property {Uuid | null} uploaded_by         NULLABLE — `on delete set null`. Reachable and
+ *   renderable: attachment DELETE is "uploader-own or admin+", so an orphaned upload persists.
  * @property {string} storage_path
  * @property {string} filename
  * @property {string | null} mime_type
@@ -463,7 +498,7 @@ export const asUuid = (s) => /** @type {Uuid} */ (/** @type {unknown} */ (s));
  * @property {Uuid} id
  * @property {TaskId} taskId
  * @property {Uuid} workspaceId
- * @property {Uuid} uploadedBy
+ * @property {Uuid | null} uploadedBy          Nullable — see AttachmentRow.uploaded_by.
  * @property {string} storagePath
  * @property {string} filename
  * @property {string | null} mimeType

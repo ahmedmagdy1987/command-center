@@ -36,6 +36,11 @@ describe('project delete — keep the tasks', () => {
     renderApp({ route: '/projects' });
     await bootDone();
 
+    // Snapshot the real project ids BEFORE the delete — after it, the deleted project is gone
+    // from apiState and any "does it exist" check against the post-state would be trivially
+    // satisfiable. This is the set the destination must belong to.
+    const idsBefore = apiState.projects.map((p) => p.id);
+
     await user.click(await screen.findByRole('button', { name: /delete doomed project/i }));
 
     const dialog = await screen.findByRole('dialog');
@@ -54,7 +59,12 @@ describe('project delete — keep the tasks', () => {
     // The whole point: the destination must be a project that actually exists. 'other' —
     // the old hardcoded seed id — resolves in NO workspace here, and would strand the task.
     expect(reassignTo).toBe('p-keep');
-    expect(apiState.projects.some((p) => p.id === reassignTo) || reassignTo === 'p-keep').toBe(true);
+    // And it must be a project that ACTUALLY EXISTED and is not the one being deleted. The
+    // earlier version of this line was `...some(p => p.id === reassignTo) || reassignTo === 'p-keep'`,
+    // which the preceding assertion already guaranteed — an unfailable check dressed up as
+    // the load-bearing one.
+    expect(idsBefore).toContain(reassignTo);
+    expect(reassignTo).not.toBe(projectId);
   });
 
   it('blocks confirmation while the task count is still unknown (fails CLOSED)', async () => {

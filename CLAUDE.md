@@ -602,6 +602,13 @@ in the commit message**, because a silent bypass is how a gate becomes permanent
   `src/lib/sanitize.js` are checked, with shapes in **`src/lib/types.js`** (JSDoc typedefs only, no
   runtime code, zero bundle bytes). **PHASE B RATCHET: every module extracted from the monolith gets
   `// @ts-check` as it lands**, so coverage tightens as the refactor proceeds, with no flag day.
+- **Know what the branded `Uuid` does NOT yet catch.** It makes a plain string unassignable to a
+  uuid-typed field — the `22P02` class — but only where values are actually typed. `api.js` has no
+  `@param` annotations yet, so its parameters are implicitly `any`, and `any` satisfies `Uuid`:
+  **`tasks.create`'s `row.workspace_id = workspaceId` is unchecked today** (verified by probe, not
+  assumed). The brand bites inside `sanitize.js` and at annotated boundaries. Adding `@param` types
+  to api.js is Phase B work; until then the runtime "id discipline" test is what covers that path.
+  Do not describe this as compile-time-proof.
 - **🔴 NO `.ts` / `.tsx` FILES. EVER.** `tailwind.config.js` globs `./src` for `.js`/`.jsx` only. A
   `.tsx` file is invisible to that glob, so its class names never reach the CSS and the component
   renders **UNSTYLED with a clean, exit-0 build**. Types are JSDoc. This is why the type layer is
